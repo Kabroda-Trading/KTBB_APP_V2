@@ -21,8 +21,6 @@ from database import (
     DecisionJournal,
     AgentRunLog,
     SystemAuditLog,
-    AuditSuggestionLog,
-    DailyAuditLog
 )
 import auth
 import main
@@ -143,41 +141,10 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertIsInstance(res.json().get("macro_engine"), dict)
 
 
-    # --- F2: Trade History & Metrics API (/api/v1/system/trades) ---
-
-    def test_f2_trades_happy(self):
-        """F2: GET /api/v1/system/trades returns 200 and contains trades and metrics."""
-        res = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn("trades", data)
-        self.assertIn("metrics", data)
-
-    def test_f2_trades_window_7d(self):
-        """F2: trades endpoint accepts window=7d parameter."""
-        res = self.admin_client.get("/api/v1/system/trades?window=7d")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("trades"), list)
-
-    def test_f2_trades_window_30d(self):
-        """F2: trades endpoint accepts window=30d parameter."""
-        res = self.admin_client.get("/api/v1/system/trades?window=30d")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("trades"), list)
-
-    def test_f2_trades_window_all(self):
-        """F2: trades endpoint accepts window=all parameter."""
-        res = self.admin_client.get("/api/v1/system/trades?window=all")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsInstance(res.json().get("trades"), list)
-
-    def test_f2_trades_metrics_schema(self):
-        """F2: trades metrics contains win_rate, net_r, and approval_rate fields."""
-        res = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res.status_code, 200)
-        metrics = res.json().get("metrics", {})
-        for metric in ["win_rate", "net_r", "approval_rate"]:
-            self.assertIn(metric, metrics)
+    # --- F2: Trade History & Metrics API removed 2026-09-23 (V2 Crown
+    # retirement, Audit-AI surface retirement) -- /api/v1/system/trades was
+    # 100% CampaignLog-sourced with zero frontend caller, removed from
+    # main.py in the same pass.
 
 
     # --- F3 (Parameter Registry) and F4 (Error Registry) removed 2026-09-23
@@ -190,44 +157,11 @@ class KabrodaE2ETestSuite(unittest.TestCase):
     # real state). See main.py's own removal comment and V2_RETIREMENT_MAP.md
     # for the dashboard tab-by-tab audit this followed.
 
-    # --- F5: AI Analysis API (/api/v1/system/analysis) ---
-
-    def test_f5_analysis_happy(self):
-        """F5: POST /api/v1/system/analysis returns 200 and matches the expected JSON schema."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": "evaluate weekly win rate"})
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn("query", data)
-        self.assertIn("analysis_id", data)
-        self.assertIn("report", data)
-
-    def test_f5_analysis_generates_id(self):
-        """F5: analysis post request generates a unique diagnostic id."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": "run baseline"})
-        self.assertEqual(res.status_code, 200)
-        self.assertIsNotNone(res.json().get("analysis_id"))
-
-    def test_f5_analysis_report_schema(self):
-        """F5: analysis report matches recommendation and findings schemas."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": "run baseline"})
-        self.assertEqual(res.status_code, 200)
-        report = res.json().get("report", {})
-        self.assertIn("recommendations", report)
-        self.assertIn("findings", report)
-
-    def test_f5_analysis_empty_query_default(self):
-        """F5: posting with an empty query defaults to general system evaluation."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": ""})
-        self.assertEqual(res.status_code, 200)
-        self.assertIsNotNone(res.json().get("analysis_id"))
-
-    def test_f5_analysis_saves_report(self):
-        """F5: posted report is stored in the database and accessible."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": "run baseline"})
-        self.assertEqual(res.status_code, 200)
-        analysis_id = res.json().get("analysis_id")
-        get_res = self.admin_client.get(f"/api/v1/system/analysis/{analysis_id}")
-        self.assertEqual(get_res.status_code, 200)
+    # --- F5: AI Analysis API removed 2026-09-23 (V2 Crown retirement) --
+    # POST /api/v1/system/analysis (no suffix) was confirmed to have zero
+    # frontend caller anywhere in the repo before removal -- the live
+    # "Recent Reports"/single-report routes it fed were never actually
+    # reachable from the real UI. See main.py's own removal comment.
 
 
     # --- F6: Upgraded Dashboard UI (/suite/dashboard) ---
@@ -255,44 +189,12 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertIn("Analysis", res.text)
 
 
-    # --- F7: AI Analysis Loop Background Worker ---
-
-    def test_f7_analysis_loop_status(self):
-        """F7: state endpoint exposes the background worker status."""
-        res = self.admin_client.get("/api/v1/system/state")
-        self.assertEqual(res.status_code, 200)
-        health = res.json().get("scheduler_health", {})
-        self.assertIn("analysis_loop", health)
-
-    def test_f7_analysis_loop_triggered_manually(self):
-        """F7: loop can be triggered manually via a POST request."""
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json().get("status"), "running")
-
-    def test_f7_analysis_loop_writes_suggestions(self):
-        """F7: triggered loop inserts suggestions into the suggestion database."""
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 200)
-        db = SessionLocal()
-        try:
-            sugg = db.query(AuditSuggestionLog).first()
-            self.assertIsNotNone(sugg)
-        finally:
-            db.close()
-
-    def test_f7_analysis_loop_reads_parameters(self):
-        """F7: loop consumes parameter metrics in its performance assessment."""
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 200)
-        # Background loop reads parameters correctly; verify via simulation mock or logs
-        self.assertIsNotNone(res.json().get("parameters_evaluated"))
-
-    def test_f7_analysis_loop_metrics_updated(self):
-        """F7: execution results are recorded as execution logs."""
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 200)
-        self.assertIsNotNone(res.json().get("last_run_timestamp"))
+    # --- F7: AI Analysis Loop Background Worker removed 2026-09-23 (V2
+    # Crown retirement, Audit-AI surface retirement, Andy's "retire
+    # entirely" ruling) -- /api/v1/system/analysis/trigger, its
+    # _run_analysis_loop_body()/run_analysis_loop_scheduler() background
+    # task, and the scheduler_health_registry["analysis_loop"] entry were
+    # all removed from main.py in the same pass.
 
 
     # =========================================================================
@@ -344,95 +246,8 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertLessEqual(len(res.json().get("recent_errors")), 50)
 
 
-    # --- F2: Trade History & Metrics API (/api/v1/system/trades) ---
-
-    def test_f2_trades_unauthenticated(self):
-        """F2: unauthenticated trades queries return 401."""
-        res = self.anon_client.get("/api/v1/system/trades")
-        self.assertEqual(res.status_code, 401)
-
-    def test_f2_trades_basic_user_denied(self):
-        """F2: basic user queries for trades return 403."""
-        res = self.basic_client.get("/api/v1/system/trades")
-        self.assertEqual(res.status_code, 403)
-
-    def test_f2_trades_empty_db(self):
-        """F2: empty trades table returns zeroed metrics (no divide-by-zero)."""
-        db = SessionLocal()
-        db.query(CampaignLog).delete()
-        db.commit()
-        db.close()
-        res = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res.status_code, 200)
-        metrics = res.json().get("metrics", {})
-        self.assertEqual(metrics.get("win_rate"), 0.0)
-        self.assertEqual(metrics.get("net_r"), 0.0)
-        self.assertEqual(metrics.get("approval_rate"), 0.0)
-
-    def test_f2_trades_invalid_window(self):
-        """F2: trade window query parameter with malformed value returns 400."""
-        res = self.admin_client.get("/api/v1/system/trades?window=invalid_val")
-        self.assertEqual(res.status_code, 400)
-
-    def test_f2_trades_out_of_bounds_metrics(self):
-        """F2: calculations are resilient to out-of-bound trades (extremely large realized_pnl)."""
-        db = SessionLocal()
-        db.add(CampaignLog(
-            symbol="BTC/USDT",
-            date_key="2026-07-01",
-            session_id="ny_futures",
-            bias="LONG",
-            grade="A",
-            entry_price=60000.0,
-            stop_loss=59000.0,
-            t1=61000.0,
-            total_contracts=1.0,
-            status="CLOSED_WIN",
-            realized_pnl=99999.0, # massive outlier PnL
-            is_canonical=True
-        ))
-        db.commit()
-        db.close()
-        res = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res.status_code, 200)
-        metrics = res.json().get("metrics", {})
-        self.assertIsNotNone(metrics.get("net_r"))
-
-
-    # Tier-2 F3/F4 boundary tests removed 2026-09-23 along with the routes
-    # themselves -- see the Tier-1 removal comment further up this file.
-
-
-    # --- F5: AI Analysis API (/api/v1/system/analysis) ---
-
-    def test_f5_analysis_unauthenticated(self):
-        """F5: unauthenticated analysis calls return 401."""
-        res = self.anon_client.post("/api/v1/system/analysis", json={"query": "test"})
-        self.assertEqual(res.status_code, 401)
-
-    def test_f5_analysis_basic_user_denied(self):
-        """F5: basic user analysis calls return 403."""
-        res = self.basic_client.post("/api/v1/system/analysis", json={"query": "test"})
-        self.assertEqual(res.status_code, 403)
-
-    def test_f5_analysis_empty_query(self):
-        """F5: POST with empty query payload key yields 400."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={})
-        self.assertEqual(res.status_code, 400)
-
-    def test_f5_analysis_malformed_json(self):
-        """F5: malformed JSON payload returns 400."""
-        res = self.admin_client.post(
-            "/api/v1/system/analysis",
-            content="invalid json",
-            headers={"Content-Type": "application/json"}
-        )
-        self.assertEqual(res.status_code, 400)
-
-    def test_f5_analysis_too_long_query(self):
-        """F5: extremely long query requests yield 400."""
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": "a" * 10000})
-        self.assertEqual(res.status_code, 400)
+    # --- F2 boundary tests and F5: AI Analysis API removed 2026-09-23 (V2
+    # Crown retirement) -- see the Tier-1 removal comments above for both.
 
 
     # --- F6: Upgraded Dashboard UI (/suite/dashboard) ---
@@ -466,37 +281,8 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
 
 
-    # --- F7: AI Analysis Loop Background Worker ---
-
-    def test_f7_analysis_loop_unauthenticated_trigger(self):
-        """F7: unauthenticated trigger POST requests yield 401."""
-        res = self.anon_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 401)
-
-    def test_f7_analysis_loop_basic_user_denied_trigger(self):
-        """F7: basic users cannot trigger the analysis loop (returns 403)."""
-        res = self.basic_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 403)
-
-    def test_f7_analysis_loop_trigger_while_running(self):
-        """F7: triggering the loop while it is already executing returns 409."""
-        # Setup running state by directly setting the registry
-        import main as _main
-        _main.scheduler_health_registry["analysis_loop"]["status"] = "EXECUTING"
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 409)
-        # Reset for subsequent tests
-        _main.scheduler_health_registry["analysis_loop"]["status"] = "WAITING"
-
-    def test_f7_analysis_loop_wiped_db_safety(self):
-        """F7: loop does not crash when executed on an empty/new database."""
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 200)
-
-    def test_f7_analysis_loop_out_of_bounds_parameters(self):
-        """F7: loop is safe when registry contains out-of-bounds parameters."""
-        res = self.admin_client.post("/api/v1/system/analysis/trigger")
-        self.assertEqual(res.status_code, 200)
+    # --- F7: AI Analysis Loop Background Worker boundary tests removed
+    # 2026-09-23 (V2 Crown retirement) -- see the Tier-1 F7 removal comment.
 
 
     # =========================================================================
@@ -510,86 +296,11 @@ class KabrodaE2ETestSuite(unittest.TestCase):
     # in passing -- /api/v1/system/state's own recent_errors field reflecting
     # a real SystemAuditLog row -- stays covered by test_f1_state_excessive_errors.
 
-    def test_t3_cross_trade_outcome_updates_metrics(self):
-        """F2+F6: inserting a closed trade (win/loss) updates both history metrics and dashboard overview totals."""
-        # 1. Clean up existing canonical trades to get a clean baseline
-        db = SessionLocal()
-        db.query(CampaignLog).filter(CampaignLog.is_canonical == True).delete()
-        db.commit()
-        db.close()
-
-        # Query initial metrics (should be 0 trades, 0.0 win rate)
-        res1 = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res1.status_code, 200)
-        init_win_rate = res1.json().get("metrics", {}).get("win_rate", 0.0)
-        self.assertEqual(init_win_rate, 0.0)
-
-        # 2. Add winning trade with a unique session_id
-        import uuid
-        unique_session = f"test_trade_{uuid.uuid4().hex[:8]}"
-        db = SessionLocal()
-        db.add(CampaignLog(
-            symbol="BTC/USDT",
-            date_key="2026-07-02",
-            session_id=unique_session,
-            bias="LONG",
-            grade="A",
-            entry_price=60000.0,
-            stop_loss=59000.0,
-            t1=61000.0,
-            total_contracts=1.0,
-            status="CLOSED_WIN",
-            realized_pnl=1.0,
-            is_canonical=True
-        ))
-        db.commit()
-        db.close()
-
-        # 3. Query updated metrics and assert increase
-        res2 = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res2.status_code, 200)
-        new_win_rate = res2.json().get("metrics", {}).get("win_rate", 0.0)
-        # The win rate should now be 1.0 (1 win, 0 losses)
-        self.assertEqual(new_win_rate, 1.0)
-        self.assertNotEqual(init_win_rate, new_win_rate)
-
-        # 4. Verify dashboard Overview renders updated statistics
-        dash_res = self.admin_client.get("/suite/dashboard")
-        self.assertEqual(dash_res.status_code, 200)
-        self.assertIn("win_rate", dash_res.text)
-
-    def test_t3_cross_trade_win_triggers_ai_evaluation(self):
-        """F2+F5+F7: recent winning trades are picked up by the AI Analysis query loop."""
-        # Query analysis report and verify it processes trade information
-        res = self.admin_client.post("/api/v1/system/analysis", json={"query": "evaluate trades"})
-        self.assertEqual(res.status_code, 200)
-        self.assertIsNotNone(res.json().get("report"))
-
-    def test_t3_cross_session_expiry_log_error(self):
-        """F2+F4: trade sessions expiring unfilled writes status and registers system alerts."""
-        db = SessionLocal()
-        db.add(CampaignLog(
-            symbol="BTC/USDT",
-            date_key="2026-07-03",
-            session_id="ny_futures",
-            bias="SHORT",
-            grade="B",
-            entry_price=60000.0,
-            stop_loss=61000.0,
-            t1=59000.0,
-            total_contracts=1.0,
-            status="EXPIRED",
-            realized_pnl=0.0,
-            is_canonical=True
-        ))
-        db.commit()
-        db.close()
-
-        res_trades = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res_trades.status_code, 200)
-        # Verify expired trade is returned in listing
-        trades = res_trades.json().get("trades", [])
-        self.assertTrue(any(t.get("status") == "EXPIRED" for t in trades))
+    # test_t3_cross_trade_outcome_updates_metrics/_cross_trade_win_triggers_
+    # ai_evaluation/_cross_session_expiry_log_error removed 2026-09-23 (V2
+    # Crown retirement) -- all three depended on /api/v1/system/trades
+    # and/or /api/v1/system/analysis, both removed from main.py in the same
+    # pass. See the Tier-1 F2/F5 removal comments above.
 
     def test_t3_cross_active_sessions_update_dashboard(self):
         """F1+F6: starting a new session lock adds it to active state and displays on the telemetry UI."""
@@ -663,61 +374,12 @@ class KabrodaE2ETestSuite(unittest.TestCase):
     # TIER 4: REAL-WORLD APPLICATION SCENARIOS (5 Tests)
     # =========================================================================
 
-    def test_t4_scenario_admin_audit_flow(self):
-        """Scenario 1: Admin logs in, verifies system state, runs diagnostic AI,
-        and views dashboard recommendations. (Step "checks errors" against
-        /api/v1/system/errors removed 2026-09-23 along with that route --
-        see the F3/F4 removal comment further up this file.)"""
-        # 1. Get system state
-        state = self.admin_client.get("/api/v1/system/state")
-        self.assertEqual(state.status_code, 200)
-
-        # 3. Run Diagnostic AI analysis
-        analysis = self.admin_client.post("/api/v1/system/analysis", json={"query": "full diagnostic audit"})
-        self.assertEqual(analysis.status_code, 200)
-
-        # 4. View dashboard to see report details
-        dash = self.admin_client.get("/suite/dashboard")
-        self.assertEqual(dash.status_code, 200)
-
-    def test_t4_scenario_trade_lifecycle_to_analysis(self):
-        """Scenario 2: Seed active trade candidate, simulate market fill and win, verify history metrics update, and check AI analysis comments."""
-        # 1. Verify initial trades history
-        res_trades1 = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res_trades1.status_code, 200)
-
-        # 2. Insert new trade setup
-        db = SessionLocal()
-        trade = CampaignLog(
-            symbol="BTC/USDT",
-            date_key="2026-07-10",
-            session_id="us_ny_futures",
-            bias="LONG",
-            grade="A",
-            entry_price=60000.0,
-            stop_loss=59000.0,
-            t1=61000.0,
-            total_contracts=2.0,
-            status="PENDING",
-            is_canonical=True
-        )
-        db.add(trade)
-        db.commit()
-
-        # Update trade status to CLOSED_WIN to simulate market fill and resolution
-        trade.status = "CLOSED_WIN"
-        trade.realized_pnl = 2.0
-        db.commit()
-        db.close()
-
-        # 3. Verify history metrics contains new win
-        res_trades2 = self.admin_client.get("/api/v1/system/trades")
-        self.assertEqual(res_trades2.status_code, 200)
-        self.assertTrue(any(t.get("status") == "CLOSED_WIN" for t in res_trades2.json().get("trades", [])))
-
-        # 4. Trigger AI analysis loop and confirm win is analyzed
-        analysis = self.admin_client.post("/api/v1/system/analysis", json={"query": "evaluate recent win"})
-        self.assertEqual(analysis.status_code, 200)
+    # test_t4_scenario_admin_audit_flow/_scenario_trade_lifecycle_to_analysis
+    # removed 2026-09-23 (V2 Crown retirement) -- both scenarios' actual
+    # point (running /api/v1/system/analysis, checking /api/v1/system/
+    # trades) is gone; their remaining incidental checks (system state,
+    # dashboard render) are already covered individually by the F1/F6
+    # tests above, not worth keeping a hollowed-out scenario test for.
 
     # test_t4_scenario_parameter_tuning_flow removed 2026-09-23 -- its
     # primary subject (/api/v1/system/parameters) is gone (see the F3/F4

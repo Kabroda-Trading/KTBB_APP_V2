@@ -6781,3 +6781,64 @@ mentioning sometime, explicitly out of scope for this retirement.
 surface (routes, background scheduler, dashboard UI, 3 DB tables).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: Audit-AI feature retired entirely -- roadmap step 3, sub-step 3b of 3f
+STATUS: resolved.
+
+Per Andy's explicit ruling (previous entry): retire entirely, don't
+rebuild against Traveler data.
+
+**Removed in one batch** (leaving any subset half-removed would have
+broken the rest): `/admin/export-audit-ledger`, `/api/v1/system/audit-
+suggestions`, `/api/v1/system/analysis/trigger`, `/api/v1/system/trades`,
+`POST /api/v1/system/analysis` (no-suffix), and `/api/admin/run-audit`
+(bonus find -- already threw `ModuleNotFoundError` on every call since its
+`harness.audit_runner` import was archived 2026-08-17, zero frontend
+caller either way, already effectively dead before this). Their shared
+background scheduler (`_run_analysis_loop_body()`/
+`run_analysis_loop_scheduler()`) and its `analysis_loop_task` `lifespan()`
+wiring were removed together in the SAME commit, not deferred -- a
+dangling function reference would have broken boot between commits.
+Dashboard UI: the "Run Analysis" card, "Audit-AI & Data Export" card,
+their JS (`triggerAnalysis()`/`loadAuditSuggestions()`/
+`copyAuditExport()`), and `nav.html`'s "EXPORT DIAGNOSTIC VAULT" link.
+`AuditSuggestionLog`/`DailyAuditLog`/`TrialsLog` now fully orphaned
+(models/tables left in place per CLAUDE.md's own "no migration framework,
+leave the table" convention -- only the code that read/wrote them removed).
+
+**A genuinely separate finding, confirmed and left alone (not part of this
+retirement)**: `POST /api/v1/system/analysis` (no suffix) was the ONLY
+writer of `SystemAnalysisReport`, and had zero frontend caller anywhere in
+the repo even before today -- meaning the live "Recent Reports" list and
+single-report view (both DO have real callers, kept, unaffected by
+CampaignLog/V2 at all) have apparently never been reachable from any real
+UI action. Flagged to Andy as a separate oddity worth mentioning
+sometime; explicitly not touched here.
+
+**A second small real bug fixed along the way**: `/admin`'s own route
+handler queried `DailyAuditLog`/`AuditSuggestionLog` into template context
+on every page load, but `templates/admin.html` never rendered either
+key -- confirmed via grep before removing, a wasted DB query on every
+admin page view, gone now.
+
+**35 now-orphaned tests removed from `tests/test_e2e.py`** (F2/F5/F7
+Tier-1 and Tier-2 blocks in full, 3 Tier-3 cross-feature tests, 2 Tier-4
+scenario tests) -- same commit as the route removals, not a follow-up
+pass. Arithmetic double-checked this time given the earlier correction
+this session: 828 (post-3a) - 35 = 793, confirmed exact by actually
+running the suite, not computed by hand alone.
+
+**Verification**: full suite 793 passed; clean boot via both a plain
+`import main` and a real `uvicorn` process start (confirmed the
+`lifespan()` background-task removal doesn't fail silently at either
+level); a real `TestClient` session (login, render `/suite/dashboard` and
+`/admin`, hit every removed route and confirm 404 -- one exception,
+`/api/v1/system/analysis/trigger`'s POST returns 405 because it
+coincidentally path-matches the surviving `/{analysis_id}` GET route,
+expected and correct, not a bug) and confirmed `/api/v1/system/state`
+(kept, unrelated to this retirement) still returns 200 with real data.
+
+**Roadmap status**: 3b of 3f done. Next: 3c, retiring
+`executor_mechanism_test.py` (Andy's ruling 3).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

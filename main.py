@@ -46,7 +46,7 @@ import lti_engine
 
 from datetime import datetime, timezone, timedelta
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, DailyAuditLog, AuditSuggestionLog, TrialsLog, SystemAnalysisReport, SignalPerformanceLog, GravityMemory, EmailSubscriber
+from database import init_db, get_db, UserModel, CampaignLog, SessionLock, AgentRunLog, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, SystemAnalysisReport, SignalPerformanceLog, GravityMemory, EmailSubscriber
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -57,7 +57,6 @@ scheduler_health_registry = {
     "daily_4h1h_audit": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "outcome_tracker": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "monthly_lti": {"last_run": None, "next_run": None, "status": "DISABLED", "error_count": 0, "last_error": None},
-    "analysis_loop": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "gravity_engine": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "ledger_closing": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "trade_plan": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
@@ -525,82 +524,13 @@ async def run_outcome_tracker() -> None:
             await asyncio.sleep(300)
 
 
-def _run_analysis_loop_body(db: Session) -> str:
-    """Shared analysis logic used by both the manual /trigger endpoint and the background scheduler.
-    Returns the ISO timestamp of the run.
-    """
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-
-    recent_trades = db.query(CampaignLog).filter(
-        CampaignLog.is_canonical == True,
-        CampaignLog.created_at >= thirty_days_ago
-    ).all()
-
-    wins = sum(1 for t in recent_trades if t.status == "CLOSED_WIN")
-    losses = sum(1 for t in recent_trades if t.status == "CLOSED_LOSS")
-    total_pnl = sum(t.realized_pnl for t in recent_trades if t.realized_pnl is not None)
-    win_rate = wins / (wins + losses) if (wins + losses) > 0 else 0.0
-
-    recent_errs = db.query(SystemAuditLog).filter(
-        SystemAuditLog.ran_successfully == False,
-        SystemAuditLog.created_at >= thirty_days_ago
-    ).count()
-
-    db.add(AuditSuggestionLog(
-        logged_at=datetime.utcnow(),
-        sessions_analyzed_n=len(recent_trades),
-        sessions_with_outcomes_n=wins + losses,
-        hypothesis_id="M2_auto_analysis",
-        hypothesis_text=f"Auto-analysis: {len(recent_trades)} trades in 30d, {recent_errs} errors.",
-        current_param_label="system_health",
-        tested_param_label="system_health",
-        actual_win_rate=win_rate,
-        counterfactual_win_rate=0.0,
-        relative_improvement_pct=0.0,
-        tier_label="OBSERVATION",
-        n_supporting=wins + losses,
-        suggestion_text=f"System auto-analysis complete. Win rate: {win_rate:.1%}, Net PnL: {total_pnl:+.4f}R, Recent errors: {recent_errs}.",
-        consecutive_runs_surfaced=1,
-        status="OPEN"
-    ))
-    db.commit()
-
-    return datetime.now(timezone.utc).isoformat()
-
-
-async def run_analysis_loop_scheduler() -> None:
-    """Background task for the AI Analysis Loop."""
-    print("[SCHEDULER] AI Analysis Loop starting...")
-    while True:
-        try:
-            seconds = 43200
-            next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["analysis_loop"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["analysis_loop"]["status"] = "WAITING"
-
-            await asyncio.sleep(seconds)
-
-            scheduler_health_registry["analysis_loop"]["status"] = "EXECUTING"
-
-            db = SessionLocal()
-            try:
-                last_run = _run_analysis_loop_body(db)
-                scheduler_health_registry["analysis_loop"]["last_run"] = last_run
-            except Exception as inner_e:
-                print(f"[SCHEDULER] AI Analysis Loop inner error: {inner_e}")
-            finally:
-                db.close()
-
-            scheduler_health_registry["analysis_loop"]["status"] = "WAITING"
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[SCHEDULER] AI Analysis Loop error: {e}")
-            scheduler_health_registry["analysis_loop"]["error_count"] += 1
-            scheduler_health_registry["analysis_loop"]["last_error"] = str(e)
-            scheduler_health_registry["analysis_loop"]["status"] = "ERROR"
-            await asyncio.sleep(300)
+# _run_analysis_loop_body()/run_analysis_loop_scheduler() removed 2026-09-23
+# (V2 Crown retirement, Audit-AI surface retirement, Andy's explicit
+# "retire entirely" ruling) -- this was the 12h background scheduler behind
+# the dashboard's "Run Analysis" button, writing 30-day CampaignLog win-
+# rate/PnL stats into AuditSuggestionLog (both now gone). Its lifespan()
+# task wiring is removed in the same commit -- see lifespan()'s own
+# removal comment below.
 
 
 @asynccontextmanager
@@ -639,7 +569,9 @@ async def lifespan(app: FastAPI):
     # Hash Ribbons) are worth reusing in the rebuild.
     # app.state.lti_task            = asyncio.create_task(run_monthly_lti_scheduler())
     app.state.outcome_tracker_task  = asyncio.create_task(run_outcome_tracker())
-    app.state.analysis_loop_task    = asyncio.create_task(run_analysis_loop_scheduler())
+    # analysis_loop_task removed 2026-09-23 (V2 Crown retirement, Audit-AI
+    # surface retirement) -- see run_analysis_loop_scheduler()'s own former
+    # definition site removal comment above.
     app.state.monitor_task          = asyncio.create_task(session_monitor.run_session_monitor_loop())
     # signal_accuracy/signal_flagging/accuracy_report schedulers archived
     # 2026-08-17 per Kabroda Audit REBUILD_PLAN.md -- confirmed record-only,
@@ -653,7 +585,6 @@ async def lifespan(app: FastAPI):
     app.state.senior_analyst_task.cancel()
     app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()
-    app.state.analysis_loop_task.cancel()
     app.state.monitor_task.cancel()
 
 
@@ -1089,24 +1020,11 @@ async def api_live_price():
 
 # --- AGENT COST INFRASTRUCTURE (PHASE 1) ---
 
-@app.post("/api/admin/run-audit")
-async def api_run_audit(request: Request, db: Session = Depends(get_db)):
-    """
-    Trigger the Audit-AI weekly ledger run on demand. Admin only.
-    Runs all 6 pre-defined hypotheses against session_audit_log, writes
-    suggestions to audit_suggestion_log (N>=30 only), and appends a
-    Markdown brief to system_audit_log.
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
-    try:
-        import harness.audit_runner as _audit
-        brief = await asyncio.to_thread(_audit.main)
-        return JSONResponse({"ok": True, "brief": brief})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
+# /api/admin/run-audit removed 2026-09-23 (V2 Crown retirement, Audit-AI
+# surface retirement) -- already effectively dead before this removal: its
+# `import harness.audit_runner` target was archived 2026-08-17, so every
+# call threw ModuleNotFoundError, caught by its own except and returned as
+# a 500. Zero frontend caller either way.
 
 @app.post("/api/admin/test-notify")
 async def api_admin_test_notify(request: Request, db: Session = Depends(get_db)):
@@ -2725,8 +2643,11 @@ async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     if not ctx["is_admin"]: return RedirectResponse("/suite")
     users = db.query(UserModel).all()
     ctx["users"] = users
-    ctx["latest_daily_digest"] = db.query(DailyAuditLog).order_by(DailyAuditLog.id.desc()).first()
-    ctx["recent_suggestions"] = db.query(AuditSuggestionLog).order_by(AuditSuggestionLog.logged_at.desc()).limit(9).all()
+    # latest_daily_digest/recent_suggestions (DailyAuditLog/AuditSuggestionLog)
+    # removed 2026-09-23 (V2 Crown retirement, Audit-AI surface retirement)
+    # -- confirmed dead even before this removal: templates/admin.html never
+    # rendered either context key, so this was a wasted query on every page
+    # load, not a real dependency.
     # 2026-09-23 -- the admin-manageable email distribution list
     # (notify.py::send_admin_email() reads these same rows directly).
     ctx["email_subscribers"] = db.query(EmailSubscriber).order_by(EmailSubscriber.id.desc()).all()
@@ -2784,87 +2705,14 @@ async def admin_delete_email_subscriber(request: Request, db: Session = Depends(
     db.commit()
     return JSONResponse({"ok": True})
 
-@app.get("/admin/export-audit-ledger")
-async def export_audit_ledger(request: Request, start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
-    """
-    Unconditional full-dump when start_date/end_date are absent (preserves
-    the original behavior + nav.html's existing link exactly). When present
-    (ISO "YYYY-MM-DD" strings), filters CampaignLog.created_at to that
-    window and additionally includes DailyAuditLog (per-trade "why" digest),
-    AuditSuggestionLog (H1-H6 15M + H7-H9 4H/1H), and TrialsLog (binomial
-    checkpoints) rows for the same window -- "the whole json log" covering
-    every audit data source in one pull, not just raw trades.
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=403)
-
-    date_range = None
-    if start_date and end_date:
-        try:
-            range_start = datetime.strptime(start_date, "%Y-%m-%d")
-            range_end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-            date_range = (range_start, range_end)
-        except ValueError:
-            return JSONResponse({"ok": False, "error": "start_date/end_date must be YYYY-MM-DD"}, status_code=400)
-
-    campaign_q = db.query(CampaignLog).order_by(CampaignLog.created_at.desc())
-    if date_range:
-        campaign_q = campaign_q.filter(CampaignLog.created_at >= date_range[0], CampaignLog.created_at < date_range[1])
-    logs = campaign_q.all()
-
-    audit_data = []
-    for l in logs:
-        try:
-            diagnostics = json.loads(l.diagnostic_data) if l.diagnostic_data else {}
-        except Exception:
-            diagnostics = {}
-
-        audit_data.append({
-            "trade_id": l.id,
-            "symbol": l.symbol,
-            "date": l.date_key,
-            "bias": l.bias,
-            "status": l.status,
-            "realized_pnl": l.realized_pnl,
-            "diagnostics": diagnostics
-        })
-
-    response = {"ok": True, "total_records": len(audit_data), "ledger": audit_data}
-
-    if date_range:
-        digest_q = db.query(DailyAuditLog).filter(
-            DailyAuditLog.created_at >= date_range[0], DailyAuditLog.created_at < date_range[1]
-        ).order_by(DailyAuditLog.created_at.desc())
-        response["daily_digests"] = [
-            {"date_key": d.date_key, "trades_covered_15m": d.trades_covered_15m,
-             "trades_covered_1h": d.trades_covered_1h, "trades_covered_4h": d.trades_covered_4h,
-             "digest": json.loads(d.digest_json)}
-            for d in digest_q.all()
-        ]
-
-        suggestion_q = db.query(AuditSuggestionLog).filter(
-            AuditSuggestionLog.logged_at >= date_range[0], AuditSuggestionLog.logged_at < date_range[1]
-        ).order_by(AuditSuggestionLog.logged_at.desc())
-        response["audit_suggestions"] = [
-            {"hypothesis_id": s.hypothesis_id, "hypothesis_text": s.hypothesis_text,
-             "tier_label": s.tier_label, "n_supporting": s.n_supporting,
-             "actual_win_rate": s.actual_win_rate, "suggestion_text": s.suggestion_text,
-             "consecutive_runs_surfaced": s.consecutive_runs_surfaced, "status": s.status}
-            for s in suggestion_q.all()
-        ]
-
-        trials_q = db.query(TrialsLog).filter(
-            TrialsLog.logged_at_utc >= date_range[0], TrialsLog.logged_at_utc < date_range[1]
-        ).order_by(TrialsLog.logged_at_utc.desc())
-        response["trials"] = [
-            {"test_type": t.test_type, "hypothesis": t.hypothesis, "result_summary": t.result_summary,
-             "result_accuracy_pct": t.result_accuracy_pct, "result_n": t.result_n,
-             "candidate_status": t.candidate_status}
-            for t in trials_q.all()
-        ]
-
-    return JSONResponse(response)
+# /admin/export-audit-ledger removed 2026-09-23 (V2 Crown retirement,
+# Andy's ruling: retire the whole Audit-AI dashboard surface entirely,
+# not rebuilt against Traveler data) -- it was 100% CampaignLog/
+# DailyAuditLog/AuditSuggestionLog/TrialsLog-sourced, all four V2-lineage
+# tables. Removed together with its nav.html link, its dashboard button
+# (copyAuditExport()), /api/v1/system/audit-suggestions, the Analysis
+# tab's "Run Analysis" trigger + 12h background scheduler, and the three
+# now-orphaned tables -- see AGENT_LOG.md for the full removal record.
 
 @app.post("/admin/delete-user")
 async def admin_delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
@@ -3413,7 +3261,11 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
         ]
 
         # 2. active_runners: active runners list
-        active_runners = ["gravity_engine", "ledger_closing_engine", "session_monitor", "analysis_loop"]
+        # "analysis_loop" removed 2026-09-23 (V2 Crown retirement, Audit-AI
+        # surface retirement -- its scheduler is gone). "ledger_closing_
+        # engine" stays here until that background task itself is removed
+        # later in the same retirement pass (a separate sub-step).
+        active_runners = ["gravity_engine", "ledger_closing_engine", "session_monitor"]
 
         # 3. macro_engine: real freshness check, not a frozen LLM narrative.
         # This used to read MacroNarrativeLog.wave_status with active always
@@ -3491,115 +3343,12 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
 # suite_dashboard.html's Live System tab UI removed alongside it.
 
 
-@app.get("/api/v1/system/audit-suggestions")
-async def get_audit_suggestions(request: Request, db: Session = Depends(get_db)):
-    """
-    Admin-only. Latest daily digest + recent Audit-AI hypothesis suggestions
-    (H1-H9, harness/audit_runner.py + audit_ai.py) for the dashboard's
-    Analysis tab. Same data /admin used to render server-side via Jinja2 --
-    exposed here as JSON so the dashboard's existing fetch-driven pattern
-    can consume it like every other tab.
-    """
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-
-    try:
-        digest = db.query(DailyAuditLog).order_by(DailyAuditLog.id.desc()).first()
-        suggestions = db.query(AuditSuggestionLog).order_by(
-            AuditSuggestionLog.logged_at.desc()
-        ).limit(9).all()
-
-        return JSONResponse({
-            "ok": True,
-            "latest_daily_digest": {
-                "date_key": digest.date_key,
-                "trades_covered_15m": digest.trades_covered_15m,
-                "trades_covered_1h": digest.trades_covered_1h,
-                "trades_covered_4h": digest.trades_covered_4h,
-            } if digest else None,
-            "recent_suggestions": [
-                {
-                    "hypothesis_id": s.hypothesis_id,
-                    "tier_label": s.tier_label,
-                    "n_supporting": s.n_supporting,
-                    "suggestion_text": s.suggestion_text,
-                }
-                for s in suggestions
-            ],
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get("/api/v1/system/trades")
-async def get_system_trades(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-    
-    # Parse window query parameter
-    window = request.query_params.get("window", "30d")
-    if window not in ["7d", "30d", "all"]:
-        return JSONResponse({"ok": False, "error": "Invalid window value"}, status_code=400)
-        
-    try:
-        query = db.query(CampaignLog).filter(CampaignLog.is_canonical == True)
-        
-        if window == "7d":
-            cutoff = datetime.utcnow() - timedelta(days=7)
-            query = query.filter(CampaignLog.created_at >= cutoff)
-        elif window == "30d":
-            cutoff = datetime.utcnow() - timedelta(days=30)
-            query = query.filter(CampaignLog.created_at >= cutoff)
-            
-        trades = query.order_by(CampaignLog.id.desc()).all()
-        
-        trade_list = []
-        for t in trades:
-            trade_list.append({
-                "id": t.id,
-                "symbol": t.symbol,
-                "date_key": t.date_key,
-                "session_id": t.session_id,
-                "bias": t.bias,
-                "grade": t.grade,
-                "entry_price": t.entry_price,
-                "stop_loss": t.stop_loss,
-                "t1": t.t1,
-                "t2": t.t2,
-                "t3": t.t3,
-                "status": t.status,
-                "realized_pnl": t.realized_pnl,
-                "mas_approval_status": t.mas_approval_status,
-                "created_at": t.created_at.isoformat() if hasattr(t, "created_at") and t.created_at else None
-            })
-            
-        total_canonical = len(trades)
-        wins = sum(1 for t in trades if t.status == "CLOSED_WIN")
-        losses = sum(1 for t in trades if t.status == "CLOSED_LOSS")
-        approved = sum(1 for t in trades if t.mas_approval_status == "APPROVED")
-        net_r = float(sum(t.realized_pnl for t in trades if t.realized_pnl is not None))
-        
-        win_rate = float(wins / (wins + losses)) if (wins + losses) > 0 else 0.0
-        approval_rate = float(approved / total_canonical) if total_canonical > 0 else 0.0
-        
-        return JSONResponse({
-            "ok": True,
-            "metrics": {
-                "win_rate": win_rate,
-                "net_r": net_r,
-                "approval_rate": approval_rate
-            },
-            "trades": trade_list
-        })
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
+# GET /api/v1/system/audit-suggestions and GET /api/v1/system/trades
+# removed 2026-09-23 (V2 Crown retirement, Audit-AI surface retirement,
+# see /admin/export-audit-ledger's own removal comment above for the full
+# batch) -- both were 100% CampaignLog/DailyAuditLog/AuditSuggestionLog-
+# sourced with no Traveler equivalent, per Andy's explicit "retire
+# entirely" ruling.
 
 # GET /api/v1/system/parameters and GET /api/v1/system/errors removed
 # 2026-09-23 -- Andy's call during the strategic site audit. Both were
@@ -3613,161 +3362,15 @@ async def get_system_trades(request: Request, db: Session = Depends(get_db)):
 # for the full dashboard tab-by-tab audit this followed.
 
 
-class AnalysisRequest(BaseModel):
-    query: Optional[str] = None
-
-
-@app.post("/api/v1/system/analysis")
-async def post_system_analysis(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-        
-    try:
-        body_json = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "Malformed JSON payload"}, status_code=400)
-        
-    if "query" not in body_json:
-        return JSONResponse({"ok": False, "error": "Query key is required"}, status_code=400)
-        
-    query = body_json["query"]
-    if query is None:
-        return JSONResponse({"ok": False, "error": "Query cannot be null"}, status_code=400)
-        
-    if len(query) > 2000:
-        return JSONResponse({"ok": False, "error": "Query is too long"}, status_code=400)
-        
-    if query == "":
-        query = "general system evaluation"
-        
-    import uuid
-    analysis_id = f"ana_{uuid.uuid4().hex[:12]}"
-    
-    report_row = SystemAnalysisReport(
-        analysis_id=analysis_id,
-        query=query,
-        status="PENDING"
-    )
-    db.add(report_row)
-    db.commit()
-    db.refresh(report_row)
-    
-    try:
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        
-        recent_trades = db.query(CampaignLog).filter(
-            CampaignLog.is_canonical == True,
-            CampaignLog.created_at >= thirty_days_ago
-        ).all()
-        
-        wins = sum(1 for t in recent_trades if t.status == "CLOSED_WIN")
-        losses = sum(1 for t in recent_trades if t.status == "CLOSED_LOSS")
-        total_pnl = sum(t.realized_pnl for t in recent_trades if t.realized_pnl is not None)
-        avg_pnl = total_pnl / len(recent_trades) if recent_trades else 0.0
-        win_rate = wins / (wins + losses) if (wins + losses) > 0 else 0.0
-        
-        recent_errs = db.query(AgentRunLog).filter(
-            AgentRunLog.status == "ERROR",
-            AgentRunLog.created_at >= thirty_days_ago
-        ).order_by(AgentRunLog.id.desc()).limit(10).all()
-        
-        errors_data = [
-            {
-                "agent_name": e.agent_name,
-                "error_message": e.error_message,
-                "created_at": e.created_at.isoformat() if e.created_at else None
-            }
-            for e in recent_errs
-        ]
-        
-        schedulers_status = {}
-        for name, val in scheduler_health_registry.items():
-            schedulers_status[name] = {
-                "status": val["status"],
-                "last_run": val["last_run"],
-                "next_run": val["next_run"],
-                "error_count": val["error_count"]
-            }
-            
-        from gravity_engine import TARGETS as gravity_targets
-        daily_cap = float(os.getenv("AGENT_DAILY_BUDGET_USD", "10.00"))
-        
-        context_data = {
-            "query": query,
-            "trade_statistics_past_30_days": {
-                "total_trades": len(recent_trades),
-                "wins": wins,
-                "losses": losses,
-                "win_rate": win_rate,
-                "avg_realized_pnl": avg_pnl
-            },
-            "system_parameters": {
-                "daily_budget_limit_usd": daily_cap,
-                "monitored_targets": gravity_targets,
-                "scheduler_health": schedulers_status
-            },
-            "recent_system_errors": errors_data
-        }
-        
-        # 2026-08-30: deterministic only, no LLM branch -- Andy's call, no AI
-        # tied to Kabroda's cost path, period. This was already the fallback
-        # used whenever ANTHROPIC_API_KEY was missing; promoted to the only
-        # path rather than removing the feature -- same real error-count/
-        # win-rate thresholds as before, just always used now.
-        verdict = "STABLE"
-        if len(errors_data) > 3:
-            verdict = "RISK_ALERT"
-        elif win_rate < 0.5 and len(recent_trades) > 0:
-            verdict = "OPTIMIZE"
-
-        parsed_json = {
-            "summary": f"System status is {verdict.lower()} based on automated analysis of {len(recent_trades)} recent trades and {len(errors_data)} error events.",
-            "verdict": verdict,
-            "data_metrics": {
-                "win_rate": win_rate,
-                "total_trades": len(recent_trades),
-                "error_count": len(errors_data)
-            },
-            "recommendations": [
-                {
-                    "parameter": "daily_budget_limit_usd",
-                    "observation": f"Daily cap is set to {daily_cap}.",
-                    "suggestion": "Keep monitoring."
-                }
-            ],
-            "confidence_score": 0.95
-        }
-
-        # Ensure recommendations is present
-        if "recommendations" not in parsed_json:
-            parsed_json["recommendations"] = []
-        # Ensure findings is present for tests
-        if "findings" not in parsed_json:
-            parsed_json["findings"] = parsed_json.get("summary", "System stable.")
-        
-        report_row.status = "SUCCESS"
-        report_row.report_json = json.dumps(parsed_json)
-        db.commit()
-        
-        return JSONResponse({
-            "query": query,
-            "analysis_id": analysis_id,
-            "report": parsed_json
-        })
-        
-    except Exception as e:
-        report_row.status = "ERROR"
-        report_row.error_message = str(e)
-        db.commit()
-        return JSONResponse({
-            "ok": False,
-            "analysis_id": analysis_id,
-            "error": str(e)
-        }, status_code=500)
-
+# POST /api/v1/system/analysis (no suffix) removed 2026-09-23 (V2 Crown
+# retirement, Audit-AI surface retirement) -- CampaignLog-sourced (30-day
+# win rate/PnL) and, separately, confirmed to have zero frontend caller
+# anywhere in this repo -- the live "Recent Reports" list below
+# (/api/v1/system/analysis/recent) and single-report view read from
+# SystemAnalysisReport, but this was the ONLY route that ever wrote to
+# that table, so it was already unreachable from any real UI before this
+# removal. AnalysisRequest (its now-unused request-body Pydantic model)
+# removed with it.
 
 @app.get("/api/v1/system/analysis/recent")
 async def get_recent_analysis_reports(request: Request, db: Session = Depends(get_db)):
@@ -3831,35 +3434,14 @@ async def get_system_analysis_by_id(analysis_id: str, request: Request, db: Sess
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-@app.post("/api/v1/system/analysis/trigger")
-async def trigger_analysis_loop(request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    if not ctx.get("is_logged_in"):
-        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    if not ctx.get("is_admin"):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
-        
-    if scheduler_health_registry["analysis_loop"]["status"] == "EXECUTING":
-        return JSONResponse({"ok": False, "error": "Analysis loop is already running"}, status_code=409)
-        
-    try:
-        scheduler_health_registry["analysis_loop"]["status"] = "EXECUTING"
-
-        # Use the shared analysis logic (same as the background scheduler)
-        last_run = _run_analysis_loop_body(db)
-        scheduler_health_registry["analysis_loop"]["last_run"] = last_run
-        scheduler_health_registry["analysis_loop"]["status"] = "WAITING"
-
-        return JSONResponse({
-            "status": "running",
-            "parameters_evaluated": 0,
-            "last_run_timestamp": last_run
-        })
-    except Exception as e:
-        scheduler_health_registry["analysis_loop"]["status"] = "ERROR"
-        scheduler_health_registry["analysis_loop"]["error_count"] += 1
-        scheduler_health_registry["analysis_loop"]["last_error"] = str(e)
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# POST /api/v1/system/analysis/trigger removed 2026-09-23 (V2 Crown
+# retirement, Audit-AI surface retirement) -- this was the live dashboard's
+# "Run Analysis" button, calling _run_analysis_loop_body() (also removed,
+# see its own former definition site) which wrote CampaignLog-derived
+# stats into AuditSuggestionLog (also removed). Its 12h background
+# scheduler (run_analysis_loop_scheduler(), analysis_loop_task) is removed
+# from lifespan() in the same commit -- see that function's own former
+# definition site and lifespan()'s removal comment.
 
 
 # ==============================================================================

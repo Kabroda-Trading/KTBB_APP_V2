@@ -378,18 +378,18 @@
 
         <!-- ── TAB: ANALYSIS ────────────────────────────── -->
         <div class="tab-content" id="tab-analysis">
+            <!-- "Run Analysis" card and "Audit-AI & Data Export" card
+                 removed 2026-09-23 (V2 Crown retirement, Andy's explicit
+                 "retire entirely" ruling) -- both were 100% CampaignLog-
+                 sourced (via /api/v1/system/analysis/trigger and
+                 /api/v1/system/audit-suggestions + /admin/export-audit-
+                 ledger, all removed from main.py in the same pass). "Recent
+                 Reports" below is a SEPARATE, unrelated feature (reads
+                 SystemAnalysisReport, no CampaignLog/V2 dependency) --
+                 kept, now alone in this row (same single-child-in-row-1-1
+                 pattern already used elsewhere on this page, e.g. the
+                 Agent Cost card below). -->
             <div class="chart-row row-1-1" style="margin-bottom:18px;">
-                <div class="chart-card">
-                    <div class="chart-title">Run Analysis</div>
-                    <div class="chart-sub">Trigger a new system analysis</div>
-                    <button id="triggerAnalysisBtn" onclick="triggerAnalysis()"
-                            style="background:#c8813a; border:none; color:#0f172a; font-family:'JetBrains Mono',monospace;
-                                   font-size:12px; font-weight:700; padding:10px 24px; border-radius:6px;
-                                   cursor:pointer; letter-spacing:1px; margin-top:12px;">
-                        ▶ TRIGGER ANALYSIS
-                    </button>
-                    <div id="analysisResult" style="margin-top:14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#c9a880;"></div>
-                </div>
                 <div class="chart-card">
                     <div class="chart-title">Recent Reports</div>
                     <div class="chart-sub">Last 5 analysis reports</div>
@@ -401,52 +401,6 @@
                  (/api/v1/system/accuracy-report(/trigger), /api/v1/system/
                  flagging/trigger), same dead-route family as the removed
                  Signal Accuracy tab. See main.py's own removal comment. -->
-
-            {% if is_admin %}
-            <!-- ── AUDIT-AI & DATA EXPORT ─────────────────────── -->
-            <div class="chart-card" style="margin-bottom:18px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <div class="chart-title" style="margin-bottom:0;">Audit-AI &amp; Data Export <span class="admin-badge">Admin</span></div>
-                    <span id="auditDigestLabel" style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345;"></span>
-                </div>
-                <div class="chart-sub">H1-H6 fire weekly (Sunday 23:00 UTC), H7-H9 fire daily (23:45 UTC)</div>
-
-                <div id="auditDigestSummary" style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#c9a880; margin:12px 0;">Loading digest…</div>
-
-                <div style="overflow-x:auto; margin-bottom:14px;">
-                    <table style="width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:10px;">
-                        <thead>
-                            <tr style="border-bottom:1px solid #4d3526;">
-                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Hypothesis</th>
-                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Tier</th>
-                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">N</th>
-                                <th style="padding:6px 8px; text-align:left; color:#8a6f57;">Suggestion</th>
-                            </tr>
-                        </thead>
-                        <tbody id="auditSuggestionsBody">
-                            <tr><td colspan="4" style="padding:20px; text-align:center; color:#6b5345;">Loading…</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div style="display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap;">
-                    <div>
-                        <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:9px; color:#8a6f57; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Start Date</label>
-                        <input type="date" id="exportStartDate" style="background:#1a120e; border:1px solid #4d3526; color:#f2e3cf; padding:8px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:12px;">
-                    </div>
-                    <div>
-                        <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:9px; color:#8a6f57; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">End Date</label>
-                        <input type="date" id="exportEndDate" style="background:#1a120e; border:1px solid #4d3526; color:#f2e3cf; padding:8px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:12px;">
-                    </div>
-                    <button id="exportCopyBtn" onclick="copyAuditExport()"
-                            style="background:transparent; border:1px solid #4d3526; color:#c9a880; font-family:'JetBrains Mono',monospace;
-                                   font-size:10px; font-weight:700; padding:8px 16px; border-radius:4px; cursor:pointer; letter-spacing:1px;">
-                        COPY JSON
-                    </button>
-                    <span id="exportStatus" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6b5345;"></span>
-                </div>
-            </div>
-            {% endif %}
         </div>
 
         <!-- Signal Accuracy tab removed 2026-09-23 -- every route it called
@@ -788,67 +742,11 @@
     // runTestCall() removed 2026-08-30 -- fired POST /api/agents/test-call,
     // a real paid LLM call with no operational purpose. Route removed too.
 
-    // ── AUDIT-AI & DATA EXPORT ──────────────────────────────
-    async function loadAuditSuggestions() {
-        if (!document.getElementById('auditSuggestionsBody')) return;
-        try {
-            const res = await fetch('/api/v1/system/audit-suggestions');
-            const data = await res.json();
-            if (!data.ok) return;
-
-            const digest = data.latest_daily_digest;
-            const label = document.getElementById('auditDigestLabel');
-            const summary = document.getElementById('auditDigestSummary');
-            if (digest) {
-                label.textContent = 'last digest: ' + digest.date_key;
-                summary.innerHTML = `Today's digest (${digest.date_key}): ` +
-                    `<b style="color:#f2e3cf;">${digest.trades_covered_15m}</b> 15M &middot; ` +
-                    `<b style="color:#f2e3cf;">${digest.trades_covered_1h}</b> 1H &middot; ` +
-                    `<b style="color:#f2e3cf;">${digest.trades_covered_4h}</b> 4H trades covered.`;
-            } else {
-                summary.textContent = 'No daily digest yet — first run fires at 23:45 UTC.';
-            }
-
-            const tbody = document.getElementById('auditSuggestionsBody');
-            const suggestions = data.recent_suggestions || [];
-            if (suggestions.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="padding:20px; text-align:center; color:#6b5345;">No Audit-AI findings logged yet.</td></tr>';
-                return;
-            }
-            tbody.innerHTML = suggestions.map(s => `
-                <tr style="border-bottom:1px solid #2a1e18;">
-                    <td style="padding:6px 8px; color:#f2e3cf; white-space:nowrap;">${s.hypothesis_id}</td>
-                    <td style="padding:6px 8px; color:#c9a880; white-space:nowrap;">${s.tier_label}</td>
-                    <td style="padding:6px 8px; color:#c9a880;">${s.n_supporting}</td>
-                    <td style="padding:6px 8px; color:#c9a880; font-family:'Inter',sans-serif;">${s.suggestion_text}</td>
-                </tr>
-            `).join('');
-        } catch (e) {
-            console.error('loadAuditSuggestions failed:', e);
-        }
-    }
-
-    async function copyAuditExport() {
-        const btn = document.getElementById('exportCopyBtn');
-        const status = document.getElementById('exportStatus');
-        const start = document.getElementById('exportStartDate').value;
-        const end = document.getElementById('exportEndDate').value;
-        if (!start || !end) { status.textContent = 'Pick both dates first'; return; }
-
-        status.textContent = 'Fetching…';
-        try {
-            const res = await fetch(`/admin/export-audit-ledger?start_date=${start}&end_date=${end}`);
-            const data = await res.json();
-            if (!data.ok) { status.textContent = 'Error: ' + (data.error || 'unknown'); return; }
-            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            const orig = btn.textContent;
-            btn.textContent = '✓ COPIED';
-            status.textContent = `${data.total_records} trades, ${(data.daily_digests || []).length} digests, ${(data.audit_suggestions || []).length} suggestions, ${(data.trials || []).length} trials`;
-            setTimeout(() => { btn.textContent = orig; }, 2000);
-        } catch (e) {
-            status.textContent = 'Fetch failed: ' + e;
-        }
-    }
+    // loadAuditSuggestions()/copyAuditExport() removed 2026-09-23 (V2 Crown
+    // retirement, Audit-AI surface retirement, Andy's "retire entirely"
+    // ruling) -- both called routes (/api/v1/system/audit-suggestions,
+    // /admin/export-audit-ledger) were 100% CampaignLog-sourced and removed
+    // from main.py in the same pass.
 
     // loadJewel() removed 2026-08-30 -- called /api/dashboard/jewel, already
     // removed from main.py (JewelSnapshotLog's only writer, jewel_specialist.py,
@@ -1108,28 +1006,9 @@
     // has had zero live writers since the Performance Auditor was archived).
 
     // ── ANALYSIS TAB ──────────────────────────────────────
-    async function triggerAnalysis() {
-        const btn = document.getElementById('triggerAnalysisBtn');
-        const result = document.getElementById('analysisResult');
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-        result.textContent = 'Running analysis…';
-        result.style.color = '#c9a880';
-        try {
-            const r = await fetch('/api/v1/system/analysis/trigger', { method: 'POST' });
-            const d = await r.json();
-            if (d.status === 'running') {
-                result.innerHTML = `<span style="color:#5e8c66;">✓ Analysis complete.</span> Parameters evaluated: ${d.parameters_evaluated}. Last run: ${d.last_run_timestamp ? d.last_run_timestamp.slice(0,19).replace('T',' ') : '—'}`;
-            } else {
-                result.innerHTML = `<span style="color:#8c4a3a;">✗ ${d.error || 'Unknown error'}</span>`;
-            }
-        } catch (e) {
-            result.innerHTML = `<span style="color:#8c4a3a;">✗ Request failed: ${e.message}</span>`;
-        }
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        loadRecentReports();
-    }
+    // triggerAnalysis() removed 2026-09-23 (V2 Crown retirement, Audit-AI
+    // surface retirement) -- called /api/v1/system/analysis/trigger, also
+    // removed from main.py in the same pass.
 
     async function loadRecentReports() {
         try {
@@ -1151,15 +1030,9 @@
     }
 
     // ── INIT ──────────────────────────────────────────────
+    // exportStartDate/exportEndDate init removed 2026-09-23 along with the
+    // "Audit-AI & Data Export" card those elements belonged to.
     async function initDashboard() {
-        const exportEndEl = document.getElementById('exportEndDate');
-        const exportStartEl = document.getElementById('exportStartDate');
-        if (exportEndEl && exportStartEl) {
-            const t = new Date();
-            exportEndEl.valueAsDate = t;
-            const p = new Date(); p.setDate(t.getDate() - 14);
-            exportStartEl.valueAsDate = p;
-        }
         await Promise.all([
             loadOverview().catch(e => console.error("loadOverview failed", e)),
             loadMasHistory().catch(e => console.error("loadMasHistory failed", e)),
@@ -1192,11 +1065,12 @@
     // the same pass. See main.py's own removal comment and
     // V2_RETIREMENT_MAP.md for the full dashboard audit this followed.
 
-    // Override initDashboard to also load audit suggestions + Live System polling
+    // Override initDashboard to also start Live System polling.
+    // loadAuditSuggestions() call removed 2026-09-23 (V2 Crown retirement,
+    // Audit-AI surface retirement) -- the function itself is gone.
     const _origInit = initDashboard;
     initDashboard = function() {
         if (_origInit) _origInit();
-        loadAuditSuggestions();
         // Polling for Live System tab data
         setInterval(loadHeartbeat, 60000);
         setInterval(loadCostData, 30000);
