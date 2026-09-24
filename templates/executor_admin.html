@@ -472,12 +472,9 @@ async function loadAccounts() {
                 </div>
             </details>
 
-            <details style="margin-top:10px;">
-                <summary>One-Time Verification Tools (already proven live 2026-09-05 through 2026-09-07 -- re-run only to re-verify the exchange mechanism)</summary>
-                <div class="danger-zone" id="tinyTest-${a.id}" style="margin-top:10px;">
-                    <p class="empty">Loading...</p>
-                </div>
-            </details>
+            <!-- "One-Time Verification Tools" (tiny-test) panel removed
+                 2026-09-23 -- executor_mechanism_test.py retired alongside
+                 V2 Crown (Andy's ruling), no Traveler/E1 analog. -->
         </div>
     `).join("");
 
@@ -490,7 +487,6 @@ async function loadAccounts() {
             document.getElementById(`riskCap-${a.id}`).value = rs.risk_state.risk_cap_usd ?? "";
             document.getElementById(`riskFactor-${a.id}`).value = rs.risk_state.compounding_factor ?? "";
         }
-        loadTinyTestForAccount(a.id, a.has_credentials);
         loadSizingPolicy(a.id);
         renderStrategyProfileSection(a.id, a);
         renderGoLiveSection(a.id, a);
@@ -933,239 +929,12 @@ async function recordTradeResult(accountId) {
     alert(`Recorded. risk_last_usd now $${resp.risk_state.risk_last_usd.toFixed(2)}, consecutive_losses=${resp.risk_state.consecutive_losses}.`);
 }
 
-// ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
-// REAL MONEY. Confirm phrases are read from real <input> fields, never
-// a JS prompt() -- a second, visible layer of friction on top of the
-// server's own gating. Already proven live -- see the collapsed section
-// this renders into. Kept exactly as built; only its location moved.
-
-const _TINY_TEST_ACTIVE_STATUSES = ["STARTED", "ORDER_PLACED", "FILL_CONFIRMED", "TPSL_SET", "T1_LIMIT_PLACED", "T1_AND_T3_LIMITS_PLACED", "PARTIAL_CLOSED", "SL_MOVED_BREAKEVEN"];
-
-async function loadTinyTestForAccount(accountId, hasCredentials) {
-    const box = document.getElementById(`tinyTest-${accountId}`);
-    if (!box) return;
-    const data = await api(`/api/executor/accounts/${accountId}/tiny-test`);
-    const tests = data.ok ? data.tests : [];
-    const active = tests.find(t => _TINY_TEST_ACTIVE_STATUSES.includes(t.status));
-    box.innerHTML = renderTinyTestSection(accountId, hasCredentials, active, tests);
-}
-
-function renderTinyTestSection(accountId, hasCredentials, active, allTests) {
-    const enabled = globalConfig.live_orders_enabled;
-    let html = '<div class="danger-zone-title">Real Money -- Live Mechanism Test (BTCUSDT LONG only)</div>';
-
-    if (!enabled) {
-        html += '<p class="empty">Live orders are DISABLED globally -- enable them in Safety Controls above first.</p>';
-    } else if (!hasCredentials) {
-        html += '<p class="empty">Set credentials (step 1) first.</p>';
-    } else if (!active) {
-        html += `
-            <div class="risk-form">
-                <label>TP %<input type="number" step="0.001" id="tinyTpPct-${accountId}" value="0.01" style="width:70px;"></label>
-                <label>SL %<input type="number" step="0.001" id="tinySlPct-${accountId}" value="0.01" style="width:70px;"></label>
-                <label>Type exactly: CONFIRM PLACE TINY LIVE ORDER<input type="text" id="tinyPlaceConfirm-${accountId}"></label>
-                <button class="btn btn-danger" onclick="placeTinyTest(${accountId}, this)" style="align-self:flex-end;">PLACE TINY LIVE ORDER</button>
-            </div>`;
-    } else {
-        html += `
-            <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
-                <span class="badge badge-warn">${escapeHtml(active.status)}</span>
-                qty=${active.qty ?? "-"} &middot; position=${escapeHtml(active.position_id) || "-"} &middot;
-                fill=${active.fill_price ?? "-"} &middot; TP=${active.initial_tp_price ?? "-"} &middot; SL=${active.initial_sl_price ?? "-"}
-                ${active.breakeven_sl_price ? ` &middot; breakeven SL=${active.breakeven_sl_price}` : ""}
-            </div>`;
-
-        if (active.status === "TPSL_SET") {
-            html += `
-                <div class="risk-form">
-                    <label>Partial close %<input type="number" step="1" id="tinyPartialPct-${accountId}" value="50" style="width:70px;"></label>
-                    <label>Type exactly: CONFIRM PARTIAL CLOSE<input type="text" id="tinyPartialConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="partialCloseTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PARTIAL CLOSE</button>
-                </div>
-                <div class="risk-form" style="margin-top:6px; border-top:1px solid #1e293b; padding-top:6px;">
-                    <label>Alt: resting T1 LIMIT -- T1 %<input type="number" step="0.0001" id="t1LimitPct-${accountId}" value="0.01" style="width:80px;"></label>
-                    <label>Qty %<input type="number" step="1" id="t1LimitQtyPct-${accountId}" value="50" style="width:70px;"></label>
-                    <label>Type exactly: CONFIRM PLACE RESTING T1 LIMIT<input type="text" id="t1LimitPlaceConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="placeRestingT1Limit(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PLACE RESTING T1 LIMIT</button>
-                </div>
-                <p class="empty" style="margin-top:4px;">A plain resting reduce-only LIMIT order sitting on the book -- the mechanism Component B's management policy actually depends on, distinct from the TP/SL bracket above. May sit unfilled for a while; check back with the status button once placed. Use a small T1 % for a real live test session so it actually touches.</p>
-                <div class="risk-form" style="margin-top:6px; border-top:1px solid #1e293b; padding-top:6px;">
-                    <label>Domain 2 pre-flight: T1 %<input type="number" step="0.0001" id="t1t3LimitT1Pct-${accountId}" value="0.01" style="width:80px;"></label>
-                    <label>T3 %<input type="number" step="0.0001" id="t1t3LimitT3Pct-${accountId}" value="0.02" style="width:80px;"></label>
-                    <label>Qty %<input type="number" step="1" id="t1t3LimitQtyPct-${accountId}" value="50" style="width:70px;"></label>
-                    <label>Type exactly: CONFIRM PLACE CONCURRENT T1 T3 LIMITS<input type="text" id="t1t3LimitPlaceConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="placeConcurrentT1T3Limits(${accountId}, ${active.id}, this)" style="align-self:flex-end;">PLACE CONCURRENT T1+T3</button>
-                </div>
-                <p class="empty" style="margin-top:4px;">Already proven live (2026-09-07): stop + T1 + T3 resting limits all at once, exactly like the real engine does. Re-run only to re-verify after an exchange API change.</p>`;
-        } else if (active.status === "T1_LIMIT_PLACED") {
-            html += `
-                <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
-                    resting T1 limit: target=${active.t1_limit_target_price ?? "-"} &middot; qty=${active.t1_limit_qty ?? "-"} &middot;
-                    orderId=${escapeHtml(active.t1_limit_exchange_order_id) || "-"}
-                </div>
-                <div class="risk-form">
-                    <button class="btn" onclick="checkRestingT1LimitStatus(${accountId}, ${active.id}, this)">CHECK STATUS</button>
-                </div>
-                <div class="risk-form" style="margin-top:6px;">
-                    <label>Type exactly: CONFIRM CANCEL RESTING T1 LIMIT<input type="text" id="t1LimitCancelConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="cancelRestingT1Limit(${accountId}, ${active.id}, this)" style="align-self:flex-end;">CANCEL</button>
-                </div>`;
-        } else if (active.status === "T1_AND_T3_LIMITS_PLACED") {
-            html += `
-                <div style="font-family:'JetBrains Mono'; font-size:11px; margin-bottom:8px;">
-                    T1: target=${active.t1_limit_target_price ?? "-"} qty=${active.t1_limit_qty ?? "-"} order=${escapeHtml(active.t1_limit_exchange_order_id) || "-"}<br>
-                    T3: target=${active.t3_limit_target_price ?? "-"} qty=${active.t3_limit_qty ?? "-"} order=${escapeHtml(active.t3_limit_exchange_order_id) || "-"}
-                </div>
-                <div class="risk-form">
-                    <button class="btn" onclick="checkConcurrentLimitsStatus(${accountId}, ${active.id}, this)">CHECK STATUS (+ TP/SL SNAPSHOT)</button>
-                </div>
-                <div class="risk-form" style="margin-top:6px;">
-                    <label>Type exactly: CONFIRM CANCEL CONCURRENT T1 T3 LIMITS<input type="text" id="t1t3LimitCancelConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="cancelConcurrentLimits(${accountId}, ${active.id}, this)" style="align-self:flex-end;">CANCEL BOTH</button>
-                </div>
-                ${active.tpsl_check_after_leg_fill_response_json ? `<pre style="font-size:10px; overflow-x:auto; background:#0f172a; padding:6px; border-radius:4px;">${escapeHtml(active.tpsl_check_after_leg_fill_response_json)}</pre>` : ""}`;
-        } else {
-            html += '<p class="empty">Partial close (or the alt resting limits) requires status TPSL_SET.</p>';
-        }
-
-        if (active.status === "PARTIAL_CLOSED") {
-            html += `
-                <div class="risk-form">
-                    <label>Type exactly: CONFIRM MOVE SL TO BREAKEVEN<input type="text" id="tinySlConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="moveSlBreakevenTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">MOVE SL TO BREAKEVEN</button>
-                </div>`;
-        } else if (active.status !== "SL_MOVED_BREAKEVEN") {
-            html += '<p class="empty">Move-SL-to-breakeven requires status PARTIAL_CLOSED.</p>';
-        }
-
-        if (active.status === "PARTIAL_CLOSED" || active.status === "SL_MOVED_BREAKEVEN") {
-            html += `
-                <div class="risk-form">
-                    <label>Type exactly: CONFIRM FLASH CLOSE REMAINDER<input type="text" id="tinyFlashConfirm-${accountId}"></label>
-                    <button class="btn btn-danger" onclick="flashCloseTinyTest(${accountId}, ${active.id}, this)" style="align-self:flex-end;">FLASH CLOSE REMAINDER</button>
-                </div>`;
-        } else {
-            html += '<p class="empty">Flash close requires status PARTIAL_CLOSED or SL_MOVED_BREAKEVEN.</p>';
-        }
-    }
-
-    if (allTests && allTests.length) {
-        html += `<table style="margin-top:10px;"><thead><tr><th>ID</th><th>Status</th><th>Qty</th><th>Fill</th><th>When</th></tr></thead><tbody>` +
-            allTests.map(t => `<tr>
-                <td>#${t.id}</td>
-                <td><span class="badge ${t.status === 'FULLY_CLOSED' ? 'badge-ok' : (t.status === 'FAILED' ? 'badge-danger' : 'badge-warn')}">${escapeHtml(t.status)}</span></td>
-                <td>${t.qty ?? "-"}</td><td>${t.fill_price ?? "-"}</td>
-                <td>${t.created_at ? _parseServerTimestamp(t.created_at).toLocaleString() : "-"}</td>
-            </tr>`).join("") + `</tbody></table>`;
-    }
-    return html;
-}
-
-// Real error detail lives at resp.test.error_detail on the "ok:false but
-// the call itself succeeded" path (e.g. fill-poll timeout) -- resp.error
-// only exists on the gated/blocked/exception paths. Check both, in order,
-// so the alert always shows the actual reason instead of a generic one.
-function _tinyTestErrorMessage(resp, fallback) {
-    return resp.error || (resp.test && resp.test.error_detail) || fallback;
-}
-
-// Guards against a double-click firing two overlapping real requests --
-// each action can take several seconds (place polls for a fill up to
-// ~10s), and a second click before the first returns could otherwise
-// send a second real order/close to the exchange.
-const _tinyTestInFlight = {};
-
-async function _runTinyTestAction(key, btn, path, body, fallbackMsg, accountId) {
-    if (_tinyTestInFlight[key]) return;
-    _tinyTestInFlight[key] = true;
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "WORKING...";
-    try {
-        const resp = await api(path, { method: "POST", body: JSON.stringify(body) });
-        if (!resp.ok) { alert(_tinyTestErrorMessage(resp, fallbackMsg)); }
-    } finally {
-        _tinyTestInFlight[key] = false;
-        loadTinyTestForAccount(accountId, true);
-    }
-}
-
-async function placeTinyTest(accountId, btn) {
-    const tp_pct = parseFloat(document.getElementById(`tinyTpPct-${accountId}`).value) || 0.01;
-    const sl_pct = parseFloat(document.getElementById(`tinySlPct-${accountId}`).value) || 0.01;
-    const confirm_ = document.getElementById(`tinyPlaceConfirm-${accountId}`).value;
-    await _runTinyTestAction(`place-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/place`,
-        { confirm: confirm_, tp_pct, sl_pct }, "failed to place tiny test order", accountId);
-}
-async function partialCloseTinyTest(accountId, testId, btn) {
-    const pct = (parseFloat(document.getElementById(`tinyPartialPct-${accountId}`).value) || 50) / 100;
-    const confirm_ = document.getElementById(`tinyPartialConfirm-${accountId}`).value;
-    await _runTinyTestAction(`partial-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/partial-close`,
-        { confirm: confirm_, pct }, "failed to partial-close", accountId);
-}
-async function moveSlBreakevenTinyTest(accountId, testId, btn) {
-    const confirm_ = document.getElementById(`tinySlConfirm-${accountId}`).value;
-    await _runTinyTestAction(`breakeven-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/move-sl-breakeven`,
-        { confirm: confirm_ }, "failed to move SL to breakeven", accountId);
-}
-async function flashCloseTinyTest(accountId, testId, btn) {
-    const confirm_ = document.getElementById(`tinyFlashConfirm-${accountId}`).value;
-    await _runTinyTestAction(`flash-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/flash-close`,
-        { confirm: confirm_ }, "failed to flash close", accountId);
-}
-
-// ------------------------------------------------------------------ resting reduce-only LIMIT at T1 (2026-09-06)
-
-async function placeRestingT1Limit(accountId, testId, btn) {
-    const t1_pct = parseFloat(document.getElementById(`t1LimitPct-${accountId}`).value) || 0.01;
-    const qty_pct = (parseFloat(document.getElementById(`t1LimitQtyPct-${accountId}`).value) || 50) / 100;
-    const confirm_ = document.getElementById(`t1LimitPlaceConfirm-${accountId}`).value;
-    await _runTinyTestAction(`t1limit-place-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/place-resting-t1-limit`,
-        { confirm: confirm_, t1_pct, qty_pct }, "failed to place resting T1 limit", accountId);
-}
-async function checkRestingT1LimitStatus(accountId, testId, btn) {
-    // No confirm phrase -- read-only exchange call.
-    await _runTinyTestAction(`t1limit-check-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/check-resting-t1-limit-status`,
-        {}, "failed to check resting T1 limit status", accountId);
-}
-async function cancelRestingT1Limit(accountId, testId, btn) {
-    const confirm_ = document.getElementById(`t1LimitCancelConfirm-${accountId}`).value;
-    await _runTinyTestAction(`t1limit-cancel-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/cancel-resting-t1-limit`,
-        { confirm: confirm_ }, "failed to cancel resting T1 limit", accountId);
-}
-
-// ------------------------------------------------------------------ Domain 2 required live pre-flight: concurrent T1+T3 (2026-09-07)
-// Already proven live -- the exact combination executor_live_engine.py
-// needs (stop + T1 + T3 all resting at once).
-
-async function placeConcurrentT1T3Limits(accountId, testId, btn) {
-    const t1_pct = parseFloat(document.getElementById(`t1t3LimitT1Pct-${accountId}`).value) || 0.01;
-    const t3_pct = parseFloat(document.getElementById(`t1t3LimitT3Pct-${accountId}`).value) || 0.02;
-    const qty_pct = (parseFloat(document.getElementById(`t1t3LimitQtyPct-${accountId}`).value) || 50) / 100;
-    const confirm_ = document.getElementById(`t1t3LimitPlaceConfirm-${accountId}`).value;
-    await _runTinyTestAction(`t1t3limit-place-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/place-concurrent-t1-t3-limits`,
-        { confirm: confirm_, t1_pct, t3_pct, qty_pct }, "failed to place concurrent T1+T3 limits", accountId);
-}
-async function checkConcurrentLimitsStatus(accountId, testId, btn) {
-    // No confirm phrase -- read-only exchange calls only.
-    await _runTinyTestAction(`t1t3limit-check-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/check-concurrent-limits-status`,
-        {}, "failed to check concurrent limits status", accountId);
-}
-async function cancelConcurrentLimits(accountId, testId, btn) {
-    const confirm_ = document.getElementById(`t1t3LimitCancelConfirm-${accountId}`).value;
-    await _runTinyTestAction(`t1t3limit-cancel-${accountId}`, btn,
-        `/api/executor/accounts/${accountId}/tiny-test/${testId}/cancel-concurrent-limits`,
-        { confirm: confirm_ }, "failed to cancel concurrent limits", accountId);
-}
+// Tiny-order mechanism test UI (loadTinyTestForAccount/renderTinyTestSection/
+// placeTinyTest/partialCloseTinyTest/moveSlBreakevenTinyTest/flashCloseTinyTest/
+// place|check|cancelRestingT1Limit/place|check|cancelConcurrentT1T3Limits)
+// removed 2026-09-23 (V2 Crown retirement, Andy's ruling: retire
+// executor_mechanism_test.py alongside V2) -- its backing routes are gone
+// from main.py in the same pass.
 
 async function engageKillSwitch(id) {
     const reason = prompt("Reason for engaging this account's kill switch:", "manual") || "manual";

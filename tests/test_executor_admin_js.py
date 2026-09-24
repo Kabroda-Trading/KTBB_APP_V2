@@ -1,15 +1,14 @@
 """
 Executes (not just reads) templates/executor_admin.html's inline <script>
-block via Node, for the four real-money tiny-test action buttons. This
-repo's Python test suite is otherwise thorough but has zero ability to
-run frontend JS -- which is exactly how a real bug shipped and reached
-production undetected (2026-09-05): the click-guard helper added to
-placeTinyTest()/partialCloseTinyTest()/moveSlBreakevenTinyTest()/
-flashCloseTinyTest() required the button element as an argument, but
-the onclick="" attributes calling them were never updated to pass it.
-Every click threw a TypeError before ever reaching fetch() -- silent in
-the browser, invisible in server logs (no request was ever sent), and
-completely outside what any Python-side test could have caught.
+block via Node. This repo's Python test suite is otherwise thorough but
+has zero ability to run frontend JS -- which is exactly how a real bug
+shipped and reached production undetected (2026-09-05, the since-removed
+tiny-test buttons): a click-guard helper required the button element as
+an argument, but the onclick="" attributes calling the handlers were
+never updated to pass it. Every click threw a TypeError before ever
+reaching fetch() -- silent in the browser, invisible in server logs (no
+request was ever sent), and completely outside what any Python-side test
+could have caught.
 
 Skips cleanly (not a failure) if Node.js isn't installed -- this repo
 has no other Node dependency, and this check is a real bonus, not a
@@ -42,64 +41,11 @@ def _run_harness():
     return scenarios, result.returncode
 
 
-def test_all_tiny_test_buttons_execute_without_throwing():
-    scenarios, returncode = _run_harness()
-    failures = [s for s in scenarios if not s.get("ok")]
-    assert not failures, f"{len(failures)} tiny-test button handler(s) failed: {json.dumps(failures, indent=2)}"
-    assert returncode == 0
-
-
-def test_place_tiny_test_calls_the_place_endpoint():
-    scenarios, _ = _run_harness()
-    place = next(s for s in scenarios if s["label"] == "placeTinyTest")
-    assert place["ok"] is True
-    assert any(p.endswith("/tiny-test/place") for p in place["fetchCalls"])
-
-
-def test_partial_close_calls_the_partial_close_endpoint_with_the_right_test_id():
-    scenarios, _ = _run_harness()
-    partial = next(s for s in scenarios if s["label"] == "partialCloseTinyTest")
-    assert partial["ok"] is True
-    assert any(p.endswith("/tiny-test/5/partial-close") for p in partial["fetchCalls"])
-
-
-def test_move_sl_breakeven_calls_the_right_endpoint():
-    scenarios, _ = _run_harness()
-    breakeven = next(s for s in scenarios if s["label"] == "moveSlBreakevenTinyTest")
-    assert breakeven["ok"] is True
-    assert any(p.endswith("/tiny-test/5/move-sl-breakeven") for p in breakeven["fetchCalls"])
-
-
-def test_flash_close_calls_the_right_endpoint():
-    scenarios, _ = _run_harness()
-    flash = next(s for s in scenarios if s["label"] == "flashCloseTinyTest")
-    assert flash["ok"] is True
-    assert any(p.endswith("/tiny-test/5/flash-close") for p in flash["fetchCalls"])
-
-
-# ------------------------------------------------------------------ resting reduce-only LIMIT at T1 (2026-09-06)
-# Same bug class this harness exists to catch (dropped/mismatched
-# onclick arguments), new surface area of it.
-
-def test_place_resting_t1_limit_calls_the_right_endpoint():
-    scenarios, _ = _run_harness()
-    place = next(s for s in scenarios if s["label"] == "placeRestingT1Limit")
-    assert place["ok"] is True
-    assert any(p.endswith("/tiny-test/5/place-resting-t1-limit") for p in place["fetchCalls"])
-
-
-def test_check_resting_t1_limit_status_calls_the_right_endpoint():
-    scenarios, _ = _run_harness()
-    check = next(s for s in scenarios if s["label"] == "checkRestingT1LimitStatus")
-    assert check["ok"] is True
-    assert any(p.endswith("/tiny-test/5/check-resting-t1-limit-status") for p in check["fetchCalls"])
-
-
-def test_cancel_resting_t1_limit_calls_the_right_endpoint():
-    scenarios, _ = _run_harness()
-    cancel = next(s for s in scenarios if s["label"] == "cancelRestingT1Limit")
-    assert cancel["ok"] is True
-    assert any(p.endswith("/tiny-test/5/cancel-resting-t1-limit") for p in cancel["fetchCalls"])
+# All tiny-test button coverage (test_all_tiny_test_buttons_execute_
+# without_throwing + 6 per-action tests, plus the resting-T1-limit trio)
+# removed 2026-09-23 (V2 Crown retirement, executor_mechanism_test.py
+# retired alongside V2, Andy's ruling) -- their scenarios were removed
+# from executor_admin_js_harness.js in the same pass.
 
 
 # ------------------------------------------------------------------ Go Live mode switch (2026-09-07)

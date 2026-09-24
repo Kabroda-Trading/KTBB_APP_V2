@@ -2,13 +2,16 @@
 // <script> block. Not a browser -- no DOM rendering, no real network --
 // but it genuinely EXECUTES the actual page JavaScript with a minimal
 // document/fetch/alert mock, which is more than static review alone
-// caught: a real incident (2026-09-05) shipped four onclick="" handlers
-// with one fewer argument than the functions they called (the click-
-// guard helper needed the button element, the handlers were never
-// updated to pass `this`), and every click threw a TypeError before
-// ever calling fetch() -- silent in the browser, invisible in server
-// logs (no request was ever sent), and completely outside what any
-// Python-side test could have caught.
+// caught: a real incident (2026-09-05, since-removed tiny-test buttons)
+// shipped four onclick="" handlers with one fewer argument than the
+// functions they called (a click-guard helper needed the button
+// element, the handlers were never updated to pass `this`), and every
+// click threw a TypeError before ever calling fetch() -- silent in the
+// browser, invisible in server logs (no request was ever sent), and
+// completely outside what any Python-side test could have caught. The
+// harness now covers the Go Live mode switch, _parseServerTimestamp,
+// the Sizing Wizard option cards, and createAccount() -- see each
+// section below for what it actually checks today.
 //
 // CRITICAL DESIGN POINT, itself the product of a second near-miss while
 // building this harness: this must execute the LITERAL onclick="..."
@@ -37,34 +40,20 @@ function extractScript(html) {
   return match[1];
 }
 
-// Finds the literal onclick="..." attribute text for a button whose
-// onclick calls `fnName(...)`, by rendering the account-card template
-// literal with known stand-in values, then locating that call. We
-// don't have a real Jinja2/JS template engine here, so instead we
-// substitute the ${...} placeholders this template's own JS uses for
-// account/test ids with fixed sentinel values via simple string
-// replacement -- close enough to get a real, executable onclick string
-// for these specific buttons (all of which take only accountId and/or
-// active.id, never full HTML-escaped content).
-function findOnclickAttr(html, fnName) {
-  const re = new RegExp(`onclick="(${fnName}\\([^)]*\\))"`, 'g');
-  const found = [];
-  let m;
-  while ((m = re.exec(html)) !== null) found.push(m[1]);
-  if (found.length === 0) throw new Error(`No onclick="${fnName}(...)" attribute found in the template`);
-  if (found.length > 1) throw new Error(`Found ${found.length} onclick="${fnName}(...)" attributes -- expected exactly one, update this harness`);
-  return found[0]
-    .replace(/\$\{accountId\}/g, '1')
-    .replace(/\$\{active\.id\}/g, '5');
-}
+// findOnclickAttr() (the plain, single-match version -- extracted literal
+// onclick="..." attribute text for a button whose onclick calls
+// `fnName(...)`) was removed 2026-09-23 along with the tiny-test buttons
+// that were its only caller (V2 Crown retirement, executor_mechanism_
+// test.py retired alongside V2). setAccountMode's own extraction below
+// needed a different function from the start (see its own comment), so
+// it's unaffected by that removal.
 
 // setAccountMode(2026-09-07) has TWO literal onclick call sites for the
 // same function name (Go Live's DRY_RUN->LIVE button vs. its Revert-to-
 // DRY_RUN button) -- mutually exclusive at render time (renderGoLiveSection()
 // branches on account.mode), both present in the static template source.
-// findOnclickAttr() above deliberately fails loud on >1 match for every
-// OTHER button (a real duplicate would be a bug there); this one needs
-// its own extraction that disambiguates by the literal mode argument.
+// This needs its own extraction that disambiguates by the literal mode
+// argument (a plain "exactly one match" finder can't distinguish them).
 function findOnclickAttrForLiteralArg(html, fnName, literalArgSubstring) {
   const re = new RegExp(`onclick="(${fnName}\\([^)]*${literalArgSubstring}[^)]*\\))"`, 'g');
   const found = [];
@@ -104,9 +93,7 @@ function buildSandbox(fetchCalls, alertCalls) {
     fetch: async (requestPath, opts) => {
       fetchCalls.push({ path: requestPath, opts });
       let body = { ok: true };
-      if (/\/tiny-test\/(place|\d+\/(partial-close|move-sl-breakeven|flash-close|place-resting-t1-limit|check-resting-t1-limit-status|cancel-resting-t1-limit))$/.test(requestPath)) {
-        body = { ok: true, test: { id: 1, status: 'TPSL_SET' } };
-      } else if (/\/sizing-policy\/preview$/.test(requestPath)) {
+      if (/\/sizing-policy\/preview$/.test(requestPath)) {
         // Real shape from main.py's api_executor_preview_sizing_policy():
         // each of current/after_2r_win/after_1r_loss carries compute_stake()'s
         // full detail dict plus stake_usd/balance_source; balance_usd sits
@@ -115,8 +102,6 @@ function buildSandbox(fetchCalls, alertCalls) {
         body = { ok: true, preview: { current: leg(250), after_2r_win: leg(275), after_1r_loss: leg(225), balance_usd: 2500 } };
       } else if (/\/sizing-policy$/.test(requestPath)) {
         body = { ok: true, sizing_policy: { preset_name: null, base_risk_usd: null, base_risk_pct: null, roll_in_pct: null, cap_abs_usd: null, cap_pct: null, tier_threshold_usd: null, tier_flat_usd: null, band_step_usd: null, band_risk_per_step_usd: null, band_below_pct: null, band_max_risk_usd: null, derisk_n: null, derisk_factor: null } };
-      } else if (/\/tiny-test$/.test(requestPath)) {
-        body = { ok: true, tests: [] };
       } else if (/\/accounts$/.test(requestPath) && opts && opts.method === 'POST') {
         // Real shape from main.py's api_executor_create_account(): echoes
         // back whatever label/user_id was actually posted, same as the
@@ -192,71 +177,17 @@ async function main() {
     timestampResults.push({ label: '_parseServerTimestamp', ok: false, error: e.message });
   }
 
-  const SCENARIOS = [
-    { label: 'placeTinyTest', expectPath: /\/tiny-test\/place$/ },
-    { label: 'partialCloseTinyTest', expectPath: /\/tiny-test\/5\/partial-close$/ },
-    { label: 'moveSlBreakevenTinyTest', expectPath: /\/tiny-test\/5\/move-sl-breakeven$/ },
-    { label: 'flashCloseTinyTest', expectPath: /\/tiny-test\/5\/flash-close$/ },
-    // 2026-09-06, ladder-test completion build -- same bug class this
-    // harness exists to catch, new surface area of it.
-    { label: 'placeRestingT1Limit', expectPath: /\/tiny-test\/5\/place-resting-t1-limit$/ },
-    { label: 'checkRestingT1LimitStatus', expectPath: /\/tiny-test\/5\/check-resting-t1-limit-status$/ },
-    { label: 'cancelRestingT1Limit', expectPath: /\/tiny-test\/5\/cancel-resting-t1-limit$/ },
-  ];
-
+  // The tiny-test button SCENARIOS array + its execution loop (place/
+  // partial-close/move-sl-breakeven/flash-close/resting-t1-limit place/
+  // check/cancel) were removed 2026-09-23 along with the buttons
+  // themselves (V2 Crown retirement, executor_mechanism_test.py retired
+  // alongside V2). `results` stays -- the setAccountMode scenarios below
+  // still push into it.
   const results = [];
-  for (const scenario of SCENARIOS) {
-    fetchCalls.length = 0;
-    let onclickAttr;
-    try {
-      onclickAttr = findOnclickAttr(html, scenario.label);
-    } catch (e) {
-      results.push({ label: scenario.label, ok: false, error: e.message });
-      continue;
-    }
-
-    const btn = makeEl(`__fake_btn_${scenario.label}__`);
-    // A real inline onclick="..." handler doesn't return its promise to
-    // the browser either (an async function's rejection there becomes
-    // an unhandled rejection logged to the console, not a thrown error
-    // anyone catches) -- so this harness must catch it the same way,
-    // via the process-level event, rather than a try/catch around the
-    // call (which would NOT see a rejection from a fire-and-forget
-    // promise the handler itself never awaited or returned).
-    let capturedRejection = null;
-    const onRejection = (reason) => { capturedRejection = reason; };
-    process.on('unhandledRejection', onRejection);
-    try {
-      // Compiled INSIDE the same vm context (not a bare `new Function`,
-      // which would run in Node's own global scope and never see
-      // placeTinyTest() etc. at all).
-      const handler = vm.runInContext(`(function () { ${onclickAttr} })`, sandbox);
-      handler.call(btn);
-      // Give the fire-and-forget async call a tick to run to completion
-      // (or throw) before checking what happened -- same reasoning a
-      // browser's own event loop would apply.
-      await new Promise((r) => setTimeout(r, 20));
-
-      if (capturedRejection) {
-        throw capturedRejection instanceof Error ? capturedRejection : new Error(String(capturedRejection));
-      }
-      const matched = fetchCalls.some((c) => scenario.expectPath.test(c.path));
-      results.push({
-        label: scenario.label, ok: matched, onclickAttr,
-        error: matched ? undefined : `expected a fetch matching ${scenario.expectPath}, got: ${fetchCalls.map(c => c.path).join(', ') || '(none)'}`,
-        fetchCalls: fetchCalls.map((c) => c.path),
-      });
-    } catch (e) {
-      results.push({ label: scenario.label, ok: false, onclickAttr, error: e.message });
-    } finally {
-      process.off('unhandledRejection', onRejection);
-    }
-  }
 
   // setAccountMode (2026-09-07) -- Go Live's two mutually-exclusive
-  // onclick call sites, extracted/run separately (see
-  // findOnclickAttrForLiteralArg's own comment for why the shared loop
-  // above can't handle this one).
+  // onclick call sites, extracted/run separately (see this section's own
+  // comment above, findOnclickAttrForLiteralArg, for why).
   const modeScenarios = [
     { label: 'setAccountMode(LIVE)', literalArg: "'LIVE'", expectPath: /\/accounts\/1\/mode$/, expectBody: /"mode":"LIVE"/ },
     { label: 'setAccountMode(DRY_RUN)', literalArg: "'DRY_RUN'", expectPath: /\/accounts\/1\/mode$/, expectBody: /"mode":"DRY_RUN"/ },
@@ -296,9 +227,9 @@ async function main() {
 
   // Sizing Wizard option cards (2026-09-07, SIZING_AND_ISOLATION.md Part 1)
   // -- these are plain globals in the script (no onclick-string extraction
-  // needed, unlike the tiny-test buttons above, since they're always
-  // called with a literal accountId/code pair, not built from a template
-  // loop's ${...} placeholders at multiple call sites).
+  // needed, unlike setAccountMode above, since they're always called with
+  // a literal accountId/code pair, not built from a template loop's
+  // ${...} placeholders at multiple call sites).
   const sizingResults = [];
   const num = (id) => { const v = sandbox.document.getElementById(id).value; return v === '' ? null : parseFloat(v); };
   try {

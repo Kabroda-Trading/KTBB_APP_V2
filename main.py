@@ -1310,39 +1310,29 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
 # write control flags, never import executor_bitunix_client.py, never
 # call executor_accounts.get_decrypted_credentials() directly.
 #
-# Stage 2 (2026-09-05) adds the tiny order mechanism test -- REAL MONEY,
-# routed through executor_mechanism_test.py (which DOES call
-# get_decrypted_credentials(), a deliberate, reviewed exception -- see
-# that module's own header). Gated behind BOTH a persistent
-# ExecutorGlobalConfig.live_orders_enabled flag (default OFF, admin-only
-# to enable) AND a per-call typed confirmation phrase on every individual
-# money-moving action -- never one or the other alone.
+# Stage 2 (2026-09-05) added the tiny order mechanism test (REAL MONEY,
+# routed through executor_mechanism_test.py) -- removed 2026-09-23 (V2
+# Crown retirement, Andy's ruling: retire alongside V2). The persistent
+# ExecutorGlobalConfig.live_orders_enabled flag + per-call confirmation
+# phrase pattern it introduced stays as shared infrastructure below.
 # ==============================================================================
 
 from database import (
     ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder,
     ExecutorAuditLog as _ExecutorAuditLog, ExecutorGlobalConfig as _ExecutorGlobalConfig,
-    ExecutorMechanismTest as _ExecutorMechanismTest, ExecutorSizingPolicy as _ExecutorSizingPolicy,
+    ExecutorSizingPolicy as _ExecutorSizingPolicy,
 )
 import executor_accounts as _executor_accounts
 import executor_control as _executor_control
-import executor_mechanism_test as _executor_mechanism_test
 import executor_plan_builder as _executor_plan_builder
 import executor_sizing as _executor_sizing
 
-# Stage 2 (2026-09-05) real-money confirm phrases -- one per action, so a
-# copy-pasted phrase from one action can never authorize a different one.
+# Stage 2 (2026-09-05) real-money confirm phrase -- kept for the shared
+# live-orders global gate below. The tiny-test-specific confirm phrases
+# (place/partial-close/move-sl/flash-close/resting-t1-limit/concurrent-
+# t1-t3-limits) were removed 2026-09-23 along with the routes that used
+# them -- see that removal comment further down.
 _CONFIRM_ENABLE_LIVE_ORDERS = "CONFIRM ENABLE LIVE ORDERS"
-_CONFIRM_TINY_TEST_PLACE = "CONFIRM PLACE TINY LIVE ORDER"
-_CONFIRM_TINY_TEST_PARTIAL_CLOSE = "CONFIRM PARTIAL CLOSE"
-_CONFIRM_TINY_TEST_MOVE_SL = "CONFIRM MOVE SL TO BREAKEVEN"
-_CONFIRM_TINY_TEST_FLASH_CLOSE = "CONFIRM FLASH CLOSE REMAINDER"
-# 2026-09-06, ladder-test completion build:
-_CONFIRM_TINY_TEST_PLACE_T1_LIMIT = "CONFIRM PLACE RESTING T1 LIMIT"
-_CONFIRM_TINY_TEST_CANCEL_T1_LIMIT = "CONFIRM CANCEL RESTING T1 LIMIT"
-
-_CONFIRM_TINY_TEST_PLACE_T1_T3_LIMITS = "CONFIRM PLACE CONCURRENT T1 T3 LIMITS"
-_CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS = "CONFIRM CANCEL CONCURRENT T1 T3 LIMITS"
 
 
 def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAccount"]) -> bool:
@@ -1441,32 +1431,10 @@ class ExecutorLiveOrdersEnableRequest(BaseModel):
     confirm: str
 
 
-class TinyTestPlaceRequest(BaseModel):
-    confirm: str
-    tp_pct: float = 0.01
-    sl_pct: float = 0.01
-
-
-class TinyTestPartialCloseRequest(BaseModel):
-    confirm: str
-    pct: float = 0.50
-
-
-class TinyTestConfirmOnlyRequest(BaseModel):
-    confirm: str
-
-
-class TinyTestPlaceT1LimitRequest(BaseModel):
-    confirm: str
-    t1_pct: float = 0.01
-    qty_pct: float = 0.50
-
-
-class TinyTestPlaceT1T3LimitsRequest(BaseModel):
-    confirm: str
-    t1_pct: float = 0.01
-    t3_pct: float = 0.02
-    qty_pct: float = 0.50
+# TinyTestPlaceRequest/TinyTestPartialCloseRequest/TinyTestConfirmOnlyRequest/
+# TinyTestPlaceT1LimitRequest/TinyTestPlaceT1T3LimitsRequest removed
+# 2026-09-23 along with the tiny-test routes that used them (V2 Crown
+# retirement, executor_mechanism_test.py retired alongside V2).
 
 
 def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, Any]:
@@ -2018,55 +1986,11 @@ async def api_executor_audit_log(request: Request, db: Session = Depends(get_db)
     } for r in rows]})
 
 
-def _serialize_mechanism_test(t: "_ExecutorMechanismTest") -> Dict[str, Any]:
-    # This IS an admin/owner-only, real-money-context page -- full raw
-    # response JSON is included on purpose, it's the single most useful
-    # debugging aid if something ever goes wrong here.
-    return {
-        "id": t.id, "account_id": t.account_id, "symbol": t.symbol, "direction": t.direction,
-        "status": t.status, "qty": t.qty, "min_trade_volume": t.min_trade_volume,
-        "exchange_order_id": t.exchange_order_id, "position_id": t.position_id, "fill_price": t.fill_price,
-        "initial_tp_price": t.initial_tp_price, "initial_sl_price": t.initial_sl_price,
-        "partial_close_pct": t.partial_close_pct, "partial_close_qty": t.partial_close_qty,
-        "breakeven_sl_price": t.breakeven_sl_price, "error_detail": t.error_detail,
-        "started_by": t.started_by, "created_at": t.created_at.isoformat() if t.created_at else None,
-        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-        "place_order_response_json": t.place_order_response_json, "tpsl_response_json": t.tpsl_response_json,
-        "partial_close_response_json": t.partial_close_response_json,
-        "sl_breakeven_response_json": t.sl_breakeven_response_json,
-        "flash_close_response_json": t.flash_close_response_json,
-        # 2026-09-05: these three were added to the DB (fill/position/
-        # TP-SL confirmation checks) but never wired into this
-        # serializer -- a real gap that hid the exact data needed to
-        # diagnose why a confirmation check failed.
-        "order_detail_response_json": t.order_detail_response_json,
-        "position_check_response_json": t.position_check_response_json,
-        "tpsl_check_response_json": t.tpsl_check_response_json,
-        # 2026-09-06, ladder-test completion build -- learned from the
-        # exact same real gap once before (new DB columns added but
-        # never wired into this serializer, hiding the diagnostic data
-        # needed to see why a confirmation check failed).
-        "position_id_after_partial_close": t.position_id_after_partial_close,
-        "qty_after_partial_close": t.qty_after_partial_close,
-        "partial_close_position_check_response_json": t.partial_close_position_check_response_json,
-        "t1_limit_target_price": t.t1_limit_target_price,
-        "t1_limit_qty": t.t1_limit_qty,
-        "t1_limit_exchange_order_id": t.t1_limit_exchange_order_id,
-        "t1_limit_place_response_json": t.t1_limit_place_response_json,
-        "t1_limit_check_response_json": t.t1_limit_check_response_json,
-        "t1_limit_cancel_response_json": t.t1_limit_cancel_response_json,
-        # 2026-09-07, Domain 2 pre-flight (concurrent T1+T3) -- same
-        # "wire it into the serializer the moment the column exists"
-        # discipline as the two notes above, learned from the same class
-        # of gap twice already.
-        "t3_limit_target_price": t.t3_limit_target_price,
-        "t3_limit_qty": t.t3_limit_qty,
-        "t3_limit_exchange_order_id": t.t3_limit_exchange_order_id,
-        "t3_limit_place_response_json": t.t3_limit_place_response_json,
-        "t3_limit_check_response_json": t.t3_limit_check_response_json,
-        "t3_limit_cancel_response_json": t.t3_limit_cancel_response_json,
-        "tpsl_check_after_leg_fill_response_json": t.tpsl_check_after_leg_fill_response_json,
-    }
+# _serialize_mechanism_test() removed 2026-09-23 (V2 Crown retirement,
+# Andy's ruling: retire executor_mechanism_test.py alongside V2 -- its
+# SPLIT/V2-flavored order shape, concurrent T1+T3 limits + BE-move, has no
+# Traveler/E1 analog and was never decision-path-coupled). See the tiny-
+# test route block's own removal comment further down for the full list.
 
 
 # ------------------------------------------------------------------ live orders global gate (Stage 2, 2026-09-05)
@@ -2111,207 +2035,18 @@ async def api_executor_disable_live_orders(request: Request, db: Session = Depen
     return JSONResponse({"ok": True})
 
 
-# ------------------------------------------------------------------ tiny order mechanism test (Stage 2, 2026-09-05)
-# REAL MONEY. Gated behind BOTH the persistent live_orders_enabled flag
-# AND a per-call confirm phrase, on top of the usual owner-or-admin +
-# is_account_tradeable() checks every other executor action already gets.
-
-async def _run_mechanism_action(db: Session, account: "_ExecutorAccount", actor: str, coro) -> JSONResponse:
-    """Shared error-handling shape for every tiny-test action route --
-    see this project's own plan notes on why the exception branch's
-    db.commit() is REQUIRED: get_db()'s finally-block only calls
-    db.close(), which discards uncommitted work. Without this explicit
-    commit, a real exchange-call failure would silently lose its own
-    FAILED status + audit row that the orchestration function already
-    flushed."""
-    try:
-        test_row = await coro
-        db.commit()
-        return JSONResponse({"ok": test_row.status != "FAILED", "test": _serialize_mechanism_test(test_row)})
-    except _executor_mechanism_test.MechanismTestBlocked as e:
-        _executor_accounts.write_audit(db, "TEST_MECHANISM_BLOCKED", str(e), account_id=account.id, actor=actor)
-        db.commit()
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=403)
-    except _executor_mechanism_test.MechanismTestInvalidState as e:
-        db.rollback()
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=409)
-    except Exception as e:
-        db.commit()
-        return JSONResponse({"ok": False, "error": f"mechanism test failed, check the exchange directly: {e}"}, status_code=502)
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/place")
-async def api_executor_tiny_test_place(account_id: int, request: Request, body: TinyTestPlaceRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
-    if account is None:
-        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
-    if not _executor_owner_or_admin(ctx, account):
-        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
-    if body.confirm != _CONFIRM_TINY_TEST_PLACE:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PLACE!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor,
-        _executor_mechanism_test.place_confirm_and_set_initial_tpsl(db, account, actor, tp_pct=body.tp_pct, sl_pct=body.sl_pct))
-
-
-def _load_owned_test_row(db, ctx, account_id, test_id):
-    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
-    if account is None:
-        return None, None, JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
-    if not _executor_owner_or_admin(ctx, account):
-        return None, None, JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
-    test_row = db.query(_ExecutorMechanismTest).filter_by(id=test_id, account_id=account_id).first()
-    if test_row is None:
-        return None, None, JSONResponse({"ok": False, "error": "No such mechanism test."}, status_code=404)
-    return account, test_row, None
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/partial-close")
-async def api_executor_tiny_test_partial_close(account_id: int, test_id: int, request: Request, body: TinyTestPartialCloseRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_PARTIAL_CLOSE:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PARTIAL_CLOSE!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.partial_close(db, account, test_row, actor, pct=body.pct))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/move-sl-breakeven")
-async def api_executor_tiny_test_move_sl_breakeven(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_MOVE_SL:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_MOVE_SL!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.move_sl_to_breakeven(db, account, test_row, actor))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/flash-close")
-async def api_executor_tiny_test_flash_close(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_FLASH_CLOSE:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_FLASH_CLOSE!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.flash_close_remainder(db, account, test_row, actor))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-resting-t1-limit")
-async def api_executor_tiny_test_place_resting_t1_limit(account_id: int, test_id: int, request: Request, body: TinyTestPlaceT1LimitRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_PLACE_T1_LIMIT:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PLACE_T1_LIMIT!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor,
-        _executor_mechanism_test.place_resting_t1_limit(db, account, test_row, actor, t1_pct=body.t1_pct, qty_pct=body.qty_pct))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/check-resting-t1-limit-status")
-async def api_executor_tiny_test_check_resting_t1_limit_status(account_id: int, test_id: int, request: Request, db: Session = Depends(get_db)):
-    # No confirm phrase -- read-only exchange call (one get_order_detail
-    # check), same reasoning as VERIFY AUTH needing none.
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.check_resting_t1_limit_status(db, account, test_row, actor))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/cancel-resting-t1-limit")
-async def api_executor_tiny_test_cancel_resting_t1_limit(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_CANCEL_T1_LIMIT:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_CANCEL_T1_LIMIT!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.cancel_resting_t1_limit(db, account, test_row, actor))
-
-
-# 2026-09-07 -- Domain 2 required live pre-flight (executor_live_engine.py's
-# approved plan): places a stop + resting T1 + resting T3 CONCURRENTLY,
-# the exact combination that engine needs and which has never been
-# tested live before. Andy must run this and confirm it passes before
-# executor_live_engine.py is trusted with a real TradePlan fill.
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/place-concurrent-t1-t3-limits")
-async def api_executor_tiny_test_place_concurrent_t1_t3_limits(account_id: int, test_id: int, request: Request, body: TinyTestPlaceT1T3LimitsRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_PLACE_T1_T3_LIMITS:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_PLACE_T1_T3_LIMITS!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor,
-        _executor_mechanism_test.place_concurrent_t1_t3_limits(
-            db, account, test_row, actor, t1_pct=body.t1_pct, t3_pct=body.t3_pct, qty_pct=body.qty_pct))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/check-concurrent-limits-status")
-async def api_executor_tiny_test_check_concurrent_limits_status(account_id: int, test_id: int, request: Request, db: Session = Depends(get_db)):
-    # No confirm phrase -- read-only exchange calls only (get_order_detail
-    # x2 + get_pending_tp_sl_order), same reasoning as the T1-only check.
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.check_concurrent_limits_status(db, account, test_row, actor))
-
-
-@app.post("/api/executor/accounts/{account_id}/tiny-test/{test_id}/cancel-concurrent-limits")
-async def api_executor_tiny_test_cancel_concurrent_limits(account_id: int, test_id: int, request: Request, body: TinyTestConfirmOnlyRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    if body.confirm != _CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS:
-        return JSONResponse({"ok": False, "error": f"confirm phrase must be exactly {_CONFIRM_TINY_TEST_CANCEL_T1_T3_LIMITS!r}"}, status_code=400)
-    actor = ctx.get("email") or "unknown"
-    return await _run_mechanism_action(
-        db, account, actor, _executor_mechanism_test.cancel_concurrent_limits(db, account, test_row, actor))
-
-
-@app.get("/api/executor/accounts/{account_id}/tiny-test")
-async def api_executor_tiny_test_list(account_id: int, request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
-    if account is None:
-        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
-    if not _executor_owner_or_admin(ctx, account):
-        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
-    rows = db.query(_ExecutorMechanismTest).filter_by(account_id=account_id).order_by(_ExecutorMechanismTest.id.desc()).all()
-    return JSONResponse({"ok": True, "tests": [_serialize_mechanism_test(t) for t in rows]})
-
-
-@app.get("/api/executor/accounts/{account_id}/tiny-test/{test_id}")
-async def api_executor_tiny_test_detail(account_id: int, test_id: int, request: Request, db: Session = Depends(get_db)):
-    ctx = get_user_context(request, db)
-    account, test_row, err = _load_owned_test_row(db, ctx, account_id, test_id)
-    if err is not None:
-        return err
-    return JSONResponse({"ok": True, "test": _serialize_mechanism_test(test_row)})
+# executor_mechanism_test.py and its 10 tiny-test routes (place,
+# partial-close, move-sl-breakeven, flash-close, place/check/cancel-
+# resting-t1-limit, place/check/cancel-concurrent-t1-t3-limits, list,
+# detail) removed 2026-09-23 (V2 Crown retirement, Andy's explicit
+# ruling: retire alongside V2) -- a standalone, real-money manual
+# diagnostic never wired into either automated engine, with SPLIT/V2-
+# flavored order-shape logic (concurrent T1+T3 limits, breakeven move)
+# that has no Traveler/MGMT_E1_STACK analog. `ExecutorMechanismTest` rows
+# already written stay in the DB per the "leave the table" convention --
+# only the code that could create new ones is gone. The shared live-
+# orders global gate below (persistent flag + confirm phrase) is
+# untouched -- it's not tiny-test-specific infrastructure.
 
 
 @app.get("/admin/executor")

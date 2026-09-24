@@ -6842,3 +6842,63 @@ expected and correct, not a bug) and confirmed `/api/v1/system/state`
 `executor_mechanism_test.py` (Andy's ruling 3).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: executor_mechanism_test.py retired entirely -- roadmap step 3, sub-step 3c of 3f
+STATUS: resolved.
+
+Per Andy's explicit ruling: retire alongside V2 (not kept, not given an
+E1-shaped counterpart). This was a standalone real-money manual
+diagnostic (never wired into either automated engine) with SPLIT/V2-
+flavored order-shape logic -- concurrent T1+T3 resting limits, breakeven
+SL move -- that has no Traveler/MGMT_E1_STACK analog.
+
+**Removed**: `executor_mechanism_test.py` outright. All 10 `/api/executor/
+accounts/{id}/tiny-test/*` routes in `main.py` (place, partial-close,
+move-sl-breakeven, flash-close, place/check/cancel-resting-t1-limit,
+place/check/cancel-concurrent-t1-t3-limits, list, detail) +
+`_run_mechanism_action()`/`_load_owned_test_row()`/
+`_serialize_mechanism_test()` + 5 `TinyTestRequest` Pydantic models + 8
+tiny-test-specific confirm-phrase constants. The shared live-orders
+global gate (`/api/executor/live-orders/enable|disable`,
+`/api/executor/global-config`) is untouched -- confirmed it's genuinely
+separate infrastructure, not tiny-test-specific, before leaving it alone.
+`templates/executor_admin.html`'s "One-Time Verification Tools" panel +
+~230 lines of its JS (load/render/action handlers for all 10 actions).
+`ExecutorMechanismTest`'s table/model stay per CLAUDE.md's own "leave the
+table" convention -- only the code that could write new rows is gone.
+
+**A real, non-obvious follow-on catch**: `tests/executor_admin_js_
+harness.js` doesn't mock the template's JS -- it EXECUTES the actual
+`templates/executor_admin.html` `<script>` block via Node's `vm` module,
+so once the tiny-test functions were deleted from the template, the
+harness's own SCENARIOS array (which called them by name) would have
+started throwing on every run. Fixed in the same pass: removed the
+SCENARIOS array + its execution loop and the now-dead `findOnclickAttr()`
+helper (its only caller), removed the matching 8 scenario-specific tests
+from `tests/test_executor_admin_js.py`, and re-ran the harness directly
+(`node tests/executor_admin_js_harness.js`) to confirm every surviving
+scenario (Go Live mode switch, `_parseServerTimestamp`, the 5 Sizing
+Wizard option cards, `createAccount()`) still reports `ok: true` end to
+end, not just that the file parses.
+
+**Test removal, verified precisely after catching myself undercounting**:
+initially wrote a comment claiming `test_executor_admin_routes.py` lost
+"7 tests" -- `git diff` showed the real number is 12 (the resting-T1-limit
+and full-ladder-via-routes tests weren't all named `test_tiny_test_*`, so
+a mental count from memory missed them). Corrected before committing.
+Full removal count: 47 (`test_executor_mechanism_test.py`, whole file) +
+12 (`test_executor_admin_routes.py`) + 8 (`test_executor_admin_js.py`) =
+67, matching the measured 793 -> 726 exactly.
+
+**Verification**: `node --check` + an actual harness execution for both
+JS files touched (not just syntax-checked); full suite 726 passed; clean
+boot; a real `TestClient` session confirming `/admin/executor` still
+renders with the panel gone, every removed tiny-test route now 404s, and
+the surviving `/api/executor/global-config` still returns 200.
+
+**Roadmap status**: 3c of 3f done. Next: 3d, the Senior Analyst dedup
+fix (a real new completion-marker column, not the naive `SessionLock`-
+existence swap the original retirement map suggested -- see the earlier
+research-pass entries above for why that's wrong).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
