@@ -29,10 +29,12 @@ import traveler_radar
 import gravity_engine
 import gravity_math
 import kabroda_mas_flow
-import ledger_closing_engine
-import trade_plan_engine
+# ledger_closing_engine/trade_plan_engine/dry_run_split_engine module-level
+# imports removed 2026-09-24 (V2 Crown retirement, Step 3e) -- main.py's
+# only use of each was creating their lifespan() background task, which
+# is gone now (see lifespan()'s own removal comment below). The modules
+# themselves are untouched, kept for tests until Step 3f's file deletion.
 import traveler_plan_engine
-import dry_run_split_engine
 import executor_live_e1_engine
 # mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
 # actually called in this file; the "mtf_confluence_scanner" string at the
@@ -559,13 +561,18 @@ async def lifespan(app: FastAPI):
         # if actually used before the key is configured.
         print(f">>> WARNING: executor credential encryption is not configured -- {e}")
     app.state.gravity_task          = asyncio.create_task(gravity_engine.run_gravity_ingestion_loop())
-    app.state.ledger_task           = asyncio.create_task(ledger_closing_engine.run_ledger_audit_loop())
-    app.state.trade_plan_task       = asyncio.create_task(trade_plan_engine.run_trade_plan_loop())
+    # ledger_task/trade_plan_task/dry_run_split_task/executor_live_task
+    # (ledger_closing_engine/trade_plan_engine/dry_run_split_engine/
+    # executor_live_engine's own loops) removed from boot 2026-09-24 (V2
+    # Crown retirement, Step 3e) -- Phase A already confirmed no
+    # ExecutorAccount is left on GATE_V2/MGMT_SPLIT, so none of these
+    # loops has any live account left to act on. The underlying modules/
+    # functions are NOT deleted yet (Step 3f) -- tests still call them
+    # directly (e.g. tests/test_dry_run_split_engine.py calls
+    # executor_engine.process_fill() directly), so only the boot-time
+    # task creation stops here, not the code itself.
     app.state.traveler_plan_task    = asyncio.create_task(traveler_plan_engine.run_traveler_plan_loop())
-    app.state.dry_run_split_task    = asyncio.create_task(dry_run_split_engine.run_dry_run_split_loop())
     app.state.executor_live_e1_task = asyncio.create_task(executor_live_e1_engine.run_executor_live_e1_loop())
-    import executor_live_engine
-    app.state.executor_live_task    = asyncio.create_task(executor_live_engine.run_executor_position_loop())
     app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
@@ -588,9 +595,8 @@ async def lifespan(app: FastAPI):
     yield
     print(">>> SHUTTING DOWN KABRODA SYSTEM...")
     app.state.gravity_task.cancel()
-    app.state.ledger_task.cancel()
-    app.state.trade_plan_task.cancel()
-    app.state.executor_live_task.cancel()
+    app.state.traveler_plan_task.cancel()
+    app.state.executor_live_e1_task.cancel()
     app.state.senior_analyst_task.cancel()
     app.state.weekly_task.cancel()
     app.state.outcome_tracker_task.cancel()
@@ -3007,9 +3013,11 @@ async def get_system_state(request: Request, db: Session = Depends(get_db)):
         # 2. active_runners: active runners list
         # "analysis_loop" removed 2026-09-23 (V2 Crown retirement, Audit-AI
         # surface retirement -- its scheduler is gone). "ledger_closing_
-        # engine" stays here until that background task itself is removed
-        # later in the same retirement pass (a separate sub-step).
-        active_runners = ["gravity_engine", "ledger_closing_engine", "session_monitor"]
+        # engine" removed 2026-09-24 (same retirement, Step 3e) -- its
+        # background task (app.state.ledger_task) no longer starts at
+        # boot; the module itself is untouched, kept for tests until
+        # Step 3f's file deletion pass.
+        active_runners = ["gravity_engine", "session_monitor"]
 
         # 3. macro_engine: real freshness check, not a frozen LLM narrative.
         # This used to read MacroNarrativeLog.wave_status with active always

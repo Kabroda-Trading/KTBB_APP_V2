@@ -6948,3 +6948,79 @@ shared files (`kabroda_mas_flow.py`'s V2 block, `executor_engine.py`,
 `templates/executor_admin.html`, `main.py`'s `lifespan()`).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-24 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: shared-file surgical edits, with a real scope correction -- roadmap step 3, sub-step 3e of 3f
+STATUS: resolved.
+
+**Shipped in `kabroda_mas_flow.py::run_mas_analysis()`**, as originally
+scoped: kept the shared candle/levels prep and `_inject_traveler_plan_
+to_database()` (plus 3d's completion-marker write); deleted the V2
+decision block, both forward-audit writer blocks (`harness/audit_
+writer.py`/`harness/unified_audit_writer.py` call sites -- Traveler's own
+forward-test audit is 3a's `GET /api/export/traveler-log.csv`, no
+Traveler-shaped replacement needed), the `ExecutiveBrief` class, three of
+the four V2 `_inject_*` helpers, and the zero-caller `_mark_mas_error()`.
+Fixed the now-invalid `return {"brief": brief.dict()}` (confirmed via
+grep neither real caller reads the return value).
+`_compute_session_expires_at()`/`_NY_TZ`/`_SESSION_CLOSE_ET` left in
+place with a DEFERRED-DEAD comment -- confirmed still imported at MODULE
+LEVEL by `trade_plan_engine.py`, which isn't gone until 3f.
+
+**Real finding that reshaped this sub-step's own scope**: the rest of
+the originally-planned 3e edits (`executor_engine.py`,
+`executor_plan_builder.py`, `executor_accounts.py`'s `GATE_V2`
+default/trim, `templates/executor_admin.html`) all turned out to be
+premature once checked directly against source, not the retirement
+map's word:
+- `executor_engine.py`'s `_process_account()`/`process_fill()` are
+  called DIRECTLY by `tests/test_dry_run_split_engine.py:100`
+  (`asyncio.run(executor_engine.process_fill(db, plan))`) -- a real,
+  currently-passing test, not just an import-time hazard.
+- `executor_plan_builder.py`'s `build_hypothetical_order()` is still
+  called by `executor_engine.py:69`'s `_process_account()` (staying, per
+  above) AND directly by 20+ tests in `tests/test_executor_plan_
+  builder.py` plus 2 more test files.
+- `executor_accounts.py`'s `DEFAULT_GATE_PROFILE="GATE_V2"` is still read
+  by the (staying) `executor_engine.py:61`, and `tests/
+  test_executor_accounts.py:902` asserts today's real default behavior.
+  Changing it now is a live behavior change tangled up with a deletion
+  that hasn't happened yet.
+- `templates/executor_admin.html`'s dropdown/warn-badge rewiring is
+  downstream of those same backend constants.
+
+All four moved into 3f, bundled with the file deletions they actually
+depend on -- a plan correction, not a shortcut; each still gets done,
+just in the sub-step where it's actually safe. Local plan file
+(`ticklish-brewing-sunbeam.md`) updated to match.
+
+**What WAS safe and done now** (confirmed by grep, zero other callers):
+`main.py`'s `lifespan()` -- removed `ledger_task`/`trade_plan_task`/
+`dry_run_split_task`/`executor_live_task` creation (target loop modules
+untouched, just no longer started at boot -- Phase A already confirmed
+no live account needs them running). Added the missing `.cancel()` calls
+for `traveler_plan_task`/`executor_live_e1_task` (real pre-existing bug
+-- never cancelled at shutdown before this). **Correction to this
+session's own earlier plan text**: it claimed `dry_run_split_task`
+needed both removal AND a new `.cancel()` call -- self-contradictory.
+Verified from `dry_run_split_engine.py`'s own header comment ("Scope:
+v1/v2 (GATE_V2/MGMT_SPLIT) orders ONLY... GATE_TRAVELER's own DRY_RUN
+walk... is traveler_plan_engine.py's job, not this file's") that it's
+100% V2-only -- removed its task creation, did not add a cancel for it.
+Also removed the now-fully-dead `import ledger_closing_engine`/
+`trade_plan_engine`/`dry_run_split_engine` module-level imports from
+`main.py`, and removed the stale `"ledger_closing_engine"` entry from
+the `active_runners` list (3b's own comment had already flagged it as
+temporary pending this exact removal).
+
+**Verification**: full suite 731 passed (unchanged from 3d -- this
+sub-step edited shared code paths, not test-counted surface); clean
+`python -c "import main"`; a real `TestClient(main.app)` context-manager
+boot (exercises the actual `lifespan()` startup/shutdown, not just
+import) confirming `/suite/radar` still renders (200) and shutdown
+completes with no `AttributeError` on the changed `.cancel()` calls.
+
+**Roadmap status**: 3e of 3f done (with the scope correction above).
+Next: 3f -- the main deletion pass, now also carrying the four deferred
+executor-stack edits.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
