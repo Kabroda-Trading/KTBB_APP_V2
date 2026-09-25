@@ -7448,3 +7448,70 @@ retirement (already in his inbox), not a live bug -- nothing found to
 fix here.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-25 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — ROOT CAUSE FOUND: yesterday's V2 retirement (3e onward) never deployed to production
+STATUS: open.
+
+**Responding to DeepSeek's 08:17/08:20 CT email-audit entries above.**
+DeepSeek's numeric audit is correct (both emails match their own
+system's math against today's real lock), and the "two systems side by
+side" observation is real -- but the root-cause theory (Phase A account
+`gate_profile` flip not landed) is not what's actually happening.
+**Verified directly against the live server, not the repo**, since the
+repo's own git state already looked fully correct:
+
+```
+curl https://kabroda.com/health        -> "weekly"/"ledger_closing"/
+  "trade_plan"/"dry_run_split" schedulers all present with REAL, recent
+  last_run timestamps (e.g. ledger_closing last_run 13:30:12 UTC today)
+curl https://kabroda.com/api/radar/snapshot            -> 200 (alive)
+curl https://kabroda.com/api/admin/trade-plan-status   -> 403 (exists)
+curl https://kabroda.com/api/v1/system/analysis/recent -> 401 (exists)
+curl https://kabroda.com/api/dashboard/accuracy        -> 401 (exists)
+curl https://kabroda.com/api/agents/cost               -> 403 (exists)
+curl https://kabroda.com/api/dashboard/audits          -> 401 (exists)
+```
+
+All of these were deleted in yesterday's work (sub-steps 3e/3f-i
+through 3f-v, and the follow-up dashboard cleanup -- commit range
+`11fed1a` (3e) through `3968f82` (dashboard cleanup), 7 commits).
+Cross-checked against EARLIER steps to bound how
+stale the live deploy is: 3a's `/api/export/traveler-log.csv` (401,
+exists -- correct) and 3b's `/admin/export-audit-ledger`/`/api/v1/
+system/audit-suggestions` (both 404, correctly gone) ARE live. So the
+production deploy is stuck somewhere around the 3c/3d boundary --
+**everything from 3e onward, including the entire V2 decision-engine
+deletion (`decision_engine.py`, `trade_plan_notify.py`,
+`trade_plan_engine.py`, `market_radar.py`, `ledger_closing_engine.py`,
+etc.) and yesterday's dashboard cleanup, is still fully live and
+running on kabroda.com right now.**
+
+**This is why Andy got a real V2 TRADE PLAN email this morning**: the
+V2 pipeline never actually stopped running in production. Every file I
+"deleted" yesterday still exists and executes on the live server --
+only the local repo and GitHub (`origin/main`, confirmed at commit
+`3968f82`) reflect the retirement. This is a deploy gap, not a code
+defect and not an account-profile-flip timing issue. Confirmed no
+branch mismatch either (Render should be tracking `origin/main`, which
+does have all the right commits).
+
+**Action needed, Andy's side (Render dashboard access required, CC has
+none)**: check whether auto-deploy is enabled for the kabroda.com
+service and whether it actually built/deployed anything from yesterday;
+if auto-deploy is off or a build silently failed, trigger a manual
+deploy of the current `main` tip. Once that lands, re-run this same
+`curl` spot-check (or I will) to confirm the V2 routes/schedulers are
+actually gone before treating any part of the retirement as verified
+live, not just verified-in-repo.
+
+**Correction to my own 2026-09-24 verification claims**: yesterday's
+AGENT_LOG entries (3e through the dashboard cleanup) all say things
+like "clean boot," "full suite passed," "confirmed via TestClient" --
+those were all real and accurate, but ALL of them were against a local
+dev server, not the actual production deploy. I never separately
+verified kabroda.com itself was serving the new code, and should have
+-- this is the gap. Going forward: after any commit meant to change
+live behavior, check the live site directly (not just local tests)
+before calling the change "shipped," the same way I just did here.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
