@@ -155,6 +155,10 @@
         <div class="card-body" id="accountsBody">
             <p class="empty">Loading...</p>
         </div>
+        <div id="inactiveAccountsToggleWrap" style="display:none; padding:0 20px 16px;">
+            <button id="inactiveAccountsToggle" class="btn" onclick="toggleInactiveAccounts()" style="font-size:11px;">SHOW 0 DEACTIVATED ACCOUNT(S)</button>
+            <div id="inactiveAccountsBody" style="display:none; margin-top:12px;"></div>
+        </div>
     </div>
 
     <div class="card">
@@ -247,10 +251,42 @@ async function loadAccounts() {
     const body = document.getElementById("accountsBody");
     const count = document.getElementById("accountCount");
     if (!data.ok) { body.innerHTML = `<p class="empty">${escapeHtml(data.error || "failed to load")}</p>`; return; }
-    count.textContent = data.accounts.length + " ACCOUNT(S)";
-    if (!data.accounts.length) { body.innerHTML = '<p class="empty">No accounts yet.</p>'; return; }
 
-    body.innerHTML = data.accounts.map(a => `
+    // 2026-09-26, Andy's own request: deactivated accounts (is_active=false,
+    // set via the DEACTIVATE button below) move out of the main list into a
+    // collapsed section instead of cluttering the default view -- reversible
+    // (REACTIVATE), not a real delete (see executor_accounts.deactivate_
+    // account()'s own docstring for why a soft-delete, not a hard one).
+    const activeAccounts = data.accounts.filter(a => a.is_active);
+    const inactiveAccounts = data.accounts.filter(a => !a.is_active);
+
+    count.textContent = activeAccounts.length + " ACCOUNT(S)";
+    const toggleWrap = document.getElementById("inactiveAccountsToggleWrap");
+    const inactiveBody = document.getElementById("inactiveAccountsBody");
+    if (inactiveAccounts.length) {
+        toggleWrap.style.display = "block";
+        const stillShowing = inactiveBody.style.display !== "none";
+        document.getElementById("inactiveAccountsToggle").innerText =
+            (stillShowing ? "HIDE " : "SHOW ") + inactiveAccounts.length + " DEACTIVATED ACCOUNT(S)";
+        inactiveBody.innerHTML = inactiveAccounts.map(a => `
+            <div style="border:1px solid #1e293b; border-radius:6px; padding:12px 14px; margin-bottom:8px; opacity:0.6;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong style="font-family:'JetBrains Mono'; font-size:13px;">${escapeHtml(a.label)}</strong>
+                        <span class="badge badge-neutral" style="margin-left:8px;">${escapeHtml(a.exchange)}</span>
+                        <span class="badge badge-neutral" style="margin-left:4px;">DEACTIVATED</span>
+                    </div>
+                    <button class="btn btn-ok" onclick="reactivateAccount(${a.id})">REACTIVATE</button>
+                </div>
+            </div>
+        `).join("");
+    } else {
+        toggleWrap.style.display = "none";
+    }
+
+    if (!activeAccounts.length) { body.innerHTML = '<p class="empty">No active accounts.</p>'; return; }
+
+    body.innerHTML = activeAccounts.map(a => `
         <div style="border:1px solid #1e293b; border-radius:6px; padding:14px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
@@ -268,6 +304,7 @@ async function loadAccounts() {
                     ${a.kill_switch_engaged
                         ? `<button class="btn btn-ok" onclick="releaseKillSwitch(${a.id})">RELEASE KILL SWITCH</button>`
                         : `<button class="btn btn-danger" onclick="engageKillSwitch(${a.id})">ENGAGE KILL SWITCH</button>`}
+                    <button class="btn" data-label="${escapeHtml(a.label)}" onclick="deactivateAccount(${a.id}, this.dataset.label)" title="Reversible -- moves this account out of your main list without deleting its history" style="margin-left:4px;">DEACTIVATE</button>
                 </div>
             </div>
             <div style="font-size:11px; color:#64748b; margin-top:8px; font-family:'JetBrains Mono';">
@@ -476,8 +513,10 @@ async function loadAccounts() {
         </div>
     `).join("");
 
-    // populate risk-state fields per account
-    for (const a of data.accounts) {
+    // populate risk-state fields per account (activeAccounts only -- the
+    // simpler inactiveAccounts summary cards above have none of these
+    // per-account DOM elements at all)
+    for (const a of activeAccounts) {
         const rs = await api(`/api/executor/accounts/${a.id}/risk-state`);
         if (rs.ok) {
             document.getElementById(`riskLast-${a.id}`).value = rs.risk_state.risk_last_usd ?? "";
@@ -949,6 +988,22 @@ async function engageKillSwitch(id) {
 async function releaseKillSwitch(id) {
     await api(`/api/executor/accounts/${id}/kill-switch/release`, { method: "POST" });
     loadAccounts();
+}
+async function deactivateAccount(id, label) {
+    if (!confirm(`Deactivate "${label}"? It becomes permanently untradeable and moves out of your main list. This is reversible -- you can reactivate it later.`)) return;
+    await api(`/api/executor/accounts/${id}/deactivate`, { method: "POST" });
+    loadAccounts();
+}
+async function reactivateAccount(id) {
+    await api(`/api/executor/accounts/${id}/reactivate`, { method: "POST" });
+    loadAccounts();
+}
+function toggleInactiveAccounts() {
+    const body = document.getElementById("inactiveAccountsBody");
+    const btn  = document.getElementById("inactiveAccountsToggle");
+    const showing = body.style.display !== "none";
+    body.style.display = showing ? "none" : "block";
+    btn.innerText = btn.innerText.replace(showing ? "HIDE" : "SHOW", showing ? "SHOW" : "HIDE");
 }
 async function createAccount() {
     // 2026-09-07: the user picker only exists for admins, and even then

@@ -1507,6 +1507,38 @@ async def api_executor_release_kill_switch(account_id: int, request: Request, db
     return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 
 
+@app.post("/api/executor/accounts/{account_id}/deactivate")
+async def api_executor_deactivate_account(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """2026-09-26, Andy's own request: a way to remove an account he set
+    up and no longer wants from his view without destroying its history.
+    Soft-delete -- is_account_tradeable() (executor_accounts.py) already
+    checks is_active before even the kill switch, so this alone makes the
+    account permanently untradeable. Reversible via the paired /reactivate
+    route below; the row and any linked ExecutorOrder history stay intact."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    _executor_accounts.deactivate_account(db, account, by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
+
+
+@app.post("/api/executor/accounts/{account_id}/reactivate")
+async def api_executor_reactivate_account(account_id: int, request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    _executor_accounts.reactivate_account(db, account, by=ctx.get("email") or "unknown")
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
+
+
 @app.post("/api/executor/global-kill-switch")
 async def api_executor_engage_global_kill_switch(request: Request, body: ExecutorKillSwitchRequest, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)

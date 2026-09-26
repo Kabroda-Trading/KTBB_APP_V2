@@ -242,6 +242,44 @@ def test_owner_can_engage_their_own_kill_switch(env):
     assert resp.json()["account"]["kill_switch_engaged"] is True
 
 
+def test_non_owner_non_admin_gets_403_on_deactivate(env):
+    client = _login("exec_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/deactivate")
+    assert resp.status_code == 403
+
+
+def test_owner_can_deactivate_and_reactivate_their_own_account(env):
+    # 2026-09-26, Andy's own request -- a reversible way to remove an
+    # account he set up and no longer wants from his view. is_active is
+    # already load-bearing (executor_accounts.is_account_tradeable() checks
+    # it before even the kill switch), so this proves the route wires up
+    # correctly, not that is_active itself works (already covered by
+    # tests/test_executor_accounts.py).
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/deactivate")
+    assert resp.status_code == 200
+    assert resp.json()["account"]["is_active"] is False
+
+    db = SessionLocal()
+    try:
+        account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+        tradeable, reason = ea.is_account_tradeable(db, account)
+        assert tradeable is False
+        assert "inactive" in reason
+    finally:
+        db.close()
+
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/reactivate")
+    assert resp.status_code == 200
+    assert resp.json()["account"]["is_active"] is True
+
+
+def test_deactivate_404s_on_a_nonexistent_account(env):
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.post("/api/executor/accounts/999999/deactivate")
+    assert resp.status_code == 404
+
+
 def test_any_logged_in_user_can_self_service_create_their_own_account(env):
     # 2026-09-07, Andy's explicit ask -- "Gross Monkey" should be able to
     # walk in and link up his own exchange account the same way Andy did,

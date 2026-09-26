@@ -314,6 +314,22 @@ def release_kill_switch(db: Session, account: ExecutorAccount, by: str) -> None:
     write_audit(db, "KILL_SWITCH_RELEASED", f"account {account.id} kill switch released", account_id=account.id, actor=by)
 
 
+def deactivate_account(db: Session, account: ExecutorAccount, by: str) -> None:
+    """Soft-delete: is_account_tradeable() already checks is_active before
+    even the kill switch (see that function above), so this alone makes
+    the account permanently untradeable -- reversible, keeps the row and
+    any order history intact, unlike a real DELETE. 2026-09-26, Andy's own
+    request for a way to remove an account he set up and no longer wants
+    from his view without destroying its history."""
+    account.is_active = False
+    write_audit(db, "ACCOUNT_DEACTIVATED", f"account {account.id} deactivated", account_id=account.id, actor=by)
+
+
+def reactivate_account(db: Session, account: ExecutorAccount, by: str) -> None:
+    account.is_active = True
+    write_audit(db, "ACCOUNT_REACTIVATED", f"account {account.id} reactivated", account_id=account.id, actor=by)
+
+
 def get_or_init_risk_state(db: Session, account: ExecutorAccount) -> ExecutorRiskState:
     state = db.query(ExecutorRiskState).filter_by(account_id=account.id).first()
     if state is None:
