@@ -7708,3 +7708,66 @@ demonstration of the per-account LIVE/DRY_RUN toggle + global-switch
 independence -- both explicitly deprioritized by Andy, not forgotten.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-26 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: Traveler email wording rewrite (site commit `7eea842`)
+STATUS: resolved.
+
+Andy pasted a real production email from today's tercile-skip on Plan #10
+("TRAVELER (evaluation lineage, DRY_RUN only)... tercile-skipped (RSI-4h-
+at-cross 49.77)... Plan ID: 10") and flagged it as stale/misleading: he's
+now genuinely LIVE (see the entry above), so "DRY_RUN only" is a false
+claim, and the internal jargon ("TRAVELER", "tercile-skipped", "RSI-4h-at-
+cross", "Plan ID") isn't something he wants to have to translate every time
+an email lands -- his own framing: "when I get that notification I should
+be able to read it and know without having to go look at a chart... it's
+clear."
+
+Andy also explicitly flagged caution here, citing a past change in this
+exact area (removing V2 from email notifications) that broke the whole
+system -- he didn't have specifics in front of him, so I didn't guess at
+what happened; if that incident's specifics ever surface, worth cross-
+referencing before touching this file again. Given that, scoped this as
+narrowly as possible and showed Andy concrete before/after example text
+(using today's real Plan #10 numbers) for explicit approval BEFORE writing
+any code, rather than shipping a guess.
+
+**What actually changed, and what didn't**: only `traveler_plan_notify.py`'s
+own text. Every function in that module is a pure string-builder (dict in,
+(subject, body) tuple out, no DB/network -- its own docstring already said
+so). `gate_traveler.py`'s decision logic, the TravelerPlan state machine,
+and when/whether an email fires are all completely untouched -- this
+was never at risk of repeating whatever the past incident actually broke,
+since that would have needed touching state-machine/gate code, not just
+string literals in the notify module.
+
+**The real underlying fact this surfaced**: the "DRY_RUN only" claim on
+LOCK/ARMED/DONE was never really correct even before today -- those three
+events are PLAN-level (one TravelerPlan can have both a DRY_RUN eval order
+and real LIVE orders linked to it), not per-account. It only read true
+because no LIVE GATE_TRAVELER account existed yet when the module was
+built (2026-09-15). The one place a real-vs-simulated claim IS true and
+worth keeping is CLOSED, which is genuinely per-order -- kept, reworded
+plainly ("Real order -- live money." / "Simulated close -- no real order
+was placed.").
+
+New body text (all four builders), verified against today's real Plan #10
+data and approved by Andy before shipping:
+- LOCK: "Session levels locked for BTCUSDT... Watching for a confirmed
+  close beyond either level. No trade yet."
+- ARMED: "BTCUSDT LONG opened at 84,315.80... Stop: ... Target: ..."
+- DONE (tercile skip): "LONG cross confirmed at 84,315.80 -- outside
+  system guidelines, no trade taken." (Andy's own suggested phrasing)
+- DONE (other no-trade causes -- opposite trigger broke / journey cap
+  expired): generic honest headline ("No trade taken this session.") with
+  the real technical reason kept as a secondary detail line, not the
+  headline -- avoided fragile string-matching on gate_traveler.py's own
+  internal reason text (never meant to be parsed) by deriving the tercile-
+  skip case from the plan's own structured fields instead.
+- CLOSED: unchanged mechanics, reworded lineage line only.
+
+Tests updated in the same commit (this file's own dedicated test file plus
+two others asserting the old exact subject/body text). Full suite 513
+passed. Not yet deployed -- needs the same Render redeploy step as
+everything else today before it's live.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
