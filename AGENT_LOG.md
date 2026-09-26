@@ -7646,3 +7646,65 @@ switch independence live in the admin UI (verified correct from source
 this session, not yet demonstrated live).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-26 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — INCIDENT CLOSED: redeploy verified, dead Analyst Brief panel removed, account deactivate/reactivate shipped
+STATUS: resolved.
+
+Three more commits shipped and deployed today, closing out the incident
+above end to end:
+
+1. **`faa0dfd`** — removed the "00. ANALYST BRIEF" panel from the Market
+   Radar cockpit entirely (HTML/CSS/~250 lines of JS, including a large
+   V2-era `renderTactical()` text parser). Andy spotted it live, stuck
+   permanently on "Today's brief is being prepared. Check back after
+   9:00 AM ET." -- both its data sources (`narrative_text`, `tactical_text`)
+   are now permanently null (this session's earlier `api_narrative_latest()`
+   fix), so that message could never become true again. Removed rather
+   than reworded, matching this retirement's own established pattern.
+   COPY TRIGGERS and the rest of the cockpit are unaffected -- separate
+   data path (`/api/radar/traveler-snapshot`).
+2. **`ac42339`** — added a reversible deactivate/reactivate action for
+   executor accounts (Andy's request: he wanted to remove the retired
+   `Gate_V2` eval account from his view; there was no delete/deactivate
+   feature at all before this). Soft-delete via the existing `is_active`
+   flag (already load-bearing in `is_account_tradeable()`), not a real
+   DELETE -- reversible, keeps order history intact. New routes, 3 new
+   tests, ownership-check mutation-tested, verified live end to end
+   (create -> deactivate -> reactivate).
+3. Andy confirmed live, independently of this session: he deactivated the
+   `Gate_V2` eval account himself via the new button and it worked; talked
+   to Dawson directly, who fixed his own account's exposure per the
+   08:31/08:32 CT ruling above. **Neither of these two account-state facts
+   is independently re-verified by CC** -- no production DB/admin login in
+   this environment, same standing limitation noted earlier in this
+   thread. Taking Andy's and Dawson's own confirmation as the correct
+   source for account-level state, since only an admin login can actually
+   see it.
+
+**Final live re-check (this entry, via curl, not just local tests)**:
+`/health` -- zero errors across all 6 schedulers (session_lock, outcome_
+tracker, monthly_lti, gravity_engine, traveler_plan, executor_live_e1).
+`/api/radar/traveler-snapshot` -- plan #10 still correctly `WAITING_CROSS`
+(locked 13:00 UTC, BO 84,273.711/BD 83,719.1188, no cross yet). Old V2
+routes (`/api/radar/snapshot`) still 404. Site is healthy and running the
+current code as of this entry.
+
+**Andy's own framing, worth recording verbatim as the intended operating
+mode going forward**: run it hands-off now, monitor for a real cross/fill
+to happen, let the Traveler system (D1/D2/D3) send/manage the trade on
+its own, and treat this as a live pilot rather than something needing
+continued active intervention. CC's own clarification given alongside
+this: the D1/D2/D3 lifecycle already runs as its own background loop on
+the server (`traveler_plan_engine.py`, `executor_live_e1_engine.py`),
+independent of any coding session -- "hands off" is accurate. If a real
+cross/fill/exit happens, Andy can ask CC (or DeepSeek) to pull the real
+order/audit-log rows afterward and verify D3 handled it per the rules,
+the same evidence-based way everything in this incident was verified,
+rather than assuming it worked.
+
+**Still open, unchanged from the entry above**: the account-setup/
+sizing-options UI cleanliness pass, and a live (not just from-source)
+demonstration of the per-account LIVE/DRY_RUN toggle + global-switch
+independence -- both explicitly deprioritized by Andy, not forgotten.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
