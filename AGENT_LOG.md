@@ -7515,3 +7515,134 @@ live behavior, check the live site directly (not just local tests)
 before calling the change "shipped," the same way I just did here.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-26 — FROM: Claude Code — FOR: DeepSeek + Andy — REAL PRODUCTION INCIDENT: radar 500'd, no email fired, root cause found and fixed
+STATUS: resolved (code fixed + committed; deploy is Andy's action, per the deploy-gap lesson logged above).
+
+**What happened, from Andy directly**: the public Market Radar page
+showed "RADAR LOAD FAILED. Check server logs." and the Traveler panel
+was showing ~24h-stale data. No session-lock email arrived for
+2026-09-26. Andy's read at the time was that yesterday's V2 retirement
+work (3e onward) had broken something — reasonable, since that work
+did touch `SessionLock` and the scheduler, but the actual defect was
+narrower and specific, not a general regression across the retirement.
+
+**Root cause, confirmed against the live server's own error output
+(`curl https://kabroda.com/api/radar/traveler-snapshot`, full Python
+traceback in the response body), not guessed from the repo**:
+`session_locks.mas_completed_at`'s migration (added 2026-09-24, sub-step
+3d, the Senior-Analyst-dedup fix) used `DATETIME` as the column type —
+valid SQLite, **invalid PostgreSQL** (production's real DB per
+`DATABASE_URL`). The `ALTER TABLE` failed on every single production
+boot, silently swallowed by this file's own established "safe to
+re-run" `try/except: pass` migration convention — so the column was
+never actually created in production. Every query touching
+`SessionLock` then crashed with `psycopg.errors.UndefinedColumn`:
+- The public radar page's backing route had no try/except at all — 500,
+  directly producing "RADAR LOAD FAILED."
+- `battlebox_pipeline.py`'s own `SessionLock` INSERT for the day failed
+  too (caught non-fatally there, so it degraded rather than crashed, but
+  the row never persisted).
+- The scheduler's boot-time dedup check (`run_senior_analyst_scheduler()`,
+  as it was still named) had **no except clause of its own** — only
+  `try/finally`. The uncaught crash killed that entire background
+  `asyncio.Task` silently, with no retry until a full app restart. This
+  is almost certainly why no lock email fired today — the loop below the
+  boot check (which DOES have its own try/except) never even got a
+  chance to run.
+
+Invisible in all prior local/CI testing because every test run uses
+SQLite, which accepts the bogus `DATETIME` type name via loose type
+affinity — the bug only manifests against a real PostgreSQL server.
+
+**Likely NOT total data loss for the day** (Andy: please confirm against
+your own inbox) — `battlebox_pipeline.py` fires
+`kabroda_mas_flow.run_mas_analysis()` via `asyncio.create_task(...)`
+unconditionally, outside and independent of the `SessionLock` DB-write
+try/except. So the actual TravelerPlan write + lock email almost
+certainly fired using in-memory packet data even though the DB row for
+today may be missing. `TravelerPlan` also stores its own copies of
+`breakout_trigger`/`breakdown_trigger`/`r30_high`/`r30_low`, so even a
+missing `SessionLock` row wouldn't make today's levels unrecoverable.
+
+**Fixes shipped (site commit `801ecd0`)**:
+1. `DATETIME` -> `TIMESTAMP` in the migration (`database.py`), matching
+   the exact type name already used correctly for 4 other DateTime
+   columns in the same file. Safe to re-run — the next boot's
+   `ALTER TABLE` will now actually succeed.
+2. Added the missing `except` clause to the scheduler's boot-time dedup
+   check — a future DB hiccup here now degrades to "assume not yet run,
+   try anyway" instead of silently killing the whole daily pipeline task
+   for the rest of the process's life.
+3. Renamed `_fire_senior_analyst()`/`run_senior_analyst_scheduler()`/
+   the `scheduler_health_registry["senior_analyst"]` key/
+   `app.state.senior_analyst_task` to `_fire_session_lock_pipeline()`/
+   `run_session_lock_scheduler()`/`"session_lock"`/
+   `session_lock_task` — per Andy's direct instruction during triage
+   ("there should not be a senior analyst anywhere in this"). This
+   function has been LLM-free since the Senior Analyst agent was retired
+   2026-08-17; the stale name caused real, reasonable confusion during
+   this exact incident (a name that looks like leftover V2/agent code
+   when it's actually the live pipeline trigger for both eras). No
+   behavior change from the rename itself.
+4. New regression test (`tests/test_session_lock_dedup.py`, renamed from
+   `test_senior_analyst_dedup.py`,
+   `test_dedup_query_failure_degrades_gracefully_instead_of_crashing`),
+   mutation-tested: reverting fix #2 makes it fail with the exact
+   production exception class.
+
+**Also requested and acted on**: an independent `general-purpose`
+subagent audit of the full V2-retirement diff + today's fix, specifically
+checking (a) whether this failure class exists anywhere else in the
+retirement work, and (b) whether the D3 executor/management/order-
+execution path is affected or safe. Findings:
+- The DATETIME/TIMESTAMP bug and the unguarded boot-query bug were each
+  the only instance of their failure class in the whole retirement diff.
+- D3 (`mgmt_e1_stack.py`) is structurally isolated from this bug and
+  independently verified correct: exit priority order (STOP -> C5/BBWP ->
+  T1 -> TIME) enforced by sequential early-return control flow; exactly
+  one `set_position_tpsl` call site in the whole codebase
+  (`executor_live_e1_engine.py`), fired once at entry-fill confirmation,
+  never again (stop-never-moves, confirmed by exhaustive grep for
+  `set_position_tpsl`/`breakeven`/`trailing`/`amend.*stop`/`modify.*stop`).
+  Andy's question during triage — "can I trust Kabroda to interact
+  correctly with D3 and send the correct stuff to the exchange" — is a
+  yes, verified from source, not recalled from memory.
+- Live-trading safety: the global "Live Orders" switch and each
+  `ExecutorAccount`'s own `mode` are fully independent gates (both must
+  be true for an order to reach the exchange) — turning on the global
+  switch never auto-enables any specific account. Whether any real
+  `ExecutorAccount` is currently set to LIVE cannot be verified from this
+  environment (no DB/admin credentials here, unrelated to and unaffected
+  by anything in this incident) — Andy needs to check this via his own
+  admin login.
+- Found two more live, real V2 remnants NOT part of today's crash but
+  squarely inside the "make sure V2 is out of everything" mandate --
+  fixed in the same commit: `api_narrative_latest()` was still reading
+  `CampaignLog` directly (serving the same frozen pre-retirement brief
+  forever to War Room/Radar Panel 00/Gravity Map sidebar — retired to
+  null, matching this function's own existing `wave`/`jewel` pattern);
+  `_do_outcome_tick()` ran a permanently-empty `CampaignLog` backfill
+  query every 4 hours (its writer is gone) — removed. Also hardened
+  `/api/radar/traveler-snapshot` with a try/except (matching
+  `/api/live-price`'s own established pattern) so a future unrelated DB
+  hiccup degrades to the frontend's existing "ENGINE CALIBRATING" state
+  instead of painting the page red again.
+
+**Verification**: full suite 511 passed, clean `python -c "import main"`,
+and a full `TestClient` lifespan cycle (boot + shutdown) confirming
+`/api/radar/traveler-snapshot`, `/api/narrative/latest`, and `/suite/radar`
+all return 200 with the corrected null/fallback shapes. Not yet deployed
+— per the 2026-09-25 lesson above, this is only verified locally; Andy
+still needs to push this to Render and the live site should be
+re-checked with the same `curl` method once deployed, before treating
+today's fix as verified in production.
+
+**Still open, not urgent, flagged for a later pass, not acted on today**:
+the account-setup/sizing-options UI cleanliness pass Andy asked for
+("Option A, option B, option C... very clean, no repetitiveness") and
+confirming/demonstrating the per-account LIVE/DRY_RUN toggle + global-
+switch independence live in the admin UI (verified correct from source
+this session, not yet demonstrated live).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
