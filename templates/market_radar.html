@@ -170,7 +170,7 @@
         .close-btn { position: absolute; top: 0; right: 0; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #ef4444; font-family: 'JetBrains Mono'; font-weight: 800; font-size: 12px; padding: 8px 16px; border-radius: 4px; cursor: pointer; z-index: 10; }
         .close-btn:hover { background: #ef4444; color: #fff; }
 
-        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 450px; grid-template-areas: "header header header" "brief brief brief" "left center right"; }
+        .cockpit { display: grid; gap: 20px; grid-template-columns: 350px 1fr 450px; grid-template-areas: "header header header" "left center right"; }
         .header { grid-area: header; border-bottom: 2px solid #334155; padding-bottom: 15px; }
         .panel { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 25px; display: flex; flex-direction: column; }
         .h-title { font-family: 'Rajdhani'; font-weight: 800; font-size: 36px; color: #fff; letter-spacing: 2px; margin: 0; }
@@ -194,25 +194,29 @@
         .mini-copy { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; opacity: 0.5; padding: 0 0 0 5px; }
         .mini-copy:hover { opacity: 1; color: #f8fafc; }
 
-        /* ================================================================
-           PANEL 00 — ANALYST BRIEF
-           ================================================================ */
-        .analyst-brief { grid-area: brief; }
-        .ab-line { font-family: 'Inter'; font-size: 14px; line-height: 1.6; padding: 12px 16px; border-radius: 4px; margin-bottom: 8px; border-left: 3px solid #334155; background: rgba(0,0,0,0.25); overflow: hidden; max-height: 300px; transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.3s ease, margin 0.3s ease, border-left-width 0.3s ease; }
-        .ab-line:last-child { margin-bottom: 0; }
-        .ab-label { font-family: 'JetBrains Mono'; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; display: block; margin-bottom: 4px; }
-        .ab-l1 { border-left-color: #0ea5e9; color: #e2e8f0; }
-        .ab-l2 { border-left-color: #22c55e; color: #f1f5f9; font-weight: 600; }
-        .ab-l3 { border-left-color: #eab308; color: #e2e8f0; }
-        .ab-l4 { border-left-color: #ef4444; color: #fca5a5; }
-        .ab-toggle { background: none; border: none; color: #0ea5e9; font-size: 14px; cursor: pointer; padding: 0 4px; line-height: 1; }
-        .ab-toggle:hover { color: #38bdf8; }
-        #analystBriefBody.collapsed { display: none; }
+        /* Panel 00 (ANALYST BRIEF) removed 2026-09-26 -- both its data
+           sources (narrative_text, tactical_text) are permanently null
+           now (main.py::api_narrative_latest(), see that function's own
+           docstring): narrative_text since the Senior Analyst LLM step was
+           removed 2026-08-17, tactical_text since 2026-09-26 once
+           CampaignLog's only writer (decision_engine.py's V2 gate) was
+           deleted 2026-09-24 and stopped setting is_canonical. The panel
+           was permanently stuck on "Today's brief is being prepared.
+           Check back after 9:00 AM ET." -- a message that can never
+           become true again -- exactly the "showing stale/dead content
+           forever" anti-pattern this retirement has been removing
+           elsewhere. Removed the panel entirely rather than reword the
+           message, matching this session's other dead-feature removals
+           (Audit-AI, the old V2 radar dossier) rather than leaving a
+           permanently-empty section in place.
 
-
+           NOTE: .jewel-gate-open/.jewel-gate-closed/.jewel-chip/
+           .chip-dir-*/.chip-conv-*/.chip-warn-*/.tac-gate-sm below are
+           NOT part of this removal -- they're shared with Panel 02's
+           loadPanel02Intel(), which is untouched. */
 
         @media (max-width: 1100px) {
-            .cockpit { grid-template-columns: 1fr; grid-template-areas: "header" "brief" "left" "center" "right"; }
+            .cockpit { grid-template-columns: 1fr; grid-template-areas: "header" "left" "center" "right"; }
         }
 
         @keyframes pulse-opacity { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
@@ -228,19 +232,6 @@
             --text:     #f1f5f9;
             --muted:    #94a3b8;
             --dim:      #475569;
-        }
-        .narrative-text {
-            font-family: 'Inter', sans-serif;
-            font-size: 14px;
-            line-height: 1.75;
-            color: #cbd5e1;
-            margin: 0 0 16px;
-        }
-        .tactical-content {
-            font-size: 14px;
-            line-height: 1.7;
-            color: #cbd5e1;
-            font-family: 'Inter', sans-serif;
         }
         .jewel-gate-open {
             font-family: 'JetBrains Mono';
@@ -284,114 +275,16 @@
         .chip-conv-low  { color: var(--dim);   border-color: var(--border2);       background: transparent; }
         .chip-warn-exit { color: #fff;         border-color: var(--red);           background: rgba(239,68,68,0.15);  }
         .chip-warn-div  { color: #fff;         border-color: var(--amber);         background: rgba(245,158,11,0.15); }
-        .tac-section-label {
-            font-family: 'JetBrains Mono';
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 2.5px;
-            text-transform: uppercase;
-            color: var(--dim);
-            margin-top: 28px;
-            margin-bottom: 10px;
-            padding-top: 20px;
-            border-top: 1px solid var(--border);
-        }
-        .tactical-content .tac-section-label:first-child {
-            margin-top: 0;
-            padding-top: 0;
-            border-top: none;
-        }
-        .tac-starred {
-            font-size: 16px;
-            font-weight: 500;
-            margin: 10px 0 6px;
-            line-height: 1.4;
-        }
-        .tac-price-row {
-            display: flex;
-            align-items: baseline;
-            font-family: 'JetBrains Mono';
-            font-size: 13px;
-            padding: 5px 0;
-            border-bottom: 1px solid var(--border);
-        }
-        .tac-price-label {
-            color: var(--muted);
-            min-width: 130px;
-            flex-shrink: 0;
-        }
-        .tac-price-dots {
-            flex: 1;
-            border-bottom: 1px dotted var(--border2);
-            margin: 0 8px 4px;
-            min-width: 12px;
-        }
-        .tac-price-value {
-            color: var(--text);
-            font-weight: 700;
-        }
-        .tac-price-note {
-            font-family: 'Inter';
-            font-size: 12px;
-            color: var(--muted);
-            margin-left: 12px;
-        }
-        .tac-do-not {
-            color: #ef4444;
-            margin: 14px 0 8px 16px;
-            font-size: 13px;
-            line-height: 1.5;
-        }
-        .tac-badge-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin: 12px 0 4px;
-        }
+        /* .tac-section-label/.tac-starred/.tac-price-*/.tac-do-not/
+           .tac-badge-row/.tac-gate-reason/.tac-div-warning/
+           .tac-standown-*/.tac-lower-prob/.tac-spacer/.tac-line removed
+           2026-09-26 alongside renderTactical() -- see the removed Panel
+           00 comment above. .tac-gate-sm stays: it's shared with Panel
+           02's loadPanel02Intel(). */
         .tac-gate-sm {
             font-size: 11px !important;
             padding: 3px 10px !important;
             letter-spacing: 1px !important;
-        }
-        .tac-gate-reason {
-            font-size: 12px;
-            color: var(--muted);
-            margin: 2px 0 6px;
-            font-style: italic;
-            line-height: 1.5;
-        }
-        .tac-div-warning {
-            font-size: 13px;
-            color: var(--amber);
-            margin: 4px 0 10px;
-            line-height: 1.5;
-        }
-        .tac-standown-box {
-            background: rgba(234,179,8,0.08);
-            border-left: 2px solid #854d0e;
-            border-radius: 6px;
-            padding: 14px;
-            margin: 8px 0 16px;
-        }
-        .tac-standown-list {
-            margin: 0;
-            padding-left: 20px;
-            color: #fef08a;
-            font-size: 13px;
-            line-height: 1.75;
-        }
-        .tac-lower-prob {
-            font-weight: 500;
-            color: var(--muted);
-            margin: 14px 0 4px;
-            font-size: 14px;
-        }
-        .tac-spacer { height: 8px; }
-        .tac-line {
-            font-size: 14px;
-            color: #94a3b8;
-            line-height: 1.65;
         }
     </style>
 </head>
@@ -437,16 +330,6 @@
             <div class="cockpit">
                 <div class="header">
                     <h1 class="h-title" id="tSym">TARGET LOCK</h1>
-                </div>
-
-                <div class="panel analyst-brief" style="grid-area: brief;">
-                    <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
-                        <span>00. ANALYST BRIEF</span>
-                        <button id="abToggle" class="ab-toggle" onclick="toggleAnalystBrief()" title="Collapse / expand">▼</button>
-                    </div>
-                    <div id="analystBriefBody">
-                        <div class="ab-line ab-l2 ab-starred">Loading structural read...</div>
-                    </div>
                 </div>
 
                 <div class="panel" style="grid-area: left;">
@@ -611,223 +494,12 @@
             document.body.style.overflow = 'auto';
         }
 
-        // ================================================================
-        // PANEL 00 — ANALYST BRIEF (reads from MacroNarrativeLog — no live LLM call)
-        // ================================================================
-        function escapeHtml(s) {
-            return String(s)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-        }
-
-        function renderBriefText(text) {
-            const lines = String(text).split(/\n+/).map(s => s.trim()).filter(Boolean);
-            if (!lines.length) {
-                return `<div class="ab-line ab-l2 ab-starred">${escapeHtml(text)}</div>`;
-            }
-            let starIdx = lines.findIndex(l => l.includes('★') || /HIGHER PROBABILITY/i.test(l));
-            if (starIdx < 0) starIdx = 0;
-            return lines.map((l, i) => {
-                const cls = (i === starIdx) ? 'ab-line ab-l2 ab-starred' : 'ab-line ab-l1 ab-collapsible';
-                return `<div class="${cls}">${escapeHtml(l)}</div>`;
-            }).join('');
-        }
-
-        function renderTactical(text) {
-            if (!text) return '';
-
-            function esc(s) {
-                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            }
-
-            const lines = text.split('\n');
-            let html = '';
-            let inStandDown = false;
-            let standDownItems = [];
-            let pendingBadges = [];
-
-            function flushBadges() {
-                if (!pendingBadges.length) return;
-                let row = '<div class="tac-badge-row">';
-                let gateReason = '';
-                let warningLine = '';
-                pendingBadges.forEach(b => {
-                    if (b.type === 'gate') {
-                        const cls = b.val === 'OPEN' ? 'jewel-gate-open' : 'jewel-gate-closed';
-                        row += `<span class="${cls} tac-gate-sm">GATE ${b.val}</span>`;
-                        gateReason = b.reason || '';
-                    } else if (b.type === 'dir') {
-                        const cls = b.val === 'BULLISH' ? 'chip-dir-bull' : b.val === 'BEARISH' ? 'chip-dir-bear' : 'chip-dir-neut';
-                        row += `<span class="jewel-chip ${cls}">${b.val}</span>`;
-                    } else if (b.type === 'conv') {
-                        const cls = b.val === 'STRONG' ? 'chip-conv-str' : b.val === 'MODERATE' ? 'chip-conv-mod' : 'chip-conv-low';
-                        row += `<span class="jewel-chip ${cls}">${b.val}</span>`;
-                    } else if (b.type === 'warning') {
-                        warningLine = b.val;
-                    }
-                });
-                row += '</div>';
-                if (gateReason) row += `<div class="tac-gate-reason">${esc(gateReason)}</div>`;
-                if (warningLine) row += `<div class="tac-div-warning">${esc(warningLine)}</div>`;
-                html += row;
-                pendingBadges = [];
-            }
-
-            function flushStandDown() {
-                if (standDownItems.length) {
-                    const items = standDownItems.map(item => `<li>${esc(item)}</li>`).join('');
-                    html += `<div class="tac-standown-box"><ul class="tac-standown-list">${items}</ul></div>`;
-                }
-                standDownItems = [];
-                inStandDown = false;
-            }
-
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                const trimmed = line.trim();
-
-                if (inStandDown) {
-                    if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
-                        standDownItems.push(trimmed.replace(/^[-•]\s*/, ''));
-                        continue;
-                    }
-                    if (trimmed === '') continue;
-                    flushStandDown();
-                    // fall through to process line normally
-                }
-
-                const isGate = /^Gate:\s*/i.test(line);
-                const isDir  = /^Direction:\s*/i.test(line);
-                const isConv = /^Conviction:\s*/i.test(line);
-
-                if (isGate) {
-                    flushBadges();
-                    const rest = line.replace(/^Gate:\s*/i, '').trim();
-                    const dashIdx = rest.search(/\s[—–-]\s/);
-                    const val = (dashIdx > -1 ? rest.slice(0, dashIdx) : rest).trim().toUpperCase();
-                    const reason = dashIdx > -1 ? rest.slice(dashIdx).replace(/^\s*[—–-]\s*/, '').trim() : '';
-                    pendingBadges.push({ type: 'gate', val, reason });
-                    continue;
-                }
-                if (isDir) {
-                    const val = line.replace(/^Direction:\s*/i, '').trim().toUpperCase();
-                    pendingBadges.push({ type: 'dir', val });
-                    continue;
-                }
-                if (isConv) {
-                    const val = line.replace(/^Conviction:\s*/i, '').trim().toUpperCase();
-                    pendingBadges.push({ type: 'conv', val });
-                    continue;
-                }
-
-                if (pendingBadges.length > 0) {
-                    if (trimmed !== '') {
-                        const isSpecial = trimmed.startsWith('## ') || line.includes('★') ||
-                            /^(Entry|Stop|Target\s+[123]|T[123]|Breakout Trigger|Breakdown Trigger|LOWER PROBABILITY|DO NOT):/i.test(trimmed);
-                        if (!isSpecial) {
-                            pendingBadges.push({ type: 'warning', val: trimmed });
-                            flushBadges();
-                            continue;
-                        }
-                    }
-                    flushBadges();
-                }
-
-                if (line.startsWith('## ')) {
-                    const label = line.slice(3).trim();
-                    if (label === 'STAND DOWN IF') {
-                        inStandDown = true;
-                        html += `<div class="tac-section-label">Stand Down If</div>`;
-                        continue;
-                    }
-                    html += `<div class="tac-section-label">${esc(label)}</div>`;
-                    continue;
-                }
-
-                if (line.includes('★')) {
-                    const isShort = /SHORT/i.test(line);
-                    const color = isShort ? '#ef4444' : '#22c55e';
-                    html += `<div class="tac-starred" style="color:${color}">${esc(line)}</div>`;
-                    continue;
-                }
-
-                const priceMatch = line.match(/^(Entry|Stop|Target\s+[123]|T[123]|Breakout Trigger|Breakdown Trigger):\s*(.+)/i);
-                if (priceMatch) {
-                    const label = priceMatch[1];
-                    const rest  = priceMatch[2].trim();
-                    const dashIdx = rest.search(/\s[—–]\s/);
-                    const price = dashIdx > -1 ? rest.slice(0, dashIdx).trim() : rest;
-                    const note  = dashIdx > -1 ? rest.slice(dashIdx).replace(/^\s*[—–]\s*/, '').trim() : '';
-                    html += `<div class="tac-price-row">` +
-                        `<span class="tac-price-label">${esc(label)}</span>` +
-                        `<span class="tac-price-dots"></span>` +
-                        `<span class="tac-price-value">${esc(price)}</span>` +
-                        (note ? `<span class="tac-price-note"> — ${esc(note)}</span>` : '') +
-                        `</div>`;
-                    continue;
-                }
-
-                if (/^DO NOT:/i.test(line)) {
-                    html += `<div class="tac-do-not">${esc(line)}</div>`;
-                    continue;
-                }
-
-                if (/^LOWER PROBABILITY:/i.test(line)) {
-                    html += `<div class="tac-lower-prob">${esc(line)}</div>`;
-                    continue;
-                }
-
-                if (trimmed === '') {
-                    html += '<div class="tac-spacer"></div>';
-                    continue;
-                }
-
-                html += `<div class="tac-line">${esc(line)}</div>`;
-            }
-
-            flushBadges();
-            if (inStandDown) flushStandDown();
-            return html;
-        }
-
-        async function loadAnalystBrief(symbol) {
-            const body  = document.getElementById('analystBriefBody');
-            body.innerHTML = `<div class="ab-line ab-l2 ab-starred">Loading brief...</div>`;
-
-            const dbSym = (symbol || '').includes('/') ? symbol : (symbol || '').replace('USDT', '/USDT');
-
-            try {
-                const res  = await fetch(`/api/narrative/latest?symbol=${encodeURIComponent(dbSym)}`);
-                const data = await res.json();
-                if (!data || !data.ok) throw new Error('API error');
-
-                const narText = data.narrative && data.narrative.narrative_text;
-                const tacText = data.narrative && data.narrative.tactical_text;
-
-                if (narText || tacText) {
-                    let html = '';
-                    if (narText) {
-                        html += `<p class="narrative-text">${narText.replace(/\n/g, '<br>')}</p>`;
-                    }
-                    if (tacText) {
-                        html += `<div class="tactical-content">${renderTactical(tacText)}</div>`;
-                    }
-                    body.innerHTML = html;
-                } else {
-                    body.innerHTML = `<div class="ab-line ab-l1 ab-starred">Today's brief is being prepared. Check back after 9:00 AM ET.</div>`;
-                }
-            } catch (e) {
-                body.innerHTML = `<div class="ab-line ab-l4 ab-starred">Brief unavailable. Check server logs.</div>`;
-            }
-        }
-
-        function toggleAnalystBrief() {
-            const body = document.getElementById('analystBriefBody');
-            const btn  = document.getElementById('abToggle');
-            const collapsed = body.classList.toggle('collapsed');
-            btn.innerText = collapsed ? '▶' : '▼';
-        }
+        // Panel 00 (ANALYST BRIEF) removed 2026-09-26 -- escapeHtml()/
+        // renderBriefText()/renderTactical()/loadAnalystBrief()/
+        // toggleAnalystBrief() all removed with it (all dead once the
+        // panel and its two data sources are gone; renderBriefText() was
+        // already orphaned, zero call sites, even before this). See the
+        // removed panel's CSS comment above for the full reasoning.
 
         async function loadPanel02Intel(symbol, masStatus) {
             const dbSym = (symbol || '').includes('/') ? symbol : (symbol || '').replace('USDT', '/USDT');
@@ -896,8 +568,7 @@
         }
 
         function renderModal(d) {
-            // PANEL 00 — Analyst Brief
-            loadAnalystBrief(d.symbol);
+            // PANEL 00 (Analyst Brief) removed 2026-09-26 -- see the removed panel's own comment.
             // PANEL 02 — JEWEL Intel Summary (pass SA verdict so it can gate the top-line label)
             loadPanel02Intel(d.symbol, d.mas_status);
 
