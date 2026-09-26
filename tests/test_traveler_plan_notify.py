@@ -1,9 +1,19 @@
 """
 Unit coverage for traveler_plan_notify.py -- Ruling C (DeepSeek, relayed by
 Andy 2026-09-15): GATE_TRAVELER's own email notification hook, following
-the exact trade_plan_notify.py pattern. Pure-function module (each builder
-takes a plain plan dict, no DB/network) -- same test style as
-tests/test_trade_plan_notify.py.
+the trade_plan_notify.py pattern that module was originally modeled on
+(trade_plan_notify.py itself deleted 2026-09-24, V2 Crown retirement).
+Pure-function module (each builder takes a plain plan dict, no DB/network).
+
+2026-09-26 rewrite (Andy's own request, real production email -- see
+AGENT_LOG.md this date): every LOCK/ARMED/DONE body used to claim
+"TRAVELER (evaluation lineage, DRY_RUN only)" unconditionally -- true only
+because no LIVE GATE_TRAVELER account existed yet when this module was
+built; false as of today (Andy_Bitunix and dawson_bitu are both LIVE).
+Rewritten to plain trader language with no DRY_RUN/lineage claim on those
+three (they're plan-level, not per-account, so the claim was never really
+correct even before today). CLOSED keeps its real is_live distinction --
+that one's per-order, and the claim there was always true.
 """
 import os
 import sys
@@ -20,6 +30,7 @@ def _plan(status, **extra):
         "r30_high": 50000.0, "r30_low": 49700.0, "rsi_4h_at_lock": 55.0,
         "direction": "LONG", "fill_price": 49900.0,
         "stop_price": 49664.0, "t1_price": 50300.0,
+        "cross_price": None, "rsi_4h_at_cross": None,
         "last_transition_reason": None,
     }
     d.update(extra)
@@ -30,19 +41,20 @@ def _plan(status, **extra):
 
 def test_lock_email_always_fires_with_the_same_shape():
     subject, body = tpn.build_traveler_lock_email(_plan("WAITING_CROSS"))
-    assert subject == "KABRODA TRAVELER LOCK - BTCUSDT - watching for a cross"
-    assert "TRAVELER" in body
-    assert "50,000.00" in body   # breakout trigger surfaced
-    assert "49,700.00" in body   # breakdown trigger surfaced
-    assert "55.0" in body        # rsi_4h_at_lock surfaced
-    assert "Plan ID: 7" in body
+    assert subject == "KABRODA - BTCUSDT - Levels Locked"
+    assert "TRAVELER" not in body        # 2026-09-26: no internal jargon in the trader-facing body
+    assert "DRY_RUN" not in body         # 2026-09-26: no longer a true claim at the plan level
+    assert "50,000.00" in body           # breakout trigger surfaced
+    assert "49,700.00" in body           # breakdown trigger surfaced
+    assert "55.0" in body                # rsi_4h_at_lock surfaced
+    assert "Ref: #7" in body
 
 
 def test_lock_email_handles_missing_levels_without_crashing():
     plan = _plan("WAITING_CROSS", breakout_trigger=None, breakdown_trigger=None,
                  r30_high=None, r30_low=None, rsi_4h_at_lock=None)
     subject, body = tpn.build_traveler_lock_email(plan)
-    assert subject == "KABRODA TRAVELER LOCK - BTCUSDT - watching for a cross"
+    assert subject == "KABRODA - BTCUSDT - Levels Locked"
     assert "?" in body
 
 
@@ -50,40 +62,43 @@ def test_lock_email_handles_missing_levels_without_crashing():
 
 def test_armed_email_format():
     subject, body = tpn.build_traveler_armed_email(_plan("FILLED"))
-    assert subject == "KABRODA TRAVELER ARMED - BTCUSDT LONG @ 49,900"
-    assert "TRAVELER" in body
-    assert "no real order was placed" in body
+    assert subject == "KABRODA - BTCUSDT LONG - Position Opened @ 49,900"
+    assert "TRAVELER" not in body
+    assert "DRY_RUN" not in body
+    assert "simulation" not in body.lower()   # 2026-09-26: no longer a true claim at the plan level
     assert "49,900.00" in body
     assert "49,664.00" in body   # stop
-    assert "50,300.00" in body   # T1
-    assert "Plan ID: 7" in body
-
-
-def test_armed_email_tagged_as_simulation_not_a_live_signal():
-    _, body = tpn.build_traveler_armed_email(_plan("FILLED"))
-    assert "simulation" in body.lower()
+    assert "50,300.00" in body   # target
+    assert "Ref: #7" in body
 
 
 # ------------------------------------------------------------------ build_traveler_done_email
 
-def test_done_email_tercile_skipped_uses_the_real_reason():
-    plan = _plan("TERCILE_SKIPPED", last_transition_reason="LONG cross confirmed at 50,100.00 -- tercile-skipped (RSI-4h-at-lock 45.0) -- not taken, no trade")
+def test_done_email_tercile_skipped_uses_plain_language_not_the_raw_reason():
+    plan = _plan("TERCILE_SKIPPED", cross_price=50100.0, rsi_4h_at_cross=45.0,
+                 last_transition_reason="LONG cross confirmed at 50,100.00 -- tercile-skipped (RSI-4h-at-cross 45.0) -- not taken, no trade")
     subject, body = tpn.build_traveler_done_email(plan)
-    assert subject == "KABRODA TRAVELER DONE - BTCUSDT - stand down"
-    assert "tercile-skipped" in body
-    assert "Plan ID: 7" in body
+    assert subject == "KABRODA - BTCUSDT - No Trade"
+    assert "tercile-skipped" not in body   # 2026-09-26: jargon removed from the trader-facing body
+    assert "outside system guidelines" in body
+    assert "50,100.00" in body
+    assert "45.0" in body
+    assert "Ref: #7" in body
 
 
-def test_done_email_opposite_trigger_break_uses_the_real_reason():
-    plan = _plan("DONE", last_transition_reason="opposite trigger (49,700.00) broke before any trigger touch fill -- journey ended, not taken")
+def test_done_email_opposite_trigger_break_uses_a_generic_headline_plus_detail():
+    plan = _plan("DONE", cross_price=50100.0,
+                 last_transition_reason="opposite trigger (49,700.00) broke before any trigger touch fill -- journey ended, not taken")
     subject, body = tpn.build_traveler_done_email(plan)
-    assert subject == "KABRODA TRAVELER DONE - BTCUSDT - stand down"
-    assert "opposite trigger" in body
+    assert subject == "KABRODA - BTCUSDT - No Trade"
+    assert "No trade taken this session." in body
+    assert "opposite trigger" in body   # kept as a secondary detail line, not the headline
 
 
-def test_done_email_journey_cap_uses_the_real_reason():
+def test_done_email_journey_cap_uses_a_generic_headline_plus_detail():
     plan = _plan("DONE", last_transition_reason="7-day journey cap reached with no trigger touch fill -- not taken")
     _, body = tpn.build_traveler_done_email(plan)
+    assert "No trade taken this session." in body
     assert "7-day journey cap" in body
 
 
@@ -101,18 +116,17 @@ def _order(**extra):
 
 def test_management_event_email_dry_run_shape():
     subject, body = tpn.build_traveler_management_event_email(_order(exit_reason="STOP", exit_price=90.0, realized_pnl_r=-1.0), is_live=False)
-    assert subject == "KABRODA TRAVELER CLOSED - BTCUSDT LONG - stop hit @ 90"
-    assert "DRY_RUN only" in body
-    assert "bookkeeping close, no real order" in body
+    assert subject == "KABRODA - BTCUSDT LONG - Closed (stop hit) @ 90"
+    assert "Simulated close -- no real order was placed." in body
     assert "90.00" in body
     assert "-1.0000R" in body
-    assert "Plan ID: 42" in body
+    assert "Ref: #42" in body
 
 
 def test_management_event_email_live_shape():
     subject, body = tpn.build_traveler_management_event_email(_order(), is_live=True)
-    assert subject == "KABRODA TRAVELER CLOSED - BTCUSDT LONG - target hit (T1) @ 106"
-    assert "real order, live money" in body
+    assert subject == "KABRODA - BTCUSDT LONG - Closed (target hit (T1)) @ 106"
+    assert "Real order -- live money." in body
     assert "106.18" in body
     assert "+1.0000R" in body
 
@@ -163,19 +177,19 @@ def test_management_event_email_handles_missing_values_without_crashing():
 def test_dispatch_filled_to_armed():
     mail = tpn.notification_for_traveler_transition("WAITING_TOUCH", _plan("FILLED"))
     assert mail is not None
-    assert mail[0].startswith("KABRODA TRAVELER ARMED")
+    assert "Position Opened" in mail[0]
 
 
 def test_dispatch_tercile_skipped_to_done_family():
     mail = tpn.notification_for_traveler_transition("WAITING_CROSS", _plan("TERCILE_SKIPPED"))
     assert mail is not None
-    assert mail[0].startswith("KABRODA TRAVELER DONE")
+    assert "No Trade" in mail[0]
 
 
 def test_dispatch_done():
     mail = tpn.notification_for_traveler_transition("WAITING_TOUCH", _plan("DONE"))
     assert mail is not None
-    assert mail[0].startswith("KABRODA TRAVELER DONE")
+    assert "No Trade" in mail[0]
 
 
 def test_dispatch_waiting_cross_to_waiting_touch_produces_no_email():

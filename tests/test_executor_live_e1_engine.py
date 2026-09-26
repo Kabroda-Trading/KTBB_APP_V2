@@ -344,9 +344,9 @@ def test_normal_t1_fill_sends_a_management_event_email(db, monkeypatch):
 
     assert len(sent) == 1
     subject, body = sent[0]
-    assert subject.startswith("KABRODA TRAVELER CLOSED")
+    assert "Closed" in subject
     assert "target hit (T1)" in body
-    assert "real order, live money" in body   # LIVE, not the DRY_RUN caveat
+    assert "Real order -- live money." in body   # LIVE, not the DRY_RUN caveat
     assert "approximated" not in body.lower()  # T1 is a real resting-limit fill, never approximated
 
 

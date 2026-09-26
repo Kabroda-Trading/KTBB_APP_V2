@@ -536,9 +536,9 @@ def test_mgmt_e1_stack_closure_sends_a_management_event_email(poll_env, monkeypa
 
     assert len(sent) == 1
     subject, body = sent[0]
-    assert subject.startswith("KABRODA TRAVELER CLOSED")
+    assert "Closed" in subject
     assert "stop hit" in body
-    assert "DRY_RUN only" in body  # this lineage's own caveat, never mistaken for a real order
+    assert "Simulated close -- no real order was placed." in body  # this order's own DRY_RUN caveat, never mistaken for a real order
     assert "-1.0000" in body
 
 
@@ -680,7 +680,7 @@ def test_waiting_touch_fill_sends_a_traveler_armed_email_via_loop(poll_env, monk
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA TRAVELER ARMED")
+    assert "Position Opened" in sent[0][0]
     assert "50,000" in sent[0][0] or "50000" in sent[0][0]   # the trigger, not the touching bar's own close
 
 
@@ -699,8 +699,8 @@ def test_waiting_cross_tercile_skipped_sends_a_traveler_done_email_via_loop(poll
     row = poll_env["get_plan"]()
     assert row.status == "TERCILE_SKIPPED"
     assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA TRAVELER DONE")
-    assert "tercile-skipped" in sent[0][1]
+    assert "No Trade" in sent[0][0]
+    assert "outside system guidelines" in sent[0][1]
 
 
 def test_waiting_touch_opposite_break_sends_a_traveler_done_email_via_loop(poll_env, monkeypatch):
@@ -719,7 +719,7 @@ def test_waiting_touch_opposite_break_sends_a_traveler_done_email_via_loop(poll_
     row = poll_env["get_plan"]()
     assert row.status == "DONE"
     assert len(sent) == 1
-    assert sent[0][0].startswith("KABRODA TRAVELER DONE")
+    assert "No Trade" in sent[0][0]
     assert "opposite trigger" in sent[0][1]
 
 
