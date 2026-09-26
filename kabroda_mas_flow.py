@@ -92,7 +92,7 @@ def run_mas_analysis(
     battlebox_pipeline.py. Writes TravelerPlan (GATE_TRAVELER's own D1
     plan object) from the session's locked levels, then sets
     SessionLock.mas_completed_at -- the real completion marker
-    main.py's Senior Analyst scheduler dedup check reads.
+    main.py's session-lock scheduler dedup check reads.
 
     REBUILT 2026-09-24 (V2 Crown retirement, CLAUDE.md's "Strategic
     Direction" section, V2_RETIREMENT_MAP.md). Andy's explicit
@@ -194,7 +194,7 @@ def run_mas_analysis(
     # (3a, main.py), not through SessionAuditLog/DecisionGaugeReading.
 
     # 2026-09-24 (V2 Crown retirement) -- the real completion marker
-    # main.py's Senior Analyst scheduler dedup check needs (see
+    # main.py's session-lock scheduler dedup check needs (see
     # SessionLock.mas_completed_at's own comment). Set unconditionally
     # here, at the true end of the pipeline, regardless of whether the
     # Traveler injection block above produced a tradeable plan -- this

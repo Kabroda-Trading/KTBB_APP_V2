@@ -690,10 +690,31 @@ def init_db():
         except Exception:
             pass
 
-    # --- SENIOR ANALYST DEDUP FIX (2026-09-24, V2 Crown retirement) --
+    # --- SESSION-LOCK DEDUP FIX (2026-09-24, V2 Crown retirement) --
     # see SessionLock.mas_completed_at's own comment for the full
-    # reasoning. ---
-    for _col in ["mas_completed_at DATETIME"]:
+    # reasoning.
+    #
+    # REAL PRODUCTION INCIDENT (2026-09-26): this originally read
+    # "mas_completed_at DATETIME" -- DATETIME is a SQLite type name, not
+    # valid PostgreSQL (production's real DB). Every local/CI test run
+    # only ever exercised this against SQLite, which accepts the bogus
+    # type name silently (loose type affinity), so the bug was invisible
+    # until it hit production -- where this ALTER TABLE failed on every
+    # single boot, was swallowed by the bare except below (this file's
+    # own established, intentional "safe to re-run" convention), and the
+    # column was never actually created. Every query touching SessionLock
+    # -- reads AND writes -- then failed with psycopg.errors.
+    # UndefinedColumn in production: the public Market Radar page 500'd,
+    # and battlebox_pipeline.py's own SessionLock INSERT for the day's
+    # session failed too (caught non-fatally there, but the row never
+    # persisted -- see that file's own lock-write try/except). Fixed to
+    # `TIMESTAMP`, the exact type name already used by every other
+    # DateTime column migration in this same file (see campaign_logs'
+    # activated_at/closed_at/entry_filled_at/session_expires_at above) --
+    # not a new guess, the established correct pattern this one deviated
+    # from. Safe to re-run: the next boot's ALTER TABLE will now actually
+    # succeed since the column still doesn't exist in production.
+    for _col in ["mas_completed_at TIMESTAMP"]:
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE session_locks ADD COLUMN {_col}"))
@@ -763,7 +784,7 @@ class SessionLock(Base):
     packet_data = Column(String, nullable=False)
 
     # 2026-09-24 (V2 Crown retirement) -- the real completion-marker
-    # main.py's Senior Analyst scheduler dedup check needs. NULL until
+    # main.py's session-lock scheduler dedup check needs. NULL until
     # kabroda_mas_flow.py::run_mas_analysis() runs to completion for this
     # row's (symbol, session_id, date_key); set unconditionally at the
     # end of that function, independent of whether a tradeable plan was

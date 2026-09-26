@@ -54,7 +54,7 @@ import lti_engine
 
 from datetime import datetime, timezone, timedelta
 
-from database import init_db, get_db, UserModel, CampaignLog, SessionLock, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, SignalPerformanceLog, GravityMemory, EmailSubscriber
+from database import init_db, get_db, UserModel, SessionLock, SessionLocal, MacroNarrativeLog, DecisionJournal, SystemAuditLog, InterpreterLog, LtiCheckpoint, LtiProtocol, SignalPerformanceLog, GravityMemory, EmailSubscriber
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -67,7 +67,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # grep before removing each). Left the Active Runners dashboard table
 # showing six schedulers that no longer exist, indefinitely "PENDING."
 scheduler_health_registry = {
-    "senior_analyst": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
+    "session_lock": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "outcome_tracker": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
     "monthly_lti": {"last_run": None, "next_run": None, "status": "DISABLED", "error_count": 0, "last_error": None},
     "gravity_engine": {"last_run": None, "next_run": None, "status": "PENDING", "error_count": 0, "last_error": None},
@@ -133,15 +133,29 @@ async def _fetch_btc_price() -> float:
         return 0.0
 
 
-async def _fire_senior_analyst(date_key: str) -> None:
+async def _fire_session_lock_pipeline(date_key: str) -> None:
     """
-    Fires the Senior Analyst for the given date_key if not already run.
+    Fires the session-lock pipeline (kabroda_mas_flow.run_mas_analysis(),
+    which computes the day's levels and writes TravelerPlan) for the given
+    date_key if not already run.
+
+    Renamed 2026-09-26 from _fire_senior_analyst() -- "Senior Analyst" was
+    the name of the LLM agent this used to trigger, retired 2026-08-17.
+    This function has been LLM-free ever since; the old name was a pure
+    holdover that never got updated when the agent underneath it was
+    replaced by the coded pipeline, and it caused real confusion during
+    the 2026-09-26 incident (a human reading "Senior Analyst" in logs/
+    scheduler names reasonably assumed it was leftover AI-agent code that
+    should have been deleted in the V2 retirement, when it's actually the
+    scheduler that fires the CURRENT live pipeline for both v2-era and
+    Traveler systems). No behavior changed in this rename -- see the
+    2026-09-26 fix below in the same function for the actual bug.
 
     Two scenarios handled:
     - New lock: get_live_battlebox() creates the lock and fires run_mas_analysis()
       internally via asyncio.create_task(). We detect this via lock_existed_before
       and do NOT fire a second time.
-    - Restart recovery: lock already exists but analyst was never triggered.
+    - Restart recovery: lock already exists but the pipeline was never triggered.
       We read the locked packet directly and call run_mas_analysis() ourselves.
     """
     db = SessionLocal()
@@ -156,13 +170,24 @@ async def _fire_senior_analyst(date_key: str) -> None:
         # alone can't distinguish "locked" from "analysis pipeline finished"
         # (see SessionLock.mas_completed_at's own comment for the full
         # reasoning this replaces).
+        #
+        # REAL PRODUCTION INCIDENT (2026-09-26): this query (and the
+        # matching one in run_session_lock_scheduler()'s boot check below)
+        # crashed with psycopg.errors.UndefinedColumn every time it ran,
+        # because the mas_completed_at column's own migration used an
+        # invalid PostgreSQL type name and never actually created the
+        # column in production (see database.py's own fix comment). This
+        # try/except now catches that class of failure explicitly instead
+        # of letting an unrelated DB error silently kill the entire daily
+        # pipeline -- see the same defensive fix applied to the boot-time
+        # check below.
         existing_brief = db.query(SessionLock).filter(
             SessionLock.symbol == "BTC/USDT",
             SessionLock.date_key == date_key,
             SessionLock.mas_completed_at.isnot(None),
         ).first()
         if existing_brief:
-            print(f"[SCHEDULER] Senior Analyst already ran for {date_key} — skipping")
+            print(f"[SCHEDULER] Session-lock pipeline already ran for {date_key} — skipping")
             return
 
         lock_before = db.query(SessionLock).filter(
@@ -170,10 +195,13 @@ async def _fire_senior_analyst(date_key: str) -> None:
             SessionLock.date_key == date_key,
         ).first()
         lock_existed_before = lock_before is not None
+    except Exception as e:
+        print(f"[SCHEDULER] Dedup check query failed (non-fatal, assuming not-yet-run): {e}")
+        lock_existed_before = False
     finally:
         db.close()
 
-    print(f"[SCHEDULER] Fetching battlebox for Senior Analyst ({date_key})...")
+    print(f"[SCHEDULER] Fetching battlebox for session-lock pipeline ({date_key})...")
     try:
         out = await battlebox_pipeline.get_live_battlebox("BTCUSDT", session_mode="AUTO")
     except Exception as e:
@@ -196,10 +224,10 @@ async def _fire_senior_analyst(date_key: str) -> None:
     if not lock_existed_before:
         # New lock was created — get_live_battlebox() already fired run_mas_analysis()
         # internally via asyncio.create_task(). No double-fire.
-        print(f"[SCHEDULER] New session lock created — Senior Analyst fired via battlebox")
+        print(f"[SCHEDULER] New session lock created — session-lock pipeline fired via battlebox")
         return
 
-    # Restart recovery: existing lock, analyst not triggered — fire directly
+    # Restart recovery: existing lock, pipeline not triggered — fire directly
     session_info = out.get("battlebox", {}).get("session", {})
     session_id = session_info.get("id")
     if not session_id:
@@ -220,7 +248,7 @@ async def _fire_senior_analyst(date_key: str) -> None:
     finally:
         db.close()
 
-    print(f"[SCHEDULER] Firing Senior Analyst directly (restart recovery) for {date_key} lock_end (9:00 AM ET)...")
+    print(f"[SCHEDULER] Firing session-lock pipeline directly (restart recovery) for {date_key} lock_end (9:00 AM ET)...")
     try:
         await asyncio.to_thread(
             kabroda_mas_flow.run_mas_analysis,
@@ -230,77 +258,96 @@ async def _fire_senior_analyst(date_key: str) -> None:
             battlebox_payload=pkt,
         )
     except Exception as e:
-        print(f"[SCHEDULER] Senior Analyst direct fire failed: {e}")
+        print(f"[SCHEDULER] Session-lock pipeline direct fire failed: {e}")
 
 
-async def run_senior_analyst_scheduler() -> None:
+async def run_session_lock_scheduler() -> None:
     """
-    Daily at 14:00 UTC (9:00 AM ET). Calls _fire_senior_analyst() which handles
-    both the normal-operation and restart-recovery paths without double-firing.
+    Daily at 14:00 UTC (9:00 AM ET). Calls _fire_session_lock_pipeline()
+    which handles both the normal-operation and restart-recovery paths
+    without double-firing.
+
+    Renamed 2026-09-26 from run_senior_analyst_scheduler() -- see
+    _fire_session_lock_pipeline()'s own docstring for why.
 
     Boot-time logic:
     - If it is past 14:00 UTC and no brief exists for today: fire immediately.
     - If it is before 14:00 UTC: wait for the scheduled time.
     """
-    print("[SCHEDULER] Senior Analyst scheduler starting...")
+    print("[SCHEDULER] Session-lock scheduler starting...")
 
     now = datetime.now(timezone.utc)
     _boot_session = session_manager.resolve_current_session(now, mode="AUTO")
     _boot_lock_end_ts = int(_boot_session["anchor_time"]) + 1800
     if now.timestamp() >= _boot_lock_end_ts:
         date_key = _boot_session["date_key"]
-        print(f"[SCHEDULER] Boot check: looking for today's Senior Analyst brief ({date_key})...")
+        print(f"[SCHEDULER] Boot check: looking for today's session-lock pipeline result ({date_key})...")
+        # REAL PRODUCTION INCIDENT (2026-09-26): this boot-time check used
+        # to have no except clause of its own -- only the outer while-loop
+        # below had one, and this code runs BEFORE that loop. When the
+        # mas_completed_at column migration silently failed in production
+        # (see database.py's own fix comment), this exact query crashed
+        # with an uncaught psycopg.errors.UndefinedColumn, which killed
+        # this entire coroutine (and therefore app.state.session_lock_task)
+        # before it ever reached the loop -- no scheduled fire ever
+        # happened again until the next full app restart. Wrapped in its
+        # own try/except now so a DB hiccup here degrades to "assume not
+        # yet run, try anyway" instead of silently killing the whole daily
+        # pipeline for the rest of the process's life.
+        existing = None
         db = SessionLocal()
         try:
             # Dedup source switched 2026-08-28, then 2026-09-24 -- see
-            # _fire_senior_analyst()'s matching comment above for the full
-            # reasoning (SessionLock.mas_completed_at, not a bare existence
-            # check, not CampaignLog.is_canonical -- that table's only
-            # writer is being retired).
+            # _fire_session_lock_pipeline()'s matching comment above for
+            # the full reasoning (SessionLock.mas_completed_at, not a bare
+            # existence check, not CampaignLog.is_canonical -- that
+            # table's only writer is being retired).
             existing = db.query(SessionLock).filter(
                 SessionLock.symbol == "BTC/USDT",
                 SessionLock.date_key == date_key,
                 SessionLock.mas_completed_at.isnot(None),
             ).first()
+        except Exception as e:
+            print(f"[SCHEDULER] Boot-time dedup check failed (non-fatal, firing anyway): {e}")
         finally:
             db.close()
 
         if existing:
-            print(f"[SCHEDULER] Boot: Senior Analyst already ran today ({date_key}) — skipping")
+            print(f"[SCHEDULER] Boot: session-lock pipeline already ran today ({date_key}) — skipping")
         else:
-            print(f"[SCHEDULER] Boot: no brief for today and past lock_end (9:00 AM ET) — firing now...")
+            print(f"[SCHEDULER] Boot: no result for today and past lock_end (9:00 AM ET) — firing now...")
             try:
-                await _fire_senior_analyst(date_key)
+                await _fire_session_lock_pipeline(date_key)
             except Exception as e:
-                print(f"[SCHEDULER] Boot-time Senior Analyst failed: {e}")
+                print(f"[SCHEDULER] Boot-time session-lock pipeline failed: {e}")
 
     while True:
         try:
             seconds = _seconds_until_lock_end()
             next_run_dt = datetime.now(timezone.utc) + timedelta(seconds=seconds)
-            scheduler_health_registry["senior_analyst"]["next_run"] = next_run_dt.isoformat()
-            scheduler_health_registry["senior_analyst"]["status"] = "WAITING"
+            scheduler_health_registry["session_lock"]["next_run"] = next_run_dt.isoformat()
+            scheduler_health_registry["session_lock"]["status"] = "WAITING"
 
-            print(f"[SCHEDULER] Senior Analyst: next fire in {seconds / 3600:.1f}h (lock_end / 9:00 AM ET)")
+            print(f"[SCHEDULER] Session-lock pipeline: next fire in {seconds / 3600:.1f}h (lock_end / 9:00 AM ET)")
             await asyncio.sleep(seconds)
 
-            scheduler_health_registry["senior_analyst"]["status"] = "EXECUTING"
+            scheduler_health_registry["session_lock"]["status"] = "EXECUTING"
 
             _fire_now = datetime.now(timezone.utc)
             _fire_session = session_manager.resolve_current_session(_fire_now, mode="AUTO")
             date_key = _fire_session["date_key"]
-            print(f"[SCHEDULER] Senior Analyst scheduled fire — {date_key} lock_end (9:00 AM ET)")
-            await _fire_senior_analyst(date_key)
+            print(f"[SCHEDULER] Session-lock pipeline scheduled fire — {date_key} lock_end (9:00 AM ET)")
+            await _fire_session_lock_pipeline(date_key)
 
-            scheduler_health_registry["senior_analyst"]["last_run"] = datetime.now(timezone.utc).isoformat()
-            scheduler_health_registry["senior_analyst"]["status"] = "WAITING"
+            scheduler_health_registry["session_lock"]["last_run"] = datetime.now(timezone.utc).isoformat()
+            scheduler_health_registry["session_lock"]["status"] = "WAITING"
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            print(f"[SCHEDULER] Senior Analyst scheduler error: {e}")
-            scheduler_health_registry["senior_analyst"]["error_count"] += 1
-            scheduler_health_registry["senior_analyst"]["last_error"] = str(e)
-            scheduler_health_registry["senior_analyst"]["status"] = "ERROR"
+            print(f"[SCHEDULER] Session-lock scheduler error: {e}")
+            scheduler_health_registry["session_lock"]["error_count"] += 1
+            scheduler_health_registry["session_lock"]["last_error"] = str(e)
+            scheduler_health_registry["session_lock"]["status"] = "ERROR"
             await asyncio.sleep(300)
 
 
@@ -413,11 +460,21 @@ async def run_monthly_lti_scheduler() -> None:
 # ==============================================================================
 # OUTCOME TRACKER — runs every 4 hours
 # Fills DecisionJournal outcome fields for rows older than 4h.
-# Fills CampaignLog.target_hit for all closed rows.
 # ==============================================================================
 
 def _do_outcome_tick(current_price: float) -> None:
-    """Core outcome-tracker logic. Extracted for testability."""
+    """Core outcome-tracker logic. Extracted for testability.
+
+    2026-09-26 (independent audit finding, V2 Crown retirement follow-up):
+    this used to also fill CampaignLog.target_hit for closed rows. Removed --
+    CampaignLog's only writer (decision_engine.py's V2 gate, plus the
+    is_canonical-setting upsert in the now-deleted _inject_brief_to_
+    database()) was deleted 2026-09-24, so no CampaignLog row has been
+    created or had is_canonical set since. This block was a permanently-
+    empty no-op query running every 4 hours against a table nothing writes
+    to anymore -- not harmful, but exactly the "still touching V2" pattern
+    this repo is being audited to remove.
+    """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - timedelta(hours=4)
     db = SessionLocal()
@@ -444,17 +501,8 @@ def _do_outcome_tick(current_price: float) -> None:
             row.outcome_direction_correct = correct
             filled += 1
 
-        # target_hit: current ledger always closes at T1 or SL — record what happened
-        closed_logs = db.query(CampaignLog).filter(
-            CampaignLog.status.in_(["CLOSED_WIN", "CLOSED_LOSS"]),
-            CampaignLog.target_hit.is_(None),
-            CampaignLog.is_canonical == True,
-        ).all()
-        for log in closed_logs:
-            log.target_hit = "T1" if log.status == "CLOSED_WIN" else "STOP"
-
         db.commit()
-        print(f"[OUTCOME TRACKER] Filled {filled} DJ rows | {len(closed_logs)} campaign target_hit rows")
+        print(f"[OUTCOME TRACKER] Filled {filled} DJ rows")
     except Exception as e:
         print(f"[OUTCOME TRACKER] DB error: {e}")
         db.rollback()
@@ -463,7 +511,7 @@ def _do_outcome_tick(current_price: float) -> None:
 
 
 async def run_outcome_tracker() -> None:
-    """Every 4 hours: fills 4H outcome fields on DecisionJournal and target_hit on CampaignLog.
+    """Every 4 hours: fills 4H outcome fields on DecisionJournal.
     Runs immediately on boot to backfill any existing unprocessed rows."""
     print("[SCHEDULER] Outcome Tracker starting...")
     while True:
@@ -532,7 +580,7 @@ async def lifespan(app: FastAPI):
     # task creation stops here, not the code itself.
     app.state.traveler_plan_task    = asyncio.create_task(traveler_plan_engine.run_traveler_plan_loop())
     app.state.executor_live_e1_task = asyncio.create_task(executor_live_e1_engine.run_executor_live_e1_loop())
-    app.state.senior_analyst_task   = asyncio.create_task(run_senior_analyst_scheduler())
+    app.state.session_lock_task     = asyncio.create_task(run_session_lock_scheduler())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
     # weekly_task (run_weekly_scheduler) removed 2026-09-24 -- see that
@@ -558,7 +606,7 @@ async def lifespan(app: FastAPI):
     app.state.gravity_task.cancel()
     app.state.traveler_plan_task.cancel()
     app.state.executor_live_e1_task.cancel()
-    app.state.senior_analyst_task.cancel()
+    app.state.session_lock_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -730,8 +778,7 @@ async def save_lti_protocol(request: Request, db: Session = Depends(get_db)):
 async def api_narrative_latest(symbol: str = "BTC/USDT"):
     """
     Single endpoint serving War Room, Market Radar Panel 00, and Gravity Map sidebar.
-    Returns latest tactical brief and JEWEL snapshot. No authentication required
-    — data is not sensitive.
+    No authentication required — data is not sensitive.
 
     2026-08-28: narrative/wave sourcing changed. MacroNarrativeLog's
     senior_analyst rows stopped being written this session (narrative_text had
@@ -740,48 +787,42 @@ async def api_narrative_latest(symbol: str = "BTC/USDT"):
     rows stopped 2026-08-17 (writer archived) -- the "wave" field had been
     silently serving month-stale data as if current. Andy's call: archive this
     concept, rebuild it properly in Kabroda AI Brain (needs continuous live
-    watching, not a once-a-day hardcoded write). tactical_text now reads from
-    CampaignLog directly (the real, canonical source); wave is always null so
+    watching, not a once-a-day hardcoded write). wave is always null so
     the front-end's existing `if (!data.wave)` fallback hides the section
     cleanly instead of showing stale content forever.
+
+    2026-09-26 (independent audit finding, V2 Crown retirement follow-up):
+    tactical_text used to read CampaignLog.mas_executive_brief directly --
+    that was fine when this comment called CampaignLog "the real, canonical
+    source," but CampaignLog's only writer (decision_engine.py, the V2 gate)
+    was deleted 2026-09-24. Nothing has set CampaignLog.is_canonical=True
+    since, so this endpoint was serving the SAME permanently-frozen
+    pre-retirement brief forever to three live public pages -- the exact
+    "showing stale content forever" anti-pattern this function's own wave/
+    jewel retirement already correctly avoided. tactical_text is now always
+    null too, same treatment, same reasoning: the front-end fallback hides
+    the section cleanly instead of lying about freshness.
     """
     db_sym = symbol.replace("USDT", "/USDT") if "/" not in symbol else symbol
 
-    db = SessionLocal()
-    try:
-        analyst_row = (
-            db.query(CampaignLog)
-            .filter(
-                CampaignLog.symbol == db_sym,
-                CampaignLog.is_canonical == True,
-            )
-            .order_by(CampaignLog.id.desc())
-            .first()
-        )
-
-        # jewel_row / JewelSnapshotLog read removed 2026-08-30 -- jewel_specialist.py
-        # (the only writer) is archived, nothing populates this table anymore.
-        # "jewel": null below so the front-end's existing !data.jewel fallback
-        # hides that panel cleanly instead of showing frozen data forever.
-
-        return JSONResponse({
-            "ok": True,
-            "symbol": db_sym,
-            "date_key": analyst_row.date_key if analyst_row else None,
-            "narrative": {
-                "narrative_text":   None,  # no longer generated -- see docstring
-                "tactical_text":    analyst_row.mas_executive_brief if analyst_row else None,
-                "performance_note": None,
-                "date_key":         analyst_row.date_key if analyst_row else None,
-            },
-            "wave": None,  # elliott_wave_specialist writer archived 2026-08-17 -- see docstring
-            "jewel": None,  # JEWEL system retired 2026-08-30 -- see comment above
-        })
-    except Exception as e:
-        print(f"[NARRATIVE API] Error: {e}")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    finally:
-        db.close()
+    # analyst_row / CampaignLog read removed 2026-09-26 -- see docstring.
+    # jewel_row / JewelSnapshotLog read removed 2026-08-30 -- jewel_specialist.py
+    # (the only writer) is archived, nothing populates this table anymore.
+    # "jewel": null below so the front-end's existing !data.jewel fallback
+    # hides that panel cleanly instead of showing frozen data forever.
+    return JSONResponse({
+        "ok": True,
+        "symbol": db_sym,
+        "date_key": None,
+        "narrative": {
+            "narrative_text":   None,  # no longer generated -- see docstring
+            "tactical_text":    None,  # no longer generated -- see docstring
+            "performance_note": None,
+            "date_key":         None,
+        },
+        "wave": None,  # elliott_wave_specialist writer archived 2026-08-17 -- see docstring
+        "jewel": None,  # JEWEL system retired 2026-08-30 -- see comment above
+    })
 
 
 # --- GRAVITY API ENDPOINT ---
@@ -833,8 +874,26 @@ async def api_radar_traveler_snapshot(db: Session = Depends(get_db)):
     data source to cut over to before V2's routes are deleted in that
     plan's Step 3 -- see traveler_radar.py's own module docstring for the
     full reasoning, including why a pre-cross request gets levels-only
-    with `plan: null` rather than a speculative directional dossier."""
-    return JSONResponse(traveler_radar.get_public_traveler_snapshot(db))
+    with `plan: null` rather than a speculative directional dossier.
+
+    2026-09-26 (real production incident): this route had no try/except at
+    all -- a DB error here (the mas_completed_at DATETIME/TIMESTAMP bug,
+    see database.py's own fix comment) propagated as an unhandled 500 with
+    a non-JSON body, which market_radar.html's loadTravelerRadar() catch
+    block can't parse, so it fell through to its hardest-coded failure
+    state ("RADAR LOAD FAILED. Check server logs."). Wrapped now, matching
+    /api/live-price's own established graceful-degradation pattern just
+    above this route: a well-formed `{"ok": false}` JSON body instead
+    routes the frontend into its existing "ENGINE CALIBRATING / STANDBY"
+    state (snap.ok falsy -> the !snap.ok branch), a materially better
+    failure mode for a public page than an unhandled crash -- this does
+    not fix a root cause (that's database.py's job), it only stops a
+    future unrelated DB hiccup from painting this exact page red again."""
+    try:
+        return JSONResponse(traveler_radar.get_public_traveler_snapshot(db))
+    except Exception as e:
+        print(f"[RADAR] traveler-snapshot failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "locked": False, "symbol": "BTCUSDT"})
 
 
 @app.get("/api/live-price")

@@ -690,7 +690,7 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
                     _LOCKED_PACKETS[session_key] = pkt
 
                     # Persist lock to DB in its own try/except so a write failure
-                    # never silently blocks gravity logging or the Senior Analyst fire.
+                    # never silently blocks gravity logging or the session-lock pipeline fire.
                     try:
                         new_lock = SessionLock(
                             symbol=norm_sym,

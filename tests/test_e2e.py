@@ -437,7 +437,9 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         state = self.admin_client.get("/api/v1/system/state")
         self.assertEqual(state.status_code, 200)
         health = state.json().get("scheduler_health", {})
-        # The scheduler_health dict contains runner keys like "senior_analyst", "jewel", etc.
+        # The scheduler_health dict contains runner keys like "session_lock", "gravity_engine", etc.
+        # ("senior_analyst"/"jewel" -- this comment's own former example keys -- were renamed/removed
+        # 2026-09-26/2026-09-24 respectively; kept the illustrative-comment convention, updated the names.)
         # Check that at least one runner has an error status, or that recent_errors is populated
         recent_errors = state.json().get("recent_errors", [])
         self.assertGreater(len(recent_errors), 0)
