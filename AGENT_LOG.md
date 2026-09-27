@@ -7771,3 +7771,83 @@ passed. Not yet deployed -- needs the same Render redeploy step as
 everything else today before it's live.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-27 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: entry-timing fix (item 3) + Bitunix decision-feed migration (item 1/L2), site commit `c452d57`
+STATUS: open (items 1+3 of the 11-item build list shipped and tested; 4/5/6/7/9/10 remain).
+
+Per Andy's ruling (14:55 CT, TRAVELER_D1_D2_D3_SPEC.md amended, CC_WORK_
+ORDER_TRAVELER_SITE_AUDIT.md filed) and the methodology correction Andy
+gave directly ("audit against the spec, then fix -- don't start from
+today's trade and justify the code"): audited D1/D2 code against the spec
+line by line (independent subagent, zero logic defect found in the four
+functions most likely to hold one), which narrowed the real incident to
+exactly the two items DeepSeek's own DB/API trace converged on from the
+other direction. Fixed both, tested, committed:
+
+**Item 3 (the actual root cause)**: the real resting limit order was only
+placed AFTER gate_traveler.advance_waiting_touch()'s pure-candle
+simulation had already decided a touch happened -- by the time the real
+order reached the exchange (13:40:33 UTC), price had moved ~245 points
+past the trigger and the POST_ONLY limit auto-canceled. Fixed: real LIVE
+order placement now fires at the WAITING_CROSS -> WAITING_TOUCH
+transition itself (confirmed cross + gate pass), via new executor_engine.
+process_traveler_cross() (LIVE accounts only), called from traveler_plan_
+engine.py's WAITING_CROSS branch. process_traveler_fill() (the old
+candle-touch-gated path) now excludes LIVE accounts explicitly -- no
+double placement. build_hypothetical_traveler_order() sources entry price
+from the trigger (available at the cross) instead of fill_price (only
+set once a touch happens) -- same value in real data, just available
+earlier, at the moment a real order actually needs it.
+
+**Item 1/L2 (the Kraken-vs-Bitunix divergence)**: added fetch_bitunix_5m/
+15m/1h/daily (market_data.py, generalized from the existing fetch_
+bitunix_4h pagination pattern) and rewired battlebox_pipeline.py's
+session-lock levels + traveler_plan_engine.py's cross/touch/D3 monitoring
+to Bitunix. Scoped narrowly, confirmed via grep before touching anything:
+Gravity Map, mtf_confluence_scanner, and session_monitor.py all still use
+fetch_live_* (Kraken) unchanged -- out of scope for this ruling, which is
+specifically the traveler decision chain, not the whole site.
+
+**Verification**: two new regression tests (LIVE order created at cross
+with zero touch yet; DRY_RUN still fires only at the simulated touch, no
+early/duplicate order), one mutation-verified (reverting the cross-time
+hook makes the LIVE test fail with the exact original symptom -- no order
+exists until a touch is simulated). 35 pre-existing tests initially broke
+on the fixture assumption that fill_price alone was enough to build an
+order (never set breakout_trigger/breakdown_trigger, which real plans
+always have at the cross) -- fixed the fixtures, not the code, since the
+fixtures were testing an incomplete plan shape. One test's synthetic BBWP
+data also tripped C5 once both legs shared one feed (expected, now that
+they're genuinely the same data) -- re-derived working synthetic data by
+direct computation against the real study_indicators functions, not
+guessed. Full suite 515 passed, clean boot, both /api/radar/traveler-
+snapshot and /suite/radar verified 200.
+
+**Independent corroboration** (Brain-side subagent, dispatched before
+this fix landed, re-verified against the LATEST code after -- its own
+methodological note flags this): D3 exit priority (STOP>C5>BBWP>T1>TIME),
+stop-never-moves (zero live callers of the one function that could
+re-price a stop), and the banded_risk x F_A sizing formula are ALL
+already correct per spec -- items 2/8's own D3 pieces, and half of item 9,
+need no further code change. Real gap confirmed independently by both
+audits: no active reconciliation exists for an entry order canceled on
+the exchange for a reason OTHER than the bot's own expiry-triggered
+cancel -- management_state can sit stale (not FILLED, not booked as a
+loss -- those hard lines hold -- but not accurate either) for up to 7
+days until expiry finally reconciles it. This is item 4's real remaining
+scope, not yet fixed.
+
+**Still open, not yet touched**: item 5 (emails carry no risk-dollars or
+account id -- confirmed the data isn't even passed into the builder
+functions), item 6 (the ARMED email still fires off plan-level bookkeeping,
+not confirmed per-account exchange truth -- now less urgent than before
+since the account's real order gets placed immediately rather than
+minutes late, but the email's own truthfulness gap is unchanged), item 7
+(radar's public badge lacks the "(bookkeeping)"/"(real)" caveat the admin
+panel already has), item 9's other half (account-1's $34.90 sizing --
+confirmed formula-correct, but whether the real saved policy values
+explain that exact number needs a DB query, not a source read), item 10
+(re-audit of 09-19->09-22 FILLED plans for touch-vs-close correctness --
+also needs DB access). Continuing.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
