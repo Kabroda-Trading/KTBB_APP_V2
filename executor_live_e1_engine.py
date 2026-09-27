@@ -85,7 +85,7 @@ _EXIT_SIDE_FOR_DIRECTION = {_LONG: "SELL", _SHORT: "BUY"}   # closing a LONG sel
 # the ONE shared source with the DRY_RUN walk -- CC_INTERFACE.md audit item 6)
 # plus the two extra states this LIVE engine can also reach, mirroring
 # executor_live_engine.py's own _TERMINAL_STATES shape exactly.
-_E1_LIVE_TERMINAL_STATES = mgmt_e1_stack.MGMT_E1_TERMINAL_STATES + ("ENTRY_FILLED_UNPROTECTED", "CLOSED_EXPIRED")
+_E1_LIVE_TERMINAL_STATES = mgmt_e1_stack.MGMT_E1_TERMINAL_STATES + ("ENTRY_FILLED_UNPROTECTED", "CLOSED_EXPIRED", "CLOSED_ENTRY_CANCELED")
 
 _CLOSE_CONFIRM_INTERVAL_SEC = 1.0
 _CLOSE_CONFIRM_ATTEMPTS = 10
@@ -139,9 +139,18 @@ def _r_multiple(price: float, entry: float, stop: float) -> float:
 
 
 async def _current_live_price(symbol: str) -> Optional[float]:
-    """Same live-price source as executor_live_engine.py's own identical
-    helper -- market_data's own 5m candle feed, not Bitunix tick data."""
-    candles = await market_data.fetch_live_5m(symbol, limit=2)
+    """2026-09-27 (Andy ruling 14:55 CT): Bitunix, not Kraken -- this
+    approximates the exchange's own market-close fill price for a real
+    contingency exit (C5/BBWP/TIME, see this function's own caller), i.e.
+    a real P&L number booked against Bitunix, the actual execution venue
+    -- using a different exchange's price for that approximation is
+    exactly the same cross-venue mismatch class as the 2026-09-27
+    incident, just in D3 instead of D1/D2. Found while fixing item 4 in
+    this same file's neighborhood; was previously market_data's Kraken 5m
+    feed (executor_live_engine.py's own v2-era identical helper's
+    convention, carried over without re-examination when this file was
+    built)."""
+    candles = await market_data.fetch_bitunix_5m(symbol, target_bars=2)
     if not candles:
         return None
     return float(candles[-1]["close"])
@@ -291,6 +300,41 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
     status = data.get("status")
     order_row.entry_status = status
     if status != "FILLED":
+        # 2026-09-27 (Andy ruling 14:55 CT, item 4 -- the reconciliation gap
+        # both the code audit and DeepSeek's DB trace confirmed): before
+        # this, a real exchange-side cancel for any reason OTHER than the
+        # bot's own expiry logic (a POST_ONLY rejection, exactly like the
+        # 2026-09-27 incident's two live orders) fell through to the
+        # "still resting, recheck next tick" return below and stayed there
+        # -- management_state stuck at PENDING_ENTRY, silently disagreeing
+        # with the exchange, for up to 7 days until expiry finally
+        # reconciled it. This never caused a false FILLED/-1R booking or
+        # close email (those hard lines already held), but the state
+        # itself was stale and nothing ever surfaced it. CLOSED_ENTRY_
+        # CANCELED is a genuinely new terminal state (not CLOSED_EXPIRED --
+        # that name means something specific and different: the bot's OWN
+        # decision to cancel because the journey timed out, not the
+        # exchange rejecting/cancelling the order on its own).
+        if status == "CANCELED":
+            order_row.management_state = "CLOSED_ENTRY_CANCELED"
+            order_row.close_reason = "ENTRY_CANCELED"
+            order_row.closed_at = datetime.datetime.utcnow()
+            executor_accounts.write_audit(
+                db, "ORDER_CANCELLED",
+                f"real traveler entry order {order_row.entry_exchange_order_id} was CANCELED on the exchange "
+                f"(not by this bot's own expiry logic) before ever filling -- no position was opened, "
+                f"no loss booked. Exchange detail: {data}",
+                account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=data)
+            import notify
+            notify.send_admin_email(
+                f"KABRODA EXECUTOR ALERT -- traveler entry canceled on the exchange ({order_row.symbol})",
+                f"traveler_plan_id={traveler_plan_row.id}, account={account.id} ({account.label})\n\n"
+                f"The real resting entry order (orderId={order_row.entry_exchange_order_id}) was CANCELED "
+                f"on the exchange -- not by this bot's own expiry logic. No position was ever opened on "
+                f"this account for this trade, and no loss is booked. This usually means a POST_ONLY "
+                f"limit could no longer rest (price had already moved past the entry level).",
+            )
+            return
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         if _plan_has_expired(traveler_plan_row, now_utc):
             await _cancel_expired_traveler_entry_order(db, account, client, symbol, traveler_plan_row, order_row)
@@ -613,14 +657,17 @@ async def poll_traveler_position(db: Session, account: ExecutorAccount, traveler
     # Still open -- check the dynamic exits, priority C5-or-BBWP then TIME.
     # T1 stays passive; it is caught in the closure branch above the moment
     # it fills, no separate check needed here.
-    candles_1h = await market_data.fetch_live_1h(symbol, limit=200)
-    candles_4h = await market_data.fetch_live_4h(symbol, limit=200)
-    # BBWP's own feed (Bitunix, CC_INTERFACE.md item 3) -- fetched
-    # regardless of the Kraken candles above; a bad Bitunix poll must never
-    # block the Kraken-fed C5 check (see check_c5_or_bbwp()'s own docstring).
-    candles_4h_bbwp = await market_data.fetch_bitunix_4h(symbol)
+    # 2026-09-27 (Andy ruling 14:55 CT): Bitunix, not Kraken -- this D3
+    # poll (for an already-filled LIVE position) was missed in the initial
+    # decision-feed migration pass, which fixed traveler_plan_engine.py's
+    # own DRY_RUN-walk equivalent but not this LIVE poll -- found while
+    # working item 4 in this same function's neighborhood. C5's own 4H leg
+    # and BBWP now read the same fetch (candles_4h passed for both
+    # parameters, same consolidation as the DRY_RUN walk).
+    candles_1h = await market_data.fetch_bitunix_1h(symbol, target_bars=200)
+    candles_4h = await market_data.fetch_bitunix_4h(symbol, target_bars=200)
     if candles_1h and candles_4h:
-        c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(candles_1h, candles_4h, candles_4h_bbwp=candles_4h_bbwp)
+        c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(candles_1h, candles_4h, candles_4h_bbwp=candles_4h)
         if c5_hit or bbwp_hit:
             await _market_close_traveler_order(
                 db, account, client, symbol, traveler_plan_row, order_row,
