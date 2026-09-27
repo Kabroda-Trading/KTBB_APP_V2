@@ -493,7 +493,7 @@ def test_kill_switch_toggle_reflected_in_next_traveler_plan_build(env):
     db = env["db"]
     plan = TravelerPlan(
         symbol="BTC/USDT", date_key="2026-09-04", session_id="us_ny_futures", status="FILLED",
-        direction="LONG", fill_price=100.0, stop_price=95.0, t1_price=112.0,
+        direction="LONG", fill_price=100.0, breakout_trigger=100.0, stop_price=95.0, t1_price=112.0,
         rsi_4h_at_cross=80.0,  # LONG extreme -- F_A=1.0, isolates this test's real subject
     )
     db.add(plan)

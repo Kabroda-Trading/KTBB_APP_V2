@@ -55,16 +55,27 @@ def _bbwp_burn_candles_4h():
     for test fixtures shared in spirit but not literally shared modules).
     Anchored to REAL wall-clock "now" (not a fixed epoch): the live loop's
     own now_utc = datetime.now(timezone.utc), so the last bar must end
-    safely before THAT, not before some fixture's own fixed `ct`."""
+    safely before THAT, not before some fixture's own fixed `ct`.
+
+    2026-09-27: dampened the final 6 bars (was a single violent +4.0 tail
+    on top of 90 alternating +-40/-39 bars) -- C5's 4H leg and BBWP now
+    read this SAME series (see run_polls()'s own comment), and the
+    original violent tail also tripped c5_momentum_decay() on this data
+    (verified directly against study_indicators.py's real functions). A
+    calmer final stretch (85 violent bars instead of 90, then 6 small
+    +2.0/-1.5 bars) keeps bbwp_burn() genuinely true (bbwp[-1]=87.88 > 70,
+    falling from bbwp[-2]=89.46) while c5_momentum_decay() reads False on
+    the same data -- verified by direct computation, not guessed."""
     closes = [100.0]
     for i in range(150):
         closes.append(closes[-1] + (12.0 if i % 2 == 0 else -11.0))
-    n_phase2 = 865 - len(closes) - 90 - 1
+    n_phase2 = 865 - len(closes) - 85 - 6
     for i in range(n_phase2):
         closes.append(closes[-1] + (0.4 if i % 2 == 0 else -0.3))
-    for i in range(90):
+    for i in range(85):
         closes.append(closes[-1] + (40.0 if i % 2 == 0 else -39.0))
-    closes.append(closes[-1] + 4.0)
+    for delta in (2.0, -1.5, 2.0, -1.5, 2.0, -1.5):
+        closes.append(closes[-1] + delta)
     last_open = int(dt.datetime.now(timezone.utc).timestamp()) - 14400 - 60
     n = len(closes)
     return [{"close": c, "time": last_open - (n - 1 - i) * 14400} for i, c in enumerate(closes)]
@@ -124,23 +135,33 @@ def poll_env(monkeypatch):
         return account_id
 
     def run_polls(candles_5m_by_symbol=None, candles_1h_by_symbol=None, candles_4h_by_symbol=None,
-                  candles_4h_bitunix_by_symbol=None, polls=1):
+                  polls=1):
+        # 2026-09-27 (Andy ruling 14:55 CT): the traveler engine's own
+        # decision feed moved from Kraken (fetch_live_*) to Bitunix
+        # (fetch_bitunix_*) -- see market_data.py's own docstrings. C5's 4H
+        # leg and BBWP now read the SAME Bitunix fetch (traveler_plan_
+        # engine.py's own _advance_e1_order() passes one fetched result for
+        # both mgmt_e1_stack.advance()'s candles_4h and candles_4h_bbwp
+        # parameters) -- the old separate candles_4h_bitunix_by_symbol
+        # parameter this fixture used to accept is gone; a test wanting a
+        # BBWP-triggering series now passes it as candles_4h_by_symbol
+        # directly, same as C5's own data (they can no longer diverge in
+        # the real code path). fetch_live_* are also patched, harmlessly --
+        # nothing in the traveler path calls them anymore, but leaving them
+        # patched costs nothing and guards against a real network call if
+        # that ever changes back.
         candles_5m_by_symbol = candles_5m_by_symbol or {}
         candles_1h_by_symbol = candles_1h_by_symbol or {}
         candles_4h_by_symbol = candles_4h_by_symbol or {}
-        candles_4h_bitunix_by_symbol = candles_4h_bitunix_by_symbol or {}
 
-        async def fake_5m(symbol, limit=310):
+        async def fake_5m(symbol, limit=310, target_bars=None):
             return candles_5m_by_symbol.get(symbol, [])
 
-        async def fake_1h(symbol, limit=100):
+        async def fake_1h(symbol, limit=100, target_bars=None):
             return candles_1h_by_symbol.get(symbol, [])
 
-        async def fake_4h(symbol, limit=100):
+        async def fake_4h(symbol, limit=100, target_bars=None):
             return candles_4h_by_symbol.get(symbol, [])
-
-        async def fake_bitunix_4h(symbol, target_bars=900):
-            return candles_4h_bitunix_by_symbol.get(symbol, [])
 
         sleeps = {"n": 0}
 
@@ -152,7 +173,9 @@ def poll_env(monkeypatch):
         monkeypatch.setattr(tpe.market_data, "fetch_live_5m", fake_5m)
         monkeypatch.setattr(tpe.market_data, "fetch_live_1h", fake_1h)
         monkeypatch.setattr(tpe.market_data, "fetch_live_4h", fake_4h)
-        monkeypatch.setattr(tpe.market_data, "fetch_bitunix_4h", fake_bitunix_4h)
+        monkeypatch.setattr(tpe.market_data, "fetch_bitunix_5m", fake_5m)
+        monkeypatch.setattr(tpe.market_data, "fetch_bitunix_1h", fake_1h)
+        monkeypatch.setattr(tpe.market_data, "fetch_bitunix_4h", fake_4h)
         monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
 
         async def main():
@@ -253,6 +276,84 @@ def test_waiting_touch_fills_and_fires_the_executor_hook_for_a_gate_traveler_acc
     # ORDER_D1_RSI_AT_CROSS.md): 55.0 is not extreme for LONG (needs >=80) -> 0.5
     assert order.sizing_multiplier_used == pytest.approx(0.5)
     assert order.qty == pytest.approx((100.0 * 0.5) / abs(50000.0 - 49664.0))
+
+
+def test_live_account_order_placed_at_cross_not_at_simulated_touch(poll_env):
+    # 2026-09-27 (Andy ruling 14:55 CT, item 3 -- root cause of the same-day
+    # incident): a LIVE account's ExecutorOrder must be created the moment
+    # the cross confirms + gate passes (WAITING_CROSS -> WAITING_TOUCH),
+    # NOT after a later poll's candle simulation decides a touch already
+    # happened. Before this fix, LIVE placement was gated behind gate_
+    # traveler.advance_waiting_touch()'s pure-candle simulation -- placing
+    # the real order only after the fact, sometimes after price had moved
+    # well past the trigger (both live accounts' real orders canceled with
+    # no fill, 2026-09-27 13:30-13:40 UTC).
+    account_id = poll_env["make_traveler_account"]()
+    db = SessionLocal()
+    db.query(ExecutorAccount).filter_by(id=account_id).update({"mode": "LIVE"})
+    db.commit()
+    db.close()
+
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_CROSS",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0,
+        r30_high=50000.0, r30_low=49700.0,
+    )
+    cross_candles = [_c5m(49850.0, ct + i * 300) for i in range(5)] + [_c5m(50100.0, ct + 5 * 300)]  # confirmed close beyond BO
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": cross_candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "WAITING_TOUCH"   # confirmed cross, gate passed -- NOT yet a real/simulated fill
+
+    orders_at_cross = poll_env["get_orders"](traveler_plan_id=row.id)
+    assert len(orders_at_cross) == 1   # the LIVE account's order already exists, before any touch
+    assert orders_at_cross[0].account_id == account_id
+    assert orders_at_cross[0].mode == "LIVE"
+    assert orders_at_cross[0].decision == "WOULD_PLACE"
+    assert orders_at_cross[0].entry_price == 50000.0   # the trigger, not a fill/touch price
+
+    # Now the simulated wick touch happens (a later poll). process_traveler_
+    # fill() (the candle-simulated-touch hook) must NOT create a second
+    # order for this same LIVE account -- it was already armed at the cross.
+    touch_candles = [_c5m(49900.0, ct + 6 * 300)]  # wick touches the trigger (low <= 50000)
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": touch_candles}, polls=1)
+
+    assert poll_env["get_plan"]().status == "FILLED"
+    orders_after_touch = poll_env["get_orders"](traveler_plan_id=row.id)
+    assert len(orders_after_touch) == 1   # still exactly one -- no duplicate created at the simulated fill
+
+
+def test_dry_run_account_not_processed_at_cross_only_at_simulated_touch(poll_env):
+    # The mirror of the test above: DRY_RUN's own bookkeeping fill must
+    # still fire at the simulated touch (unchanged behavior) -- its order
+    # is NOT created early at the cross, since build_hypothetical_
+    # traveler_order() would otherwise stamp entry_fill_price/time from
+    # traveler_plan_row.fill_price while it's still None at that point.
+    account_id = poll_env["make_traveler_account"]()  # DRY_RUN by default
+
+    ct = 1700000000
+    poll_env["make_plan"](
+        status="WAITING_CROSS",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0,
+        r30_high=50000.0, r30_low=49700.0,
+    )
+    cross_candles = [_c5m(49850.0, ct + i * 300) for i in range(5)] + [_c5m(50100.0, ct + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": cross_candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "WAITING_TOUCH"
+    assert poll_env["get_orders"](traveler_plan_id=row.id) == []   # nothing created yet for DRY_RUN
+
+    touch_candles = [_c5m(49900.0, ct + 6 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": touch_candles}, polls=1)
+
+    assert poll_env["get_plan"]().status == "FILLED"
+    orders = poll_env["get_orders"](traveler_plan_id=row.id)
+    assert len(orders) == 1
+    assert orders[0].account_id == account_id
+    assert orders[0].mode == "DRY_RUN"
+    assert orders[0].management_state == "ENTRY_FILLED_ORDERS_PLACED"
 
 
 def test_waiting_touch_fills_on_a_wick_only_touch_through_the_full_loop(poll_env):
@@ -400,11 +501,15 @@ def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_bbwp_exit(poll_env):
     assert poll_env["get_plan"]().status == "FILLED"
 
     walk_candles = [_c5m(49900.0, ct + 300), _c5m(49950.0, ct + 600)]  # no STOP, no T1 touch
-    flat_htf = [{"close": 50000.0} for _ in range(20)]                # no C5 signal on Kraken
+    flat_htf = [{"close": 50000.0} for _ in range(20)]                # no C5 signal on the 1H leg
+    # 2026-09-27: C5's 4H leg and BBWP now read the same Bitunix fetch (see
+    # run_polls()'s own comment) -- the BBWP-burn series goes to
+    # candles_4h_by_symbol directly; there is no separate feed to isolate
+    # C5 from BBWP on 4H data anymore, only the 1H leg (flat_htf) can stay
+    # C5-neutral.
     poll_env["run_polls"](
         candles_5m_by_symbol={"BTC/USDT": walk_candles},
-        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
-        candles_4h_bitunix_by_symbol={"BTC/USDT": _bbwp_burn_candles_4h()},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": _bbwp_burn_candles_4h()},
         polls=1,
     )
 

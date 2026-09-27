@@ -55,6 +55,11 @@ from market_data import (
     fetch_live_1h,
     fetch_live_4h,
     fetch_live_daily,
+    fetch_bitunix_5m,
+    fetch_bitunix_15m,
+    fetch_bitunix_1h,
+    fetch_bitunix_4h,
+    fetch_bitunix_daily,
     _calc_ema_series,
     _calc_adx,
     _calc_bbwp,
@@ -564,12 +569,25 @@ async def get_live_battlebox(symbol: str, session_mode: str = "AUTO", manual_id:
     # -- its only output, context["macro_environment"], had zero readers
     # anywhere (its only consumer was the removed session-energy route);
     # market_context_oracle.py itself is archived, orphaned by this.
+    #
+    # 2026-09-27 (Andy ruling 14:55 CT, AGENT_LOG.md both repos): switched
+    # from fetch_live_*() (Kraken) to fetch_bitunix_*() -- SessionLock's
+    # levels (BO/BD/r30/24h value area) are the Traveler's sole SSOT now
+    # that V2 is retired (see this repo's CLAUDE.md "Core Concept" section),
+    # so this is squarely "the traveler decision chain," which the ruling
+    # moved to Bitunix -- the venue the traveler study was actually
+    # measured against and real orders execute on. Kraken's own bar for
+    # the same nominal window can genuinely disagree with Bitunix's (real,
+    # confirmed cross-venue divergence, 2026-09-27 incident) -- levels
+    # must be computed on the same venue the live gate/entry monitor
+    # reads, or the two halves of D1 could each be internally consistent
+    # and still disagree with each other.
     fetch_tasks = [
-        fetch_live_5m(symbol),
-        fetch_live_15m(symbol),
-        fetch_live_1h(symbol),
-        fetch_live_4h(symbol),
-        fetch_live_daily(symbol),
+        fetch_bitunix_5m(symbol),
+        fetch_bitunix_15m(symbol),
+        fetch_bitunix_1h(symbol),
+        fetch_bitunix_4h(symbol),
+        fetch_bitunix_daily(symbol),
     ]
 
     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)

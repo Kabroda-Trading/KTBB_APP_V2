@@ -11,14 +11,24 @@
 #   WAITING_CROSS  -> gate_traveler.advance_waiting_cross() (5m candles) --
 #                     no cross yet -> silent; cross confirmed -> either
 #                     TERCILE_SKIPPED (terminal, no trade) or WAITING_TOUCH.
+#                     2026-09-27 (item 3, root cause of that day's incident):
+#                     a WAITING_TOUCH transition ALSO fires
+#                     executor_engine.process_traveler_cross() immediately
+#                     -- this is where a LIVE account's real resting entry
+#                     limit gets placed on the exchange, at the trigger,
+#                     the moment the cross confirms and the gate passes.
+#                     Real fill confirmation for that order is exchange-
+#                     polled separately (executor_live_e1_engine.py), not
+#                     decided by the candle simulation below.
 #   WAITING_TOUCH  -> gate_traveler.advance_waiting_touch() (5m candles since
 #                     cross_time) -- a resting limit sits at the trigger;
 #                     opposite trigger breaks first -> DONE; a wick touches
-#                     the trigger -> FILLED (fires the executor hook for
-#                     GATE_TRAVELER accounts); 7-day journey cap passes with
-#                     neither -> DONE. NOT scoped to "is the session still
-#                     today" -- a row can poll across multiple days, unlike
-#                     TradePlan's WAITING.
+#                     the trigger -> FILLED (fires the DRY_RUN-only
+#                     executor hook, process_traveler_fill() -- see its own
+#                     docstring); 7-day journey cap passes with neither ->
+#                     DONE. NOT scoped to "is the session still today" -- a
+#                     row can poll across multiple days, unlike TradePlan's
+#                     WAITING.
 #   FILLED / TERCILE_SKIPPED / DONE -> terminal, not polled (see the query
 #                        filter in run_traveler_plan_loop() below).
 #
@@ -26,11 +36,13 @@
 # orders (mgmt_e1_stack.py) -- NOT executor_live_engine.py's own poll_open_
 # position()/run_executor_position_loop(), which are exchange-POSITION-
 # driven (they query real Bitunix positions, and only ever pick up orders
-# with a real entry_exchange_order_id, i.e. LIVE fills). GATE_TRAVELER is
-# DRY_RUN-only for now (executor_engine.py's own comment on this), so its
-# management walk is pure candle-driven simulation, same style as gate_
-# traveler.py's own D1/D2 -- kept in this file rather than executor_live_
-# engine.py to keep that module's real-exchange-call assumptions intact.
+# with a real entry_exchange_order_id, i.e. LIVE fills). GATE_TRAVELER has
+# real LIVE accounts as of 2026-09-26 (Andy_Bitunix, dawson_bitu) -- this
+# file's own candle-driven D3 walk (mgmt_e1_stack.py) is DRY_RUN-only
+# (_open_dry_run_e1_orders()'s own mode filter, unchanged); a LIVE order's
+# real management is executor_live_e1_engine.py's job, exchange-polled,
+# never this simulation. Kept in this file (rather than executor_live_
+# engine.py) to keep that module's real-exchange-call assumptions intact.
 # ==============================================================================
 
 import asyncio
@@ -75,7 +87,10 @@ def _as_utc(dt):
 
 async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
     symbol = row.symbol
-    candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=310))
+    # 2026-09-27 (Andy ruling 14:55 CT): Bitunix, not Kraken -- the
+    # traveler's own decision feed, see market_data.py's fetch_bitunix_*()
+    # docstrings for the full ruling.
+    candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_bitunix_5m(symbol, target_bars=310))
     if not candles_5m:
         return
 
@@ -87,24 +102,35 @@ async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
         }
         # D1 RSI-AT-CROSS (2026-09-21): raw (unstripped) 4H candles -- gate_
         # traveler.rsi_at_cross() does its own closed-bar filtering against
-        # the cross timestamp it determines internally. limit=200 is far
-        # more than MIN_RSI_4H_BARS (15) needs; a fetch failure (empty list)
-        # is handled by rsi_at_cross() itself (-> None -> not skipped), not
-        # a reason to delay cross detection on the already-confirmed 5m data.
-        candles_4h = await market_data.fetch_live_4h(symbol, limit=200)
+        # the cross timestamp it determines internally. target_bars=200 is
+        # far more than MIN_RSI_4H_BARS (15) needs; a fetch failure (empty
+        # list) is handled by rsi_at_cross() itself (-> None -> not
+        # skipped), not a reason to delay cross detection on the already-
+        # confirmed 5m data.
+        candles_4h = await market_data.fetch_bitunix_4h(symbol, target_bars=200)
         updates = gate_traveler.advance_waiting_cross(plan_dict, candles_5m, now_utc, candles_4h=candles_4h)
         await _apply(db, row, updates, symbol)
+        # 2026-09-27 (item 3, root cause of the same-day incident): place
+        # LIVE accounts' real resting entry order NOW, at the confirmed
+        # cross + gate pass -- not after a later poll decides a touch
+        # already happened. Only fires on a genuine WAITING_CROSS ->
+        # WAITING_TOUCH transition (gate passed) -- TERCILE_SKIPPED takes
+        # no trade, so nothing to arm. See executor_engine.process_
+        # traveler_cross()'s own docstring for the full reasoning.
+        if updates and updates.get("status") == "WAITING_TOUCH":
+            await _notify_executor_cross(db, row, symbol)
 
     elif row.status == "WAITING_TOUCH":
-        # A multi-day window (up to 7 days from the cross) -- limit=310 5m
-        # candles (~26h) may not cover the whole span on a late poll after a
-        # gap, but every poll only needs candles since the LAST time this row
-        # was checked to find a newly-confirmed bar; a wider fetch is cheap
-        # insurance against a missed poll cycle, not required for correctness
-        # (a bar this poll misses because the window was too short gets
-        # caught on the NEXT poll, same as trade_plan_engine.py's own 60s-
-        # cadence tolerance elsewhere).
-        candles_wide = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=2016))  # ~7 days of 5m bars
+        # A multi-day window (up to 7 days from the cross) -- target_
+        # bars=2016 5m candles (~7 days) may not cover the whole span on a
+        # late poll after a gap, but every poll only needs candles since
+        # the LAST time this row was checked to find a newly-confirmed
+        # bar; a wider fetch is cheap insurance against a missed poll
+        # cycle, not required for correctness (a bar this poll misses
+        # because the window was too short gets caught on the NEXT poll,
+        # same as trade_plan_engine.py's own 60s-cadence tolerance
+        # elsewhere).
+        candles_wide = market_data.confirmed_5m_closes(await market_data.fetch_bitunix_5m(symbol, target_bars=2016))  # ~7 days of 5m bars
         plan_dict = {
             "status": row.status, "direction": row.direction,
             "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
@@ -179,15 +205,33 @@ def _notify_traveler_management_event(order: ExecutorOrder) -> None:
 
 
 async def _notify_executor(db, row: TravelerPlan, symbol: str) -> None:
-    """GATE_TRAVELER's executor hook -- fires once, on the real FILLED
-    transition, same 'bot = hands, brain stays in the plan row' treatment
-    trade_plan_engine.py's own _notify_executor() gives v1/v2. Swallows every
+    """GATE_TRAVELER's executor hook -- fires once, on the candle-simulated
+    FILLED transition, DRY_RUN accounts only as of 2026-09-27 (see
+    executor_engine.process_traveler_fill()'s own updated docstring; LIVE
+    accounts are armed earlier, at the cross -- see _notify_executor_cross()
+    below). Same 'bot = hands, brain stays in the plan row' treatment
+    trade_plan_engine.py's own _notify_executor() gave v1/v2. Swallows every
     exception (an executor bug must never affect this row's own write)."""
     try:
         import executor_engine
         await executor_engine.process_traveler_fill(db, row)
     except Exception as e:
         print(f"|| EXECUTOR || Traveler hook failed for {symbol}: {e}")
+
+
+async def _notify_executor_cross(db, row: TravelerPlan, symbol: str) -> None:
+    """2026-09-27 (Andy ruling 14:55 CT, item 3): fires once, on the
+    confirmed WAITING_CROSS -> WAITING_TOUCH transition (gate passed) --
+    this is where a LIVE account's real resting entry order actually gets
+    placed on the exchange, at the trigger, per spec §D2. See executor_
+    engine.process_traveler_cross()'s own docstring for the full root-
+    cause reasoning. Same non-blocking, own-try/except pattern as
+    _notify_executor() above."""
+    try:
+        import executor_engine
+        await executor_engine.process_traveler_cross(db, row)
+    except Exception as e:
+        print(f"|| EXECUTOR || Traveler cross hook failed for {symbol}: {e}")
 
 
 def _open_dry_run_e1_orders(db) -> list:
@@ -210,17 +254,23 @@ def _open_dry_run_e1_orders(db) -> list:
 
 async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None:
     symbol = order.symbol
-    candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_live_5m(symbol, limit=2016))  # ~7 days
+    # 2026-09-27 (Andy ruling 14:55 CT): Bitunix, not Kraken -- see
+    # market_data.py's fetch_bitunix_*() docstrings. C5's own 4H leg and
+    # BBWP now read the SAME Bitunix feed (candles_4h passed for both
+    # parameters below) -- they were only ever split because C5 stayed on
+    # Kraken while BBWP moved to Bitunix first (2026-09-22); that split is
+    # gone now that both are Bitunix, though check_c5_or_bbwp() still
+    # accepts candles_4h/candles_4h_bbwp as two parameters (see market_
+    # data.fetch_bitunix_4h()'s own updated docstring on why the
+    # signature wasn't changed under this same fix).
+    candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_bitunix_5m(symbol, target_bars=2016))  # ~7 days
     if not candles_5m:
         return
-    candles_1h = await market_data.fetch_live_1h(symbol, limit=200)
-    candles_4h = await market_data.fetch_live_4h(symbol, limit=200)
+    candles_1h = await market_data.fetch_bitunix_1h(symbol, target_bars=200)
+    candles_4h = await market_data.fetch_bitunix_4h(symbol, target_bars=200)
     if not candles_1h or not candles_4h:
         return  # can't check C5/BBWP this poll -- try again next cycle, never guess
-    # BBWP's own feed (Bitunix, CC_INTERFACE.md item 3) -- deliberately NOT
-    # inside the guard above; a bad Bitunix poll must never block the
-    # Kraken-fed C5 check (see mgmt_e1_stack.check_c5_or_bbwp()'s docstring).
-    candles_4h_bbwp = await market_data.fetch_bitunix_4h(symbol)
+    candles_4h_bbwp = candles_4h
 
     traveler_plan = db.query(TravelerPlan).filter_by(id=order.traveler_plan_id).first()
     journey_cap_at = _as_utc(traveler_plan.journey_cap_at) if traveler_plan else None

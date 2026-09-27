@@ -352,16 +352,22 @@ async def fetch_live_daily(symbol: str, limit: int = 300) -> List[Dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# BITUNIX 4H FEED — BBWP-only (2026-09-22, CC_INTERFACE.md item 3, Andy
-# ruling 2026-09-21 14:06 CT: "compute the live BBWP leg on Bitunix data...
-# drop the dead Kraken-based BBWP path"). Kraken's ~721-bar depth cannot
-# satisfy bbwp_series()'s 864-confirmed-bar floor (BBWP_PERIOD 96 +
-# BBWP_LOOKBACK 768), so BBWP has been structurally dead (always False)
-# since it shipped. Bitunix's own public kline endpoint has 260+ days of
-# real history (verified live), so this feed is usable immediately, no
-# ramp-up. BBWP-ONLY: do NOT repurpose this as a general 4H feed for C5 --
-# nobody has ruled on moving C5 off Kraken; check_c5_or_bbwp() keeps C5 on
-# the existing Kraken-sourced candles_4h and uses this feed for BBWP only.
+# BITUNIX FEED — the traveler's own decision feed (2026-09-27, Andy ruling
+# 14:55 CT, AGENT_LOG.md both repos: "the traveler decision chain runs on
+# Bitunix -- the venue that was audited, rebuilt, and measured"). Started
+# 2026-09-22 as BBWP-only (Kraken's ~721-bar depth couldn't satisfy
+# bbwp_series()'s 864-confirmed-bar floor, so BBWP was structurally dead
+# -- always False -- since it shipped); expanded 2026-09-27 to cover the
+# full traveler chain -- lock levels (battlebox_pipeline.py), cross
+# detection + touch monitoring (traveler_plan_engine.py), RSI-4h-at-cross,
+# and C5's own 4H leg (mgmt_e1_stack.py) -- once Andy ruled the prior
+# Kraken-as-decision-feed setup was v1-era plumbing that was never
+# actually ruled on, not a deliberate design choice. Bitunix's own public
+# kline endpoint has 260+ days of real history (verified live), so this
+# feed was usable immediately, no ramp-up. Gravity Map / mtf_confluence_
+# scanner / session_monitor.py are OUT OF SCOPE for this ruling (it is
+# specifically "the traveler decision chain," not the whole site) and
+# keep reading fetch_live_*'s Kraken feed unchanged.
 #
 # A duplicated BASE_URL (not an import of executor_bitunix_client) on
 # purpose -- that module is per-account/credentialed and this is a public,
@@ -409,17 +415,18 @@ async def _bitunix_kline_page(
     return body["data"]
 
 
-async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str, Any]]:
-    """Live 4H candles from Bitunix itself (BBWP's own feed only -- see the
-    module note above). Paginates backward via `endTime` (verified live:
-    the boundary is exact -- the bar AT endTime is excluded, so re-using
-    the prior page's own oldest `time` as the next page's `endTime` produces
-    no duplicates and no gaps) until `target_bars` raw bars are assembled, a
-    page comes back shorter than the requested page size (history
-    exhausted), or a page fails (partial results are kept, never discarded --
-    real, already-fetched bars are worth more than an all-or-nothing retry).
-    Returns ascending by time, same convention as every fetch_live_* above.
-    Never raises -- a total failure returns []."""
+async def _fetch_bitunix_candles(symbol: str, interval: str, target_bars: int, log_tag: str) -> List[Dict[str, Any]]:
+    """Generic Bitunix kline fetch -- paginates backward via `endTime`
+    (verified live: the boundary is exact -- the bar AT endTime is
+    excluded, so re-using the prior page's own oldest `time` as the next
+    page's `endTime` produces no duplicates and no gaps) until
+    `target_bars` raw bars are assembled, a page comes back shorter than
+    the requested page size (history exhausted), or a page fails (partial
+    results are kept, never discarded -- real, already-fetched bars are
+    worth more than an all-or-nothing retry). Returns ascending by time,
+    same convention as every fetch_live_* function. Never raises -- a
+    total failure returns []. Does NOT persist -- callers persist under
+    their own timeframe label, matching fetch_live_*'s own convention."""
     bitunix_symbol = (symbol or "").replace("/", "").upper()
     page_size = 200  # Bitunix's own documented max per request
     all_rows: List[Dict[str, Any]] = []
@@ -427,7 +434,7 @@ async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str
     try:
         async with aiohttp.ClientSession() as session:
             while len(all_rows) < target_bars:
-                page = await _bitunix_kline_page(session, bitunix_symbol, "4h", page_size, end_time_ms)
+                page = await _bitunix_kline_page(session, bitunix_symbol, interval, page_size, end_time_ms)
                 if not page:
                     break
                 all_rows.extend(page)
@@ -438,7 +445,7 @@ async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str
                 if len(page) < page_size:
                     break  # short page -- history exhausted
     except Exception as e:
-        print(f"[BITUNIX_4H] fetch failed: {e}")
+        print(f"[{log_tag}] fetch failed: {e}")
     if not all_rows:
         return []
     seen_ms = set()
@@ -455,6 +462,54 @@ async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str
             "volume": float(r["baseVol"]),
         })
     result.sort(key=lambda c: c["time"])  # descending -> ascending
+    return result
+
+
+async def fetch_bitunix_5m(symbol: str, target_bars: int = 1500) -> List[Dict[str, Any]]:
+    """2026-09-27 (Andy ruling 14:55 CT, AGENT_LOG.md both repos): the
+    traveler's own D1/D2 decision feed (cross detection, touch monitoring)
+    moved from Kraken to Bitunix -- the venue the traveler study was
+    actually measured against (calibration_data/bitunix) and the venue
+    real orders execute on. NOT a general replacement for fetch_live_5m()
+    (Gravity Map/mtf_confluence_scanner/session_monitor keep reading
+    Kraken -- out of scope for this ruling, see market_data.py's own
+    per-function docstrings for why those stay untouched)."""
+    result = await _fetch_bitunix_candles(symbol, "5m", target_bars, "BITUNIX_5M")
+    _persist_candles(_normalize_symbol(symbol), "5M_BITUNIX", result)
+    return result
+
+
+async def fetch_bitunix_15m(symbol: str, target_bars: int = 300) -> List[Dict[str, Any]]:
+    """2026-09-27 traveler decision-feed migration -- see fetch_bitunix_5m()."""
+    result = await _fetch_bitunix_candles(symbol, "15m", target_bars, "BITUNIX_15M")
+    _persist_candles(_normalize_symbol(symbol), "15M_BITUNIX", result)
+    return result
+
+
+async def fetch_bitunix_1h(symbol: str, target_bars: int = 720) -> List[Dict[str, Any]]:
+    """2026-09-27 traveler decision-feed migration -- see fetch_bitunix_5m()."""
+    result = await _fetch_bitunix_candles(symbol, "1h", target_bars, "BITUNIX_1H")
+    _persist_candles(_normalize_symbol(symbol), "1H_BITUNIX", result)
+    return result
+
+
+async def fetch_bitunix_daily(symbol: str, target_bars: int = 300) -> List[Dict[str, Any]]:
+    """2026-09-27 traveler decision-feed migration -- see fetch_bitunix_5m()."""
+    result = await _fetch_bitunix_candles(symbol, "1d", target_bars, "BITUNIX_DAILY")
+    _persist_candles(_normalize_symbol(symbol), "1D_BITUNIX", result)
+    return result
+
+
+async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str, Any]]:
+    """The traveler's 4H feed -- RSI-4h-at-cross, C5's 4H leg, and BBWP all
+    read this same function as of the 2026-09-27 decision-feed ruling (see
+    fetch_bitunix_5m()'s docstring). Was BBWP-only before that ruling (C5
+    stayed on Kraken's candles_4h until today) -- that distinction is gone
+    now; callers may pass this same result for both the candles_4h and
+    candles_4h_bbwp parameters mgmt_e1_stack.check_c5_or_bbwp() still
+    accepts (kept as two parameters for now rather than a signature change
+    under this same change -- they are simply the same data today)."""
+    result = await _fetch_bitunix_candles(symbol, "4h", target_bars, "BITUNIX_4H")
     if len(result) < BITUNIX_BBWP_MIN_BARS:
         print(f"[BITUNIX_4H] only {len(result)} bars fetched (need {BITUNIX_BBWP_MIN_BARS} for BBWP) -- "
               f"BBWP will stay undefined this poll")

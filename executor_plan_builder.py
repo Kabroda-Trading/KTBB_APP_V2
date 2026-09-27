@@ -343,9 +343,21 @@ async def build_hypothetical_traveler_order(
                 "decision_reason": f"account already has an active order from traveler_plan_id={other.traveler_plan_id}",
             }
 
+    # 2026-09-27 (Andy ruling 14:55 CT, item 3, root cause of the same-day
+    # incident): entry price is the TRIGGER, not traveler_plan_row.fill_
+    # price -- this function is now called at the CROSS (WAITING_CROSS ->
+    # WAITING_TOUCH), before any touch/fill has happened, so fill_price is
+    # still None at that point. The trigger and the eventual fill_price are
+    # always the same value anyway (gate_traveler.py's own advance_waiting_
+    # touch() sets "fill_price": trigger, never the touching bar's own
+    # price) -- using the trigger directly just makes it available at the
+    # moment a real resting order actually needs it, instead of waiting on
+    # a candle-simulated touch that a real order should never have been
+    # gated behind in the first place.
+    trigger = traveler_plan_row.breakout_trigger if traveler_plan_row.direction == "LONG" else traveler_plan_row.breakdown_trigger
     f_a = executor_sizing.f_a_multiplier(traveler_plan_row.rsi_4h_at_cross, traveler_plan_row.direction)
     return await _size_and_check_order(
         db, base, traveler_plan_row.symbol, traveler_plan_row.direction,
-        traveler_plan_row.fill_price, traveler_plan_row.stop_price, account, risk_state,
+        trigger, traveler_plan_row.stop_price, account, risk_state,
         sizing_multiplier=f_a,
     )

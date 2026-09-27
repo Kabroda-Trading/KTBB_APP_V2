@@ -93,9 +93,21 @@ def _make_filled_plan(db, symbol="BTC/USDT", direction="LONG", entry=100.0, stop
     # f_a_multiplier() resolves to 1.0 (neutral) -- callers passing
     # direction="SHORT" must override this to 20.0 (that side's own
     # extreme), same as the direction-flip tests below do.
+    #
+    # 2026-09-27 (item 3 fix): build_hypothetical_traveler_order() now
+    # sources entry price from breakout_trigger/breakdown_trigger (the
+    # trigger, available at the cross), not fill_price (only set once a
+    # real/simulated touch happens) -- see executor_plan_builder.py's own
+    # comment on this change. Both fields set to `entry` here so this
+    # fixture works whether the code under test reads either one; the two
+    # are always equal in real data anyway (gate_traveler.py's own fill
+    # logic: fill_price is always the trigger, never the touching bar's
+    # own price).
     plan = TravelerPlan(
         symbol=symbol, date_key=date_key, session_id="us_ny_futures", status="FILLED",
         direction=direction, fill_price=entry, stop_price=stop, t1_price=t1,
+        breakout_trigger=(entry if direction == "LONG" else None),
+        breakdown_trigger=(entry if direction == "SHORT" else None),
         rsi_4h_at_cross=rsi_4h_at_cross,
     )
     db.add(plan)

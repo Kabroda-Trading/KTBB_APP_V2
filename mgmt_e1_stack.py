@@ -74,10 +74,14 @@ def advance(
     candle -- market_data.confirmed_5m_closes()), covering from
     entry_fill_time through now. candles_1h/candles_4h: may include the
     still-forming trailing candle -- check_c5_or_bbwp() strips it itself.
-    candles_4h_bbwp (2026-09-22, CC_INTERFACE.md item 3): BBWP's OWN feed
-    (Bitunix, via market_data.fetch_bitunix_4h()) -- C5's own 4H leg keeps
-    reading candles_4h (Kraken) exactly as before. See check_c5_or_bbwp()'s
-    own docstring for why these are deliberately different feeds.
+    candles_4h_bbwp: originally BBWP's OWN separate feed (Bitunix, added
+    2026-09-22, CC_INTERFACE.md item 3, back when C5's own 4H leg still
+    read Kraken's candles_4h). 2026-09-27 (Andy ruling 14:55 CT): the
+    traveler's whole decision chain, including C5's 4H leg, moved to
+    Bitunix -- callers now pass the SAME fetched result for both
+    candles_4h and candles_4h_bbwp (traveler_plan_engine.py's own comment
+    on this). The two-parameter signature was kept rather than collapsed
+    under this same change; see check_c5_or_bbwp()'s own docstring.
 
     Returns None if still open (keep polling), or a dict with exit_price/
     exit_time/exit_reason/c5_fired/bbwp_fired once resolved.
@@ -164,21 +168,25 @@ def check_c5_or_bbwp(
     (AGENT_LOG 2026-09-21 10:15). Enforcing it inside the one shared
     function means no caller can forget it. now_ts defaults to wall-clock.
 
-    candles_4h_bbwp (2026-09-22, CC_INTERFACE.md item 3, Andy ruling
-    2026-09-21 14:06 CT): BBWP's OWN feed -- Bitunix, via market_data.
-    fetch_bitunix_4h() -- DIFFERENT from candles_4h (Kraken), which keeps
-    feeding C5's own 4H leg exactly as before. Two different feeds for two
-    different legs, on purpose: Kraken's ~721-bar depth cannot satisfy
-    BBWP's 864-confirmed-bar floor (BBWP_PERIOD 96 + BBWP_LOOKBACK 768), so
-    BBWP was structurally dead (always False) on Kraken data; Bitunix has
-    the real depth. C5 has never needed more than ~15 bars, so there is no
-    reason cited anywhere to move it too -- doing so would be an unruled
-    scope change. Deliberately NOT folded into the same `if candles_1h and
-    candles_4h:` gate either caller uses: a bad Bitunix poll must never
-    block the Kraken-fed C5 check -- only bbwp_hit degrades to False for
-    that one poll. omitted/None -> bbwp_hit is False (not skipped, not an
-    error) -- same "missing data never gets the favorable case" convention
-    used throughout this codebase, never a crash on a transient feed gap."""
+    candles_4h_bbwp: BBWP's own feed parameter, added 2026-09-22 (CC_
+    INTERFACE.md item 3, Andy ruling 2026-09-21 14:06 CT) back when it was
+    Bitunix while C5's own 4H leg (candles_4h) still read Kraken -- at the
+    time, two different feeds for two different legs, on purpose: Kraken's
+    ~721-bar depth couldn't satisfy BBWP's 864-confirmed-bar floor
+    (BBWP_PERIOD 96 + BBWP_LOOKBACK 768), so BBWP was structurally dead
+    (always False) on Kraken data, while C5 never needed more than ~15
+    bars. 2026-09-27 (Andy ruling 14:55 CT): the traveler's whole decision
+    chain moved to Bitunix, including C5's 4H leg -- callers now pass the
+    SAME fetched result for both candles_4h and candles_4h_bbwp
+    (traveler_plan_engine.py's own comment on this change), so this
+    parameter is no longer a genuinely different feed, just a second
+    reference to the one Bitunix fetch. Kept as a separate parameter
+    rather than collapsed under this same change -- lower risk than a
+    signature change to every caller, not a design endorsement of keeping
+    it duplicated forever. omitted/None -> bbwp_hit is False (not skipped,
+    not an error) -- same "missing data never gets the favorable case"
+    convention used throughout this codebase, never a crash on a
+    transient feed gap."""
     h1_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_1h, 3600, now_ts)]
     h4_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_4h, 14400, now_ts)]
     rsi_1h = si.rsi_series(h1_closes, period=si.RSI_PERIOD)

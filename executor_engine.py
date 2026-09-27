@@ -136,8 +136,47 @@ async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan
         await executor_live_e1_engine.place_traveler_entry_order(db, account, traveler_plan_row, order)
 
 
+async def process_traveler_cross(db: Session, traveler_plan_row: TravelerPlan) -> None:
+    """2026-09-27 (Andy ruling 14:55 CT, item 3 -- root cause of the same-
+    day incident): fires on the WAITING_CROSS -> WAITING_TOUCH transition
+    (traveler_plan_engine.py), i.e. the confirmed cross + gate pass -- NOT
+    on the candle-simulated touch/fill. LIVE accounts ONLY: this is where
+    the real resting POST_ONLY limit gets placed on the exchange, at the
+    trigger, the moment the setup is confirmed live -- matching spec §D2
+    ("a resting limit is placed AT THE TRIGGER, once... any subsequent
+    wick touch fills it"). Before this fix, LIVE order placement was
+    gated behind gate_traveler.advance_waiting_touch()'s own pure-candle
+    simulation deciding a touch already happened -- placing the real order
+    only after the fact, sometimes minutes after price had already moved
+    past the trigger (2026-09-27 13:30-13:40 UTC incident, both live
+    accounts' orders canceled with no fill). DRY_RUN is deliberately NOT
+    processed here -- its own bookkeeping fill still fires at the
+    simulated touch (process_traveler_fill() below), unchanged: the eval
+    walk genuinely IS a candle-only simulation, and this function's
+    build_hypothetical_traveler_order() call would otherwise stamp a
+    DRY_RUN order's entry_fill_price/time from traveler_plan_row.fill_price
+    while it's still None at the cross -- wrong for that lineage, though
+    harmless for LIVE (which no longer reads fill_price at all, see
+    executor_plan_builder.py's own comment on this same change)."""
+    accounts = db.query(ExecutorAccount).filter_by(is_active=True, mode="LIVE").all()
+    for account in accounts:
+        try:
+            await _process_traveler_account(db, traveler_plan_row, account)
+        except Exception as e:
+            print(f"|| EXECUTOR || account {account.id} ({account.label}) failed at cross for "
+                  f"traveler_plan {traveler_plan_row.id}: {e}")
+
+
 async def process_traveler_fill(db: Session, traveler_plan_row: TravelerPlan) -> None:
-    accounts = db.query(ExecutorAccount).filter_by(is_active=True).all()
+    """Fires on the candle-simulated WAITING_TOUCH -> FILLED transition.
+    2026-09-27: LIVE accounts are now excluded here -- process_traveler_
+    cross() above already created and placed their real order at the
+    cross. Calling this function for a LIVE account too would be a no-op
+    in practice (build_hypothetical_traveler_order()'s own dedup check
+    would find the order process_traveler_cross() already created and
+    return SKIPPED_ALREADY_IN_TRADE) but excluding it explicitly makes the
+    split the actual design, not an accident of a dedup check catching it."""
+    accounts = db.query(ExecutorAccount).filter_by(is_active=True).filter(ExecutorAccount.mode != "LIVE").all()
     for account in accounts:
         try:
             await _process_traveler_account(db, traveler_plan_row, account)
