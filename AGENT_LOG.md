@@ -7851,3 +7851,73 @@ explain that exact number needs a DB query, not a source read), item 10
 also needs DB access). Continuing.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-27 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — SHIPPED: items 5/6/7 (site commit `734f33b`) + item 4 (site commit `eed87b3`) -- all code-side build-list items now done
+STATUS: open (only items 9's DB half and item 10 remain, both need DB access neither CC nor these commits can provide).
+
+**Items 5/6 (emails carry no risk-dollars/account id; ARMED reflects
+plan-level bookkeeping, not a confirmed per-account fill)**: added
+EmailSendLog (database.py) -- a fresh table, not a resurrection of the
+retired NewsletterLog (a different concept, gone since 2026-08-30) --
+wired into notify.send_admin_email() itself, the one function every
+email in this codebase routes through, logging every outcome (sent/
+skipped/failed) for every category, not just traveler. Added
+build_traveler_real_fill_email(): fires only once executor_live_e1_
+engine.py's check_traveler_entry_fill_and_protect() gets a REAL exchange
+status=="FILLED", never from gate_traveler.py's candle-only simulation --
+carries direction, real entry, stop, T1, risk dollars, and the account,
+exactly what Andy said an email needs to let him take the trade manually.
+Existing ARMED/DONE/CLOSED emails kept as-is (already-approved wording,
+untouched) -- this is additive, a new notification for the event they
+could never honestly represent. Added account_id/label to the existing
+CLOSED email too.
+
+**Item 7 (public radar badge always showed "LIVE" on a FILLED plan, even
+a pure DRY_RUN eval plan with zero live money)**: _travelerStatusBadge()
+now mirrors the admin panel's own existing bookkeeping-vs-real
+distinction (audit Finding 2), using the mgmt_mode/mgmt_entry_fill_price
+fields the snapshot already returns. LIVE only shows once the exchange
+has actually confirmed the fill; otherwise ARMED. Verified all four real
+scenarios directly (DRY_RUN-only, no-account, real LIVE, LIVE-not-yet-
+confirmed) before shipping.
+
+**Item 4 (no reconciliation for a non-expiry exchange-side entry
+cancel)**: a real POST_ONLY rejection (exactly like the 2026-09-27
+incident) used to fall through to "still resting, recheck next tick" and
+stay there -- management_state stuck at PENDING_ENTRY for up to 7 days.
+Added an explicit branch: a confirmed status=="CANCELED" before expiry
+now reconciles to a new terminal state (CLOSED_ENTRY_CANCELED), writes a
+real audit row, and sends an alert email -- never a false FILLED/-1R
+booking (that line already held; this closes the "stale but not wrong"
+gap on top of it).
+
+**Two more Bitunix decision-feed gaps found while working item 4's
+neighborhood** (missed in the original item 1 pass, which fixed
+traveler_plan_engine.py's DRY_RUN walk but not these LIVE paths):
+poll_traveler_position()'s C5/BBWP check for an already-open LIVE
+position still read Kraken for C5's own leg; _current_live_price()
+(approximates a real market-close contingency exit's fill price -- a
+real booked P&L number) still read Kraken's 5m feed -- the same cross-
+venue mismatch class as the incident itself, just in D3. Both now
+Bitunix.
+
+**Verification across both commits**: 21 new tests (EmailSendLog on all
+three outcomes + a logging-failure-never-blocks-the-send case; account-
+label rendering/fallback; the real-fill email's format, account-id
+fallback, and firing-on-success-not-on-failure; badge logic verified
+directly for all four scenarios; the item-4 reconciliation itself,
+correctly and with no false fill/loss booking). 9 pre-existing tests
+needed mock updates for the mechanical fetch-function rename (same
+class of fixture fix as item 1 -- not a code bug). Full suite 529
+passed, clean boot, both radar endpoints verified 200 via TestClient
+after each commit.
+
+**What's left**: item 9's DB half (does account 1's saved sizing policy
+actually explain the $34.90 figure -- the formula itself is confirmed
+correct by the earlier D3 audit, this needs a query against the real
+saved policy, not a source read) and item 10 (re-audit 09-19->09-22
+FILLED plans for touch-vs-close correctness -- needs DB access). Neither
+is a code change CC can make from here. Every other item in the 11-item
+build list is shipped, tested, and pushed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
