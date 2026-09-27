@@ -118,6 +118,37 @@ def build_traveler_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     return subject, body
 
 
+def build_traveler_real_fill_email(order: Dict[str, Any]) -> Tuple[str, str]:
+    """2026-09-27 (Andy ruling 14:55 CT, items 5/6): fires once a LIVE
+    account's real exchange fill is confirmed -- executor_live_e1_engine.py
+    ::check_traveler_entry_fill_and_protect(), only reached after a real
+    get_order_detail() call returns status=="FILLED" (never from
+    gate_traveler.py's own candle-only touch simulation, which the plan-
+    level ARMED email above describes). Andy's own words: "I should be
+    able to take that email and it should give me enough information...
+    to go do the trade on my own in the exchange" -- carries direction,
+    the real fill price, stop, T1, risk dollars, and which account this
+    is, since ARMED (plan-level, shared across every account tracking the
+    plan) never carried the last two and can't honestly claim a specific
+    account's fill at all."""
+    symbol = _symbol_compact(order.get("symbol", ""))
+    direction = order.get("direction") or "?"
+    entry = order.get("entry_fill_price")
+    stop = order.get("stop_price")
+    t1 = order.get("t1_price")
+    risk = order.get("risk_dollars_used")
+    account_label = order.get("account_label") or f"account #{order.get('account_id')}"
+    subject = f"KABRODA - {symbol} {direction} - Real Fill Confirmed @ {_fmt(entry, ',.0f')} ({account_label})"
+    body = (
+        f"{symbol} {direction} filled for real on {account_label}, confirmed by the exchange, at {_fmt(entry)}.\n\n"
+        f"  Stop:   {_fmt(stop)}\n"
+        f"  Target: {_fmt(t1)}\n"
+        f"  Risk:   ${_fmt(risk, ',.2f')}\n\n"
+        f"  Ref: #{order.get('traveler_plan_id')}"
+    )
+    return subject, body
+
+
 def build_traveler_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     """Covers BOTH real terminal 'no trade' outcomes -- TERCILE_SKIPPED
     (a real cross, excluded) and DONE (opposite trigger broke first, or
@@ -204,8 +235,15 @@ def build_traveler_management_event_email(order: Dict[str, Any], is_live: bool) 
             "price at close time, not an independently confirmed exchange fill."
         )
 
+    # 2026-09-27 (item 4): which account this closure applies to -- absent
+    # before, and per-account identity is exactly what makes this email
+    # (unlike LOCK/ARMED/DONE) able to carry it honestly at all.
+    account_label = order.get("account_label") or (f"account #{order.get('account_id')}" if order.get("account_id") else None)
+    account_line = f"  Account: {account_label}\n" if account_label else ""
+
     body = (
         f"{symbol} {direction} closed: {reason_label}.\n"
+        f"{account_line}"
         f"  Exit price: {_fmt(exit_price)}\n"
         f"  Realized:   {_fmt(r, '+.4f')}R\n\n"
         f"{lineage_line}{approx_note}\n\n"

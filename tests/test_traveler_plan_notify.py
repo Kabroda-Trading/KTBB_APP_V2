@@ -123,6 +123,22 @@ def test_management_event_email_dry_run_shape():
     assert "Ref: #42" in body
 
 
+def test_management_event_email_includes_account_label_when_given():
+    # 2026-09-27 item 4 -- which account this closure applies to.
+    _, body = tpn.build_traveler_management_event_email(_order(account_label="andy_bitunix_main"), is_live=True)
+    assert "Account: andy_bitunix_main" in body
+
+
+def test_management_event_email_falls_back_to_account_id_when_no_label():
+    _, body = tpn.build_traveler_management_event_email(_order(account_id=7), is_live=True)
+    assert "Account: account #7" in body
+
+
+def test_management_event_email_omits_account_line_when_neither_given():
+    _, body = tpn.build_traveler_management_event_email(_order(), is_live=True)
+    assert "Account:" not in body
+
+
 def test_management_event_email_live_shape():
     subject, body = tpn.build_traveler_management_event_email(_order(), is_live=True)
     assert subject == "KABRODA - BTCUSDT LONG - Closed (target hit (T1)) @ 106"
@@ -170,6 +186,48 @@ def test_management_event_email_handles_missing_values_without_crashing():
     order = _order(exit_price=None, realized_pnl_r=None)
     subject, body = tpn.build_traveler_management_event_email(order, is_live=True)
     assert "?" in body   # _fmt()'s own None-safe placeholder, not a crash
+
+
+# ------------------------------------------------------------------ build_traveler_real_fill_email (2026-09-27)
+# Andy ruling 14:55 CT, items 5/6: the genuinely real, per-account
+# "position opened" event -- fires only once executor_live_e1_engine.py's
+# check_traveler_entry_fill_and_protect() confirms a real exchange fill
+# (get_order_detail() status=="FILLED"), never from gate_traveler.py's own
+# candle-only touch simulation (which the shared, plan-level ARMED email
+# describes and cannot honestly attribute to a specific account).
+
+def _fill_order(**extra):
+    d = {
+        "symbol": "BTC/USDT", "direction": "LONG",
+        "entry_fill_price": 85123.71, "stop_price": 84657.86, "t1_price": 86311.56,
+        "risk_dollars_used": 100.0, "traveler_plan_id": 11,
+        "account_id": 1, "account_label": "andy_bitunix_main",
+    }
+    d.update(extra)
+    return d
+
+
+def test_real_fill_email_format():
+    subject, body = tpn.build_traveler_real_fill_email(_fill_order())
+    assert subject == "KABRODA - BTCUSDT LONG - Real Fill Confirmed @ 85,124 (andy_bitunix_main)"
+    assert "andy_bitunix_main" in body
+    assert "85,123.71" in body
+    assert "84,657.86" in body   # stop
+    assert "86,311.56" in body   # target
+    assert "$100.00" in body     # risk dollars
+    assert "Ref: #11" in body
+
+
+def test_real_fill_email_falls_back_to_account_id_when_no_label():
+    subject, body = tpn.build_traveler_real_fill_email(_fill_order(account_label=None, account_id=11))
+    assert "account #11" in subject
+    assert "account #11" in body
+
+
+def test_real_fill_email_handles_missing_values_without_crashing():
+    order = _fill_order(entry_fill_price=None, stop_price=None, t1_price=None, risk_dollars_used=None)
+    subject, body = tpn.build_traveler_real_fill_email(order)
+    assert "?" in body
 
 
 # ------------------------------------------------------------------ notification_for_traveler_transition dispatch

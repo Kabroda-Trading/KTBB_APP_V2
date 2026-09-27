@@ -369,6 +369,32 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
         f"stop {sl_str}, T1 {t1_price_str} ({qty_str}, full qty) placed",
         account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system")
 
+    # 2026-09-27 (Andy ruling 14:55 CT, items 5/6): the genuinely real,
+    # per-account "position opened" event -- this is the first point in
+    # the whole traveler pipeline where a LIVE fill is confirmed BY THE
+    # EXCHANGE (status=="FILLED" above), not by gate_traveler.py's own
+    # candle-only touch simulation (which the shared plan-level ARMED
+    # email describes, and which cannot honestly claim a specific
+    # account's real fill). Same non-blocking own-try/except pattern as
+    # _finalize_traveler_close()'s own management-event email below --
+    # a bug here must never roll back the real fill/protection bookkeeping
+    # that already committed above.
+    try:
+        import notify
+        import traveler_plan_notify
+
+        fill_order_dict = {
+            "symbol": order_row.symbol, "direction": order_row.direction,
+            "entry_fill_price": order_row.entry_fill_price, "stop_price": order_row.stop_price,
+            "t1_price": order_row.t1_price, "risk_dollars_used": order_row.risk_dollars_used,
+            "traveler_plan_id": traveler_plan_row.id,
+            "account_id": account.id, "account_label": account.label,
+        }
+        subject, body = traveler_plan_notify.build_traveler_real_fill_email(fill_order_dict)
+        notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| EXECUTOR LIVE E1 || Real-fill notification failed for order {order_row.id}: {e}")
+
 
 async def _cancel_orphaned_t1(db: Session, account: ExecutorAccount, client: "executor_bitunix_client.BitunixClient",
                                symbol: str, traveler_plan_row: TravelerPlan, order_row: ExecutorOrder) -> None:
@@ -455,6 +481,7 @@ async def _finalize_traveler_close(
             "symbol": order_row.symbol, "direction": order_row.direction,
             "exit_reason": exit_reason, "exit_price": exit_price,
             "realized_pnl_r": order_row.realized_pnl_r, "traveler_plan_id": traveler_plan_row.id,
+            "account_id": account.id, "account_label": account.label,  # 2026-09-27 item 4
             "approximated": approximated,
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=True)

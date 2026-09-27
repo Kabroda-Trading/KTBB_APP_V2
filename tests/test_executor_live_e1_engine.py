@@ -232,6 +232,66 @@ def test_entry_fill_places_stop_and_full_qty_t1_only_no_t3(db, monkeypatch):
     assert order.t3_exchange_order_id is None   # never touched -- no T3 for E1
 
 
+def test_entry_fill_sends_a_real_fill_confirmed_email_with_full_manual_trade_info(db, monkeypatch):
+    # 2026-09-27 (Andy ruling 14:55 CT, items 5/6): the genuinely real,
+    # per-account "position opened" event -- must carry direction, entry,
+    # stop, T1, risk dollars, and which account, and must only fire once
+    # the exchange itself confirms the fill (this function only reaches
+    # this point after get_order_detail() returns status=="FILLED").
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1",
+                        stop_price=84657.86, t1_price=86311.56, risk_dollars_used=100.0)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="FILLED")),
+             get_position=_async(_one_position_response()),
+             get_trading_pairs=_async(_trading_pairs_response()),
+             set_position_tpsl=_async(_tpsl_response()),
+             place_order=_async(_place_order_response(order_id="t1-order")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+
+    assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
+    assert len(sent) == 1
+    subject, body = sent[0]
+    assert "Real Fill Confirmed" in subject
+    assert "traveler_live_test" in subject   # the account label
+    assert "traveler_live_test" in body
+    assert "84,657.86" in body   # stop
+    assert "86,311.56" in body   # target
+    assert "$100.00" in body     # risk dollars
+
+
+def test_entry_fill_unprotected_state_does_not_send_the_real_fill_email(db, monkeypatch):
+    # The real-fill email is a success-path confirmation -- an incomplete-
+    # protection failure sends its OWN existing alert email instead (see
+    # test_entry_protection_failure_lands_in_unprotected_state below),
+    # never this one, since Andy should not get told "confirmed, all good"
+    # about a position that isn't actually protected yet.
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+
+    async def _tpsl_fail(self, *a, **kw):
+        return {"code": 1, "msg": "boom", "data": {}}
+
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="FILLED")),
+             get_position=_async(_one_position_response()),
+             get_trading_pairs=_async(_trading_pairs_response()),
+             set_position_tpsl=_tpsl_fail,
+             place_order=_async(_place_order_response(order_id="t1-order")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+
+    assert order.management_state == "ENTRY_FILLED_UNPROTECTED"
+    assert len(sent) == 1
+    assert "Real Fill Confirmed" not in sent[0][0]
+    assert "unprotected" in sent[0][0].lower()
+
+
 def test_entry_protection_failure_lands_in_unprotected_state(db, monkeypatch):
     account = _ready_account(db)
     plan = _traveler_plan(db)

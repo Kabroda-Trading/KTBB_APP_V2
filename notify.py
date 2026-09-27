@@ -73,6 +73,30 @@ def _db_subscriber_recipients() -> List[str]:
         return []
 
 
+def _log_send(subject: str, body: str, recipients: List[str], outcome: str, detail: str = None) -> None:
+    """2026-09-27 (Andy ruling 14:55 CT): every email this codebase sends
+    routes through send_admin_email() (confirmed by a full-repo audit),
+    so logging here alone covers every category -- traveler lock/armed/
+    done/closed, gravity, ledger, executor error alerts, all of it. Same
+    self-contained lazy-import/short-lived-session pattern as
+    _db_subscriber_recipients() above -- never raises, a logging failure
+    must never block or fail the actual send this function already
+    completed or skipped by the time this runs."""
+    try:
+        from database import SessionLocal, EmailSendLog
+        db = SessionLocal()
+        try:
+            db.add(EmailSendLog(
+                subject=subject, body=body, recipients=", ".join(recipients),
+                outcome=outcome, detail=detail,
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[NOTIFY] EmailSendLog write failed (non-fatal): {e}")
+
+
 def send_admin_email(subject: str, body: str) -> bool:
     """
     Sends a plain-text email to the union of SMTP_DEST's addresses and
@@ -80,7 +104,9 @@ def send_admin_email(subject: str, body: str) -> bool:
     True on success, False on any failure (missing config, connection
     error, auth error). Never raises — callers should not need their own
     try/except, but the pattern is safe to double-wrap if a caller
-    already does.
+    already does. Every outcome (sent, skipped, failed) is logged to
+    EmailSendLog (database.py) -- 2026-09-27 audit finding: this table had
+    zero writer, so real sends were invisible in the DB.
     """
     env_recipients = _parse_recipients(SMTP_DEST)
     db_recipients = _db_subscriber_recipients()
@@ -95,7 +121,9 @@ def send_admin_email(subject: str, body: str) -> bool:
             seen.add(key)
             recipients.append(addr)
     if not (SMTP_USER and SMTP_PASS and recipients):
-        print(f"[NOTIFY] Skipped — SMTP_USER/SMTP_PASS not configured, or no recipients (SMTP_DEST + EmailSubscriber both empty).")
+        reason = "SMTP_USER/SMTP_PASS not configured, or no recipients (SMTP_DEST + EmailSubscriber both empty)."
+        print(f"[NOTIFY] Skipped — {reason}")
+        _log_send(subject, body, recipients, "SKIPPED", reason)
         return False
     try:
         msg = MIMEText(body)
@@ -109,7 +137,9 @@ def send_admin_email(subject: str, body: str) -> bool:
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, recipients, msg.as_string())
         print(f"[NOTIFY] Sent to {len(recipients)} recipient(s): {subject}")
+        _log_send(subject, body, recipients, "SENT")
         return True
     except Exception as e:
         print(f"[NOTIFY ERROR] Failed to send '{subject}': {e}")
+        _log_send(subject, body, recipients, "FAILED", str(e))
         return False

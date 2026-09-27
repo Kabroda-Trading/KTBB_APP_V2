@@ -2584,4 +2584,36 @@ class EmailSubscriber(Base):
     is_active = Column(Boolean, nullable=False, default=True)   # soft-disable without losing the row
     added_by = Column(String, nullable=True)         # admin's own email, audit trail
     added_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# New table -- picked up by Base.metadata.create_all() on deploy. No ALTER
+# TABLE migration needed.
+# ---------------------------------------------------------
+class EmailSendLog(Base):
+    """Audit trail for every email notify.send_admin_email() sends or
+    attempts -- 2026-09-27 (Andy ruling 14:55 CT, TRAVELER_D1_D2_D3_SPEC.md
+    ONE-TRUTH RULE: "every send lands in newsletter_log"). NOT the retired
+    NewsletterLog table (database.py's own comment on that table: removed
+    2026-08-30, its own writer/reader both archived along with the old
+    Content Publishing Engine) -- that table's name/shape belonged to a
+    completely different concept (published newsletters), and repurposing
+    a retired table for an unrelated purpose would be its own source of
+    confusion later. A fresh, purpose-built table instead. Written from
+    notify.py itself -- the ONE function every email in this codebase
+    already routes through (confirmed by a full-repo audit, 2026-09-27) --
+    so this logs every category (traveler lock/armed/done/closed, gravity,
+    ledger, executor error alerts, etc.), not just traveler ones. Logs
+    every outcome, not only successful sends: a skip (no SMTP config, no
+    recipients) or an SMTP failure are exactly the states this audit trail
+    exists to make visible -- Andy's own real question ("did today's
+    emails actually send?") is unanswerable from an empty log either way."""
+    __tablename__ = "email_send_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sent_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    subject = Column(String, nullable=False)
+    body = Column(String, nullable=True)
+    recipients = Column(String, nullable=True)   # comma-separated, audit only -- never used for delivery
+    outcome = Column(String, nullable=False)      # "SENT" | "SKIPPED" | "FAILED"
+    detail = Column(String, nullable=True)        # skip reason or exception text, when applicable
 

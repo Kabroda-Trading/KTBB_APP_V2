@@ -701,7 +701,24 @@
         function _travelerStatusBadge(plan) {
             if (!plan) return { label: 'WATCHING', color: '#64748b', active: false };
             if (plan.mgmt_exit_reason) return { label: 'CLOSED', color: '#94a3b8', active: false };
-            if (plan.status === 'FILLED') return { label: (plan.direction || '') + ' LIVE', color: '#22c55e', active: true };
+            if (plan.status === 'FILLED') {
+                // 2026-09-27 (Andy ruling 14:55 CT, item 7): plan.status ==
+                // 'FILLED' is gate_traveler.py's own candle-only touch
+                // simulation -- it fires the same way whether zero, one, or
+                // several accounts are actually tracking this plan, DRY_RUN
+                // or LIVE. Showing "LIVE" here unconditionally was honest for
+                // NEITHER case: a pure DRY_RUN-only plan (no live money at
+                // all) showed the same green "LIVE" badge as a real
+                // confirmed exchange fill. The admin panel already carries
+                // this exact distinction ("(bookkeeping)" vs "(real)",
+                // audit Finding 2) -- mirrored here with the same fields
+                // (mgmt_mode/mgmt_entry_fill_price) traveler_radar.py's
+                // snapshot already includes.
+                const confirmedLive = plan.mgmt_mode === 'LIVE' && plan.mgmt_entry_fill_price != null;
+                return confirmedLive
+                    ? { label: (plan.direction || '') + ' LIVE', color: '#22c55e', active: true }
+                    : { label: (plan.direction || '') + ' ARMED', color: '#eab308', active: true };
+            }
             if (plan.status === 'WAITING_TOUCH') return { label: (plan.direction || '') + ' ARMED', color: '#eab308', active: true };
             if (plan.status === 'TERCILE_SKIPPED') return { label: 'SKIPPED', color: '#94a3b8', active: false };
             if (plan.status === 'DONE') return { label: 'DONE', color: '#64748b', active: false };

@@ -263,3 +263,88 @@ def test_db_subscriber_recipients_real_db_returns_only_active_rows():
         ).delete(synchronize_session=False)
         db.commit()
         db.close()
+
+
+# ------------------------------------------------------------------ EmailSendLog (2026-09-27)
+# Andy ruling 14:55 CT, TRAVELER_D1_D2_D3_SPEC.md ONE-TRUTH RULE: "every
+# send lands in newsletter_log" -- the real audit finding was that
+# send_admin_email() (every email in this codebase routes through it,
+# confirmed by a full-repo grep) had ZERO database writes of any kind.
+# Real DB, not mocked -- the whole point is proving the write actually
+# lands, not just that the right function gets called.
+
+@pytest.fixture(autouse=True)
+def _clean_email_send_log():
+    import database
+    database.init_db()
+    db = database.SessionLocal()
+    db.query(database.EmailSendLog).delete()
+    db.commit()
+    db.close()
+    yield
+    db = database.SessionLocal()
+    db.query(database.EmailSendLog).delete()
+    db.commit()
+    db.close()
+
+
+def _log_rows():
+    import database
+    db = database.SessionLocal()
+    try:
+        rows = db.query(database.EmailSendLog).order_by(database.EmailSendLog.id).all()
+        db.expunge_all()
+        return rows
+    finally:
+        db.close()
+
+
+def test_send_admin_email_logs_a_sent_row_on_success(smtp_env, monkeypatch):
+    monkeypatch.setattr(notify, "SMTP_DEST", "andy@x.com")
+    mock_server = MagicMock()
+    mock_server.__enter__ = MagicMock(return_value=mock_server)
+    mock_server.__exit__ = MagicMock(return_value=False)
+    with patch("smtplib.SMTP", return_value=mock_server):
+        notify.send_admin_email("KABRODA test subject", "test body")
+    rows = _log_rows()
+    assert len(rows) == 1
+    assert rows[0].subject == "KABRODA test subject"
+    assert rows[0].body == "test body"
+    assert rows[0].outcome == "SENT"
+    assert rows[0].recipients == "andy@x.com"
+
+
+def test_send_admin_email_logs_a_skipped_row_with_reason(smtp_env, monkeypatch):
+    monkeypatch.setattr(notify, "SMTP_DEST", "")
+    with patch("smtplib.SMTP") as mock_smtp_cls:
+        notify.send_admin_email("subject", "body")
+    mock_smtp_cls.assert_not_called()
+    rows = _log_rows()
+    assert len(rows) == 1
+    assert rows[0].outcome == "SKIPPED"
+    assert rows[0].detail   # a real reason string, not blank
+
+
+def test_send_admin_email_logs_a_failed_row_with_the_exception_text(smtp_env, monkeypatch):
+    monkeypatch.setattr(notify, "SMTP_DEST", "andy@x.com")
+    with patch("smtplib.SMTP", side_effect=RuntimeError("connection refused")):
+        notify.send_admin_email("subject", "body")
+    rows = _log_rows()
+    assert len(rows) == 1
+    assert rows[0].outcome == "FAILED"
+    assert "connection refused" in rows[0].detail
+
+
+def test_send_admin_email_logging_failure_never_blocks_the_real_send(smtp_env, monkeypatch):
+    # A logging bug must never take down the actual email send -- send_
+    # admin_email() already returns before _log_send() can affect the
+    # outcome, but confirm this explicitly: a broken DB session must not
+    # raise back into send_admin_email() or flip its return value.
+    monkeypatch.setattr(notify, "SMTP_DEST", "andy@x.com")
+    monkeypatch.setattr("database.SessionLocal", lambda: (_ for _ in ()).throw(RuntimeError("DB down")))
+    mock_server = MagicMock()
+    mock_server.__enter__ = MagicMock(return_value=mock_server)
+    mock_server.__exit__ = MagicMock(return_value=False)
+    with patch("smtplib.SMTP", return_value=mock_server):
+        ok = notify.send_admin_email("subject", "body")
+    assert ok is True   # the real send still succeeded and reported success

@@ -196,6 +196,7 @@ def _notify_traveler_management_event(order: ExecutorOrder) -> None:
             "symbol": order.symbol, "direction": order.direction,
             "exit_reason": order.exit_reason, "exit_price": order.exit_price,
             "realized_pnl_r": order.realized_pnl_r, "traveler_plan_id": order.traveler_plan_id,
+            "account_id": order.account_id,   # 2026-09-27 item 4 -- which account this closure applies to
             "approximated": False,  # DRY_RUN never approximates -- candle-sourced, deterministic (mgmt_e1_stack.py)
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=False)
