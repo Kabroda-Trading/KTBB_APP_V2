@@ -357,6 +357,60 @@ def test_entry_canceled_on_exchange_before_expiry_reconciles_not_a_loss(db, monk
     assert "canceled on the exchange" in sent[0][0].lower()
 
 
+def test_init_db_backfills_exit_reason_on_historical_entry_canceled_rows(db):
+    # 2026-09-28: the test above proves the CODE fix for new rows going
+    # forward. But CLOSED_ENTRY_CANCELED is a genuine terminal state --
+    # e1e._E1_LIVE_TERMINAL_STATES correctly stops the poll loop from
+    # ever revisiting it -- so the two real rows written by the buggy
+    # code BEFORE this fix (2026-09-27's two canceled entry orders, caught
+    # live by Andy on the radar screen still showing "position open
+    # (LIVE)") could never self-correct just by deploying the code fix.
+    # database.py::init_db() has a one-time idempotent backfill for
+    # exactly this. Simulate a pre-fix historical row via raw SQL
+    # (bypassing the ORM/code path entirely, the same way the real buggy
+    # code once did), then prove re-running init_db() corrects it.
+    from sqlalchemy import text as _text
+
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="CLOSED_ENTRY_CANCELED",
+                        close_reason="ENTRY_CANCELED")
+    db.commit()
+    order_id = order.id
+
+    with database.engine.begin() as conn:
+        conn.execute(_text("UPDATE executor_orders SET exit_reason = NULL WHERE id = :id"), {"id": order_id})
+    db.expire_all()
+    assert db.query(ExecutorOrder).filter_by(id=order_id).first().exit_reason is None   # confirm the pre-fix shape
+
+    database.init_db()   # idempotent -- must run the one-time backfill
+
+    db.expire_all()
+    row = db.query(ExecutorOrder).filter_by(id=order_id).first()
+    assert row.exit_reason == "ENTRY_CANCELED"
+
+
+def test_init_db_backfill_does_not_touch_rows_with_a_different_real_exit_reason(db):
+    # Guard against an overly-broad backfill: a row that's
+    # CLOSED_ENTRY_CANCELED but already has ITS OWN exit_reason (however
+    # that happened) must be left alone -- the backfill's WHERE clause is
+    # "... AND exit_reason IS NULL", not a blind overwrite.
+    from sqlalchemy import text as _text
+
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="CLOSED_ENTRY_CANCELED",
+                        close_reason="ENTRY_CANCELED", exit_reason="SOMETHING_ELSE")
+    db.commit()
+    order_id = order.id
+
+    database.init_db()
+
+    db.expire_all()
+    row = db.query(ExecutorOrder).filter_by(id=order_id).first()
+    assert row.exit_reason == "SOMETHING_ELSE"
+
+
 def test_entry_canceled_reconciliation_never_books_a_fill_or_loss(db, monkeypatch):
     account = _ready_account(db)
     plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)

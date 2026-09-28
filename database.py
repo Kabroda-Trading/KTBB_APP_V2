@@ -40,6 +40,27 @@ def init_db():
     except Exception:
         pass
 
+    # 2026-09-28: executor_live_e1_engine.py's CLOSED_ENTRY_CANCELED path
+    # (added same day) originally set management_state/close_reason but
+    # not exit_reason -- the specific field traveler_radar.py's own
+    # _mgmt_fields() exposes, and the field the admin panel's display
+    # logic branches on to decide "closed" vs "position open (LIVE)".
+    # Real rows written by that code before the fix (2026-09-27's two
+    # canceled entry orders, caught live by Andy on the radar screen)
+    # already have management_state="CLOSED_ENTRY_CANCELED" -- a genuine
+    # terminal state that _E1_LIVE_TERMINAL_STATES correctly stops the
+    # poll loop from ever revisiting, so those specific rows would never
+    # self-correct just by deploying the code fix. One-time backfill so
+    # the historical display corrects on this boot, not never.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE executor_orders SET exit_reason = 'ENTRY_CANCELED' "
+                "WHERE management_state = 'CLOSED_ENTRY_CANCELED' AND exit_reason IS NULL"
+            ))
+    except Exception:
+        pass
+
     # --- MIGRATION PATCHES (POSTGRESQL SAFE) ---
     try:
         with engine.begin() as conn:
@@ -2616,4 +2637,4 @@ class EmailSendLog(Base):
     recipients = Column(String, nullable=True)   # comma-separated, audit only -- never used for delivery
     outcome = Column(String, nullable=False)      # "SENT" | "SKIPPED" | "FAILED"
     detail = Column(String, nullable=True)        # skip reason or exception text, when applicable
-
+

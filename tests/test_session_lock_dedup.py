@@ -315,3 +315,91 @@ def test_calibrating_status_still_retries_exactly_as_before(env, monkeypatch):
     _run(main._fire_session_lock_pipeline("2026-09-19"))
     assert fetch_mock.call_count == 2
     assert sent == []
+
+
+# ------------------------------------------------------------------ 2026-09-28: the general lock watchdog
+# Andy's own standing question after two consecutive real incidents cost
+# whole days ("what do we need to do... to be sure we don't lose days"):
+# a backstop independent of WHY the pipeline failed. Every fix above this
+# comment closes one SPECIFIC known failure mode -- this instead checks
+# the actual OUTCOME (did SessionLock.mas_completed_at get set for today)
+# so a genuinely different, not-yet-discovered failure mode still alerts
+# instead of silently costing another day. Called after every fire
+# attempt (both the boot-time recovery path and the normal scheduled
+# fire), independent of _fire_session_lock_pipeline() itself.
+
+def test_watchdog_sends_no_alert_when_pipeline_actually_completed(env, monkeypatch):
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=dt.datetime(2026, 9, 19, 14, 5, 0))
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
+    assert sent == []
+
+
+def test_watchdog_alerts_when_lock_exists_but_never_completed(env, monkeypatch):
+    # The real 2026-09-28 shape: a lock/attempt happened but
+    # mas_completed_at never got set (whatever the underlying reason).
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
+    assert len(sent) == 1
+    assert "no completed session lock" in sent[0][0].lower()
+    assert "2026-09-19" in sent[0][0]
+
+
+def test_watchdog_alerts_when_no_lock_row_exists_at_all(env, monkeypatch):
+    # An even more total failure than 2026-09-28's -- not even a
+    # SessionLock row got written. Must still alert, not assume "no row
+    # means nothing to check."
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
+    assert len(sent) == 1
+
+
+def test_watchdog_never_raises_even_if_its_own_db_query_explodes(env, monkeypatch):
+    # This is a defense-in-depth backstop -- a bug in the watchdog itself
+    # must never be able to affect the scheduler it's watching (e.g. crash
+    # the boot-time check or the main while-loop).
+    class _ExplodingSession:
+        def query(self, model):
+            raise Exception("simulated DB failure inside the watchdog itself")
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main, "SessionLocal", lambda: _ExplodingSession())
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))   # must not raise
+    assert sent == []   # the exploding query means we never got to decide -- no false alert either
+
+
+def test_watchdog_wired_into_scheduled_fire_path(env, monkeypatch):
+    # Prove the wiring end-to-end (both real call sites go through
+    # _fire_session_lock_pipeline() then the watchdog, in that order --
+    # see run_session_lock_scheduler()'s boot-time and while-loop call
+    # sites, both call the watchdog right after the pipeline attempt).
+    # Use the SAME fatal, non-retryable error shape as
+    # test_other_fatal_errors_give_up_immediately_but_now_alert -- that
+    # path returns early and never reaches run_mas_analysis() (which
+    # would otherwise set mas_completed_at unconditionally per
+    # CLAUDE.md's invariant 8), so it's the one real shape that leaves
+    # mas_completed_at unset all the way through both layers. Two
+    # alerts firing here is correct, not a bug: _fire_session_lock_
+    # pipeline()'s own alert names the specific cause, and the
+    # watchdog's is the general backstop that would still catch a
+    # totally different, not-yet-discovered failure mode -- the two are
+    # deliberately independent layers, per Andy's own "make sure we
+    # don't lose days" request (not one alert making the other redundant).
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    monkeypatch.setattr(main.asyncio, "sleep", _noop_sleep)
+    fetch_mock = AsyncMock(return_value={"status": "ERROR", "message": "No Data"})
+    monkeypatch.setattr(main.battlebox_pipeline, "get_live_battlebox", fetch_mock)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._fire_session_lock_pipeline("2026-09-19"))
+    _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
+    assert len(sent) == 2
+    assert "session-lock pipeline failed" in sent[0][0].lower()
+    assert "no completed session lock" in sent[1][0].lower()

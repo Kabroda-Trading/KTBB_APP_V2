@@ -305,6 +305,49 @@ async def _fire_session_lock_pipeline(date_key: str) -> None:
         print(f"[SCHEDULER] Session-lock pipeline direct fire failed: {e}")
 
 
+async def _alert_if_lock_pipeline_did_not_complete(date_key: str) -> None:
+    """2026-09-28 (Andy's own request, after two consecutive real
+    incidents where a day's session silently never locked): a backstop,
+    independent of WHY the pipeline might fail. Every fix so far --
+    2026-09-26's mas_completed_at migration bug, 2026-09-28's calibration-
+    race -- has been reactive, closing one specific failure mode after it
+    already cost a day. This checks the actual OUTCOME (did
+    mas_completed_at get set for today) rather than any specific step,
+    so a genuinely different, not-yet-discovered failure mode still gets
+    caught and alerted on, instead of silently costing another day the
+    way the first two did. Called after every fire attempt (boot-time
+    recovery and the normal scheduled fire alike) -- deliberately NOT
+    inside _fire_session_lock_pipeline() itself, so a bug in THAT
+    function's own control flow (an early return, an unhandled path)
+    can't also silently skip this check the way it skipped the pipeline
+    itself. Never raises -- a bug in this watchdog must never affect the
+    scheduler it's watching."""
+    try:
+        db = SessionLocal()
+        try:
+            completed = db.query(SessionLock).filter(
+                SessionLock.symbol == "BTC/USDT",
+                SessionLock.date_key == date_key,
+                SessionLock.mas_completed_at.isnot(None),
+            ).first()
+        finally:
+            db.close()
+        if completed is None:
+            print(f"[SCHEDULER] WATCHDOG: session-lock pipeline did NOT complete for {date_key} -- alerting")
+            import notify
+            notify.send_admin_email(
+                f"KABRODA ALERT -- no completed session lock for {date_key}",
+                f"The session-lock pipeline was attempted for {date_key} but SessionLock."
+                f"mas_completed_at is still not set -- there may be no BO/BD triggers, no "
+                f"TravelerPlan, and no lock email for today. CHECK THE SITE/EXCHANGE FEED "
+                f"DIRECTLY. This is an independent backstop check, not tied to any specific "
+                f"known failure mode -- it fires whenever the pipeline's own attempt (including "
+                f"its own retry) did not reach completion, for any reason.",
+            )
+    except Exception as e:
+        print(f"[SCHEDULER] Watchdog check itself failed (non-fatal): {e}")
+
+
 async def run_session_lock_scheduler() -> None:
     """
     Daily at 14:00 UTC (9:00 AM ET). Calls _fire_session_lock_pipeline()
@@ -364,6 +407,7 @@ async def run_session_lock_scheduler() -> None:
                 await _fire_session_lock_pipeline(date_key)
             except Exception as e:
                 print(f"[SCHEDULER] Boot-time session-lock pipeline failed: {e}")
+            await _alert_if_lock_pipeline_did_not_complete(date_key)
 
     while True:
         try:
@@ -382,6 +426,7 @@ async def run_session_lock_scheduler() -> None:
             date_key = _fire_session["date_key"]
             print(f"[SCHEDULER] Session-lock pipeline scheduled fire — {date_key} lock_end (9:00 AM ET)")
             await _fire_session_lock_pipeline(date_key)
+            await _alert_if_lock_pipeline_did_not_complete(date_key)
 
             scheduler_health_registry["session_lock"]["last_run"] = datetime.now(timezone.utc).isoformat()
             scheduler_health_registry["session_lock"]["status"] = "WAITING"
