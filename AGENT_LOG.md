@@ -7921,3 +7921,55 @@ is a code change CC can make from here. Every other item in the 11-item
 build list is shipped, tested, and pushed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-28 (CC) — FROM: Claude Code — FOR: DeepSeek + Andy — L3 CLOSED: 2026-09-28's total lock-day failure fixed, plus a real display bug caught live by Andy on the same radar screen (site commit `4367509`)
+STATUS: resolved.
+
+Andy asked directly ("DeepSeek may not be correct, I need you to figure
+out why") -- verified the whole chain from source myself rather than
+taking the Brain report's word. DeepSeek's SUBSTANCE was correct (real
+race, real silent total failure, real evidence chain); the MECHANISM
+description was slightly off. Precise version, read directly out of
+battlebox_pipeline.py and main.py: `get_live_battlebox()` wraps
+_compute_sse_packet()'s "Insufficient calibration data." as
+`{"status": "ERROR", ...}` -- and `_fire_session_lock_pipeline()`
+ALREADY has a working retry, but only for `status=="CALIBRATING"`
+(sleep 120s, retry once). The insufficient-calibration case fell into a
+SEPARATE, adjacent branch that treats "ERROR" as permanently fatal and
+gives up immediately -- not a general "no retry mechanism exists" gap,
+a specific routing bug: a transient, timing-only failure (the 6th 5m bar
+closes exactly at lock_end and Bitunix needs a moment to publish it) was
+sorted into the same bucket as a genuinely permanent one (a real API
+outage, "No Data").
+
+**Fix, my own call given the three options on the table**: routed this
+specific error into the ALREADY-WORKING CALIBRATING retry, rather than
+(a) shifting the scheduled fire time later -- a band-aid on today's
+specific timing that wouldn't survive a slower publish on a different
+day, or (b) accepting 5 bars -- would silently narrow the r30 range/24h
+value area on the exact feed the whole session's SSOT depends on, the
+kind of quiet degradation this project's own discipline (loud failures,
+never silent) has rejected everywhere else. Also added a loud alert
+email if the pipeline STILL fails after the retry (or on a genuinely
+different fatal error) -- today's actual symptom was total silence, no
+lock, no email, no alert, found only because Andy checked the radar
+himself hours later. That must not happen again regardless of what
+specific error eventually causes a total failure.
+
+**Separate, real bug Andy caught live on the SAME radar screen**:
+yesterday's item-4 fix (CLOSED_ENTRY_CANCELED) set management_state and
+close_reason but never exit_reason -- the specific field traveler_
+radar.py's _mgmt_fields() exposes, and the field the admin panel's own
+display logic branches on to decide "closed" vs "position open (LIVE)".
+Without it, a correctly-terminal, correctly-never-booked-as-a-loss
+canceled order (yesterday's real plan #11) displayed as an open LIVE
+position -- alarming, and a genuine gap in my own prior fix, not a
+misread. Fixed by setting exit_reason too, plus a real display label
+instead of the raw code.
+
+4 new tests for the retry fix (mutation-verified: reverting the routing
+condition makes both the retry-succeeds and retry-then-alert tests fail
+exactly as expected), 1 existing test extended for the exit_reason fix.
+Full suite 533 passed, clean boot. L3 closed in CC_INTERFACE.md.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
