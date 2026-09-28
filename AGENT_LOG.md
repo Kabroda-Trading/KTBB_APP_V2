@@ -7973,3 +7973,58 @@ exactly as expected), 1 existing test extended for the exit_reason fix.
 Full suite 533 passed, clean boot. L3 closed in CC_INTERFACE.md.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-28 — FROM: Claude Code — FOR: both
+STATUS: resolved
+
+Andy's standing question after the last two entries: "what do we need to
+do... to be sure we don't lose days and the kabroda.com system is working
+correctly." Two concrete pieces shipped in site commit `ec29b17`, both
+tested and mutation-verified, pushed to main:
+
+1. **Historical display-bug backfill.** The 2026-09-27 exit_reason fix
+   (previous entry) only corrected the code path going forward.
+   `CLOSED_ENTRY_CANCELED` is a genuine terminal state --
+   `_E1_LIVE_TERMINAL_STATES` correctly stops the poll loop from ever
+   revisiting a row once it's there -- so the two real orders Andy
+   screenshotted (still showing "position open (LIVE)") could never
+   self-correct just from deploying that code fix. Added a one-time
+   idempotent backfill in `database.py::init_db()` (same "ONE-TIME DATA
+   FIX" pattern already used for the 2026-09-05 margin_mode correction):
+   `UPDATE executor_orders SET exit_reason = 'ENTRY_CANCELED' WHERE
+   management_state = 'CLOSED_ENTRY_CANCELED' AND exit_reason IS NULL`.
+
+2. **General lock-day watchdog, independent of any specific known
+   failure mode.** Every fix this week (the 2026-09-26 migration bug,
+   2026-09-28's calibration-race) closed one SPECIFIC cause after it had
+   already cost a day. `main.py` now has
+   `_alert_if_lock_pipeline_did_not_complete(date_key)`, called right
+   after BOTH real call sites of `_fire_session_lock_pipeline()` (the
+   boot-time restart-recovery check and the main scheduled-fire loop).
+   It independently re-queries `SessionLock.mas_completed_at` for
+   `date_key` -- if still NULL after the pipeline's own attempt
+   (including its own internal retry), it sends its own "no completed
+   session lock" alert email, regardless of why. This is deliberately a
+   SEPARATE layer from `_fire_session_lock_pipeline()`'s own
+   cause-specific alerts, not a replacement -- on a day like 2026-09-28
+   both would have fired (one naming the specific cause, one as the
+   general backstop), which is intentional redundancy, not a bug. Never
+   raises itself (wrapped in its own try/except) so a bug in the
+   watchdog can't take down the scheduler it watches.
+
+Both mutation-tested (breaking the backfill's WHERE clause and the
+watchdog's completion check each make the corresponding new test fail
+exactly as expected, confirmed then reverted). 6 new tests total across
+`tests/test_session_lock_dedup.py` (5, the watchdog) and
+`tests/test_executor_live_e1_engine.py` (2, the backfill, one positive
+one guarding against over-matching). Full suite 540 passed, clean boot
+verified via a real `TestClient` lifespan run (`/suite/radar` -> 200).
+
+**Not part of this fix, for the record**: this is a site-side automated
+layer. It complements, not replaces, the Brain's own daily manual/AI
+review of `gate_log`/`traveler-log.csv` exports -- the watchdog catches
+"did today lock at all," the Brain's review catches "was today's lock
+and decision actually correct." Both layers matter; neither substitutes
+for the other.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
