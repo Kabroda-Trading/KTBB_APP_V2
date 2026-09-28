@@ -318,6 +318,19 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
         if status == "CANCELED":
             order_row.management_state = "CLOSED_ENTRY_CANCELED"
             order_row.close_reason = "ENTRY_CANCELED"
+            # 2026-09-28 real bug, caught live by Andy: exit_reason (NOT
+            # close_reason) is the field traveler_radar.py's _mgmt_fields()
+            # exposes as mgmt_exit_reason, and the admin panel's own
+            # renderTravelerState() branches on THAT field specifically --
+            # `if (row.mgmt_exit_reason) {...closed...} else {'position
+            # open (LIVE)'}`. Without this line, a canceled-with-no-fill
+            # order (management_state already correctly terminal) still
+            # displayed as "position open (LIVE)" on the radar -- alarming
+            # and wrong, since no position ever existed. Set both fields to
+            # the same value; nothing elsewhere in the codebase reads
+            # close_reason for this same purpose, so setting only one was
+            # never going to be consistent between the two names.
+            order_row.exit_reason = "ENTRY_CANCELED"
             order_row.closed_at = datetime.datetime.utcnow()
             executor_accounts.write_audit(
                 db, "ORDER_CANCELLED",

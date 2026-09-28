@@ -344,6 +344,13 @@ def test_entry_canceled_on_exchange_before_expiry_reconciles_not_a_loss(db, monk
     assert order.management_state == "CLOSED_ENTRY_CANCELED"
     assert order.entry_status == "CANCELED"
     assert order.close_reason == "ENTRY_CANCELED"
+    # 2026-09-28 real bug, caught live by Andy: exit_reason (not just
+    # close_reason) must be set too -- traveler_radar.py's own
+    # _mgmt_fields() exposes THIS field as mgmt_exit_reason, and the admin
+    # panel's renderTravelerState() branches on it specifically to decide
+    # "closed" vs "position open (LIVE)". Without it, this exact canceled-
+    # no-fill order displayed as an open live position on the radar.
+    assert order.exit_reason == "ENTRY_CANCELED"
     assert order.closed_at is not None
     assert order.management_state in e1e._E1_LIVE_TERMINAL_STATES   # the poll loop must stop re-checking it
     assert len(sent) == 1

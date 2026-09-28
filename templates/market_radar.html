@@ -878,6 +878,12 @@
             BBWP_EXIT: 'BBWP volatility-burnout exit',
             T1: 'target hit (T1)',
             TIME: 'journey time-cap exit',
+            // 2026-09-28 real bug, caught live by Andy: without this label
+            // (and without executor_live_e1_engine.py setting exit_reason
+            // at all, the actual fix), a canceled-with-no-fill entry order
+            // displayed as "position open (LIVE)" -- alarming and wrong,
+            // since no position ever existed.
+            ENTRY_CANCELED: 'entry canceled on exchange, no fill',
         };
 
         function renderTravelerState(row) {

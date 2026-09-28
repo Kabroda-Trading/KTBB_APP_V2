@@ -236,3 +236,82 @@ def test_run_mas_analysis_sets_the_completion_marker(env, monkeypatch):
         assert row.mas_completed_at is not None
     finally:
         db.close()
+
+
+# ------------------------------------------------------------------ 2026-09-28 real production incident: the calibration-race retry fix
+# Root cause verified from source (battlebox_pipeline.py::_compute_sse_
+# packet(): fewer than 6 confirmed 5m bars -> {"error": "Insufficient
+# calibration data.", ...} -> get_live_battlebox() wraps this as
+# {"status": "ERROR", "message": ...} -- a TRANSIENT race (the 6th bar
+# closes exactly at lock_end and the exchange needs a moment to publish
+# it), but before this fix it hit the SAME "give up entirely, no retry"
+# branch as a genuinely fatal error. The entire 2026-09-28 session was a
+# total loss (no lock, no email, no traveler plan, all day) because of
+# this exact gap. asyncio.sleep is monkeypatched to resolve instantly --
+# these tests prove the RETRY LOGIC, not that a real 120-second wait
+# happens.
+
+async def _noop_sleep(seconds):
+    return None
+
+
+def test_insufficient_calibration_data_retries_and_succeeds_on_second_attempt(env, monkeypatch):
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    monkeypatch.setattr(main.asyncio, "sleep", _noop_sleep)
+    fetch_mock = AsyncMock(side_effect=[
+        {"status": "ERROR", "message": "Insufficient calibration data."},
+        {"status": "OK", "battlebox": {"session": {"id": "us_ny_futures"}}},
+    ])
+    monkeypatch.setattr(main.battlebox_pipeline, "get_live_battlebox", fetch_mock)
+    _run(main._fire_session_lock_pipeline("2026-09-19"))
+    assert fetch_mock.call_count == 2   # the retry actually happened
+
+
+def test_insufficient_calibration_data_alerts_if_the_retry_also_fails(env, monkeypatch):
+    # 2026-09-28's real symptom: "8:22 AM CT, radar empty, no email, no
+    # alerts." A total pipeline failure must never be silent again.
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    monkeypatch.setattr(main.asyncio, "sleep", _noop_sleep)
+    fetch_mock = AsyncMock(return_value={"status": "ERROR", "message": "Insufficient calibration data."})
+    monkeypatch.setattr(main.battlebox_pipeline, "get_live_battlebox", fetch_mock)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._fire_session_lock_pipeline("2026-09-19"))
+    assert fetch_mock.call_count == 2   # one retry, then give up
+    assert len(sent) == 1
+    assert "session-lock pipeline failed" in sent[0][0].lower()
+    assert "2026-09-19" in sent[0][0]
+
+
+def test_other_fatal_errors_give_up_immediately_but_now_alert(env, monkeypatch):
+    # A genuinely different, non-transient error (not the calibration-data
+    # message) must NOT get the retry -- only the specific race condition
+    # this fix targets does. It must still alert, though (that part is not
+    # specific to the calibration race -- ANY total pipeline failure
+    # should be loud now).
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    monkeypatch.setattr(main.asyncio, "sleep", _noop_sleep)
+    fetch_mock = AsyncMock(return_value={"status": "ERROR", "message": "No Data"})
+    monkeypatch.setattr(main.battlebox_pipeline, "get_live_battlebox", fetch_mock)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._fire_session_lock_pipeline("2026-09-19"))
+    assert fetch_mock.call_count == 1   # no retry for a non-calibration error
+    assert len(sent) == 1
+
+
+def test_calibrating_status_still_retries_exactly_as_before(env, monkeypatch):
+    # The pre-existing CALIBRATING retry path must be untouched by this
+    # change -- same trigger, same single retry, no alert on success.
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    monkeypatch.setattr(main.asyncio, "sleep", _noop_sleep)
+    fetch_mock = AsyncMock(side_effect=[
+        {"status": "CALIBRATING"},
+        {"status": "OK", "battlebox": {"session": {"id": "us_ny_futures"}}},
+    ])
+    monkeypatch.setattr(main.battlebox_pipeline, "get_live_battlebox", fetch_mock)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._fire_session_lock_pipeline("2026-09-19"))
+    assert fetch_mock.call_count == 2
+    assert sent == []

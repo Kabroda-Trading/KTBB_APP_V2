@@ -208,8 +208,33 @@ async def _fire_session_lock_pipeline(date_key: str) -> None:
         print(f"[SCHEDULER] Battlebox fetch failed: {e}")
         return
 
-    if out.get("status") == "CALIBRATING":
-        print("[SCHEDULER] Session CALIBRATING — waiting 2 min and retrying (lock_end / 9:00 AM ET)...")
+    # 2026-09-28 real production incident (root cause verified from source,
+    # not just recalled from the report): "Insufficient calibration data"
+    # (out["status"]=="ERROR", battlebox_pipeline.py::_compute_sse_packet()
+    # -- fewer than 6 confirmed 5m bars in the 30-minute calibration
+    # window) is a TRANSIENT race, not a permanent failure -- the 6th bar
+    # (covering the final 5 minutes before lock_end) closes EXACTLY at
+    # lock_end, and the exchange can take a moment to publish it. This
+    # scheduler fires at lock_end sharp, so it can legitimately race the
+    # exchange's own publish latency -- confirmed live on 2026-09-28: the
+    # bar existed on a re-fetch ~84 minutes later, but was absent at the
+    # exact fire instant. Before this fix, this hit the SAME "give up
+    # entirely, no retry" branch below as a genuinely fatal error (a real
+    # API outage, "No Data") -- that silent give-up, with zero retry and
+    # zero alert, is why the entire day was a total loss (no lock, no
+    # email, no traveler plan, stable across every check that day).
+    # Treated the same way the ALREADY-WORKING "CALIBRATING" case is: wait,
+    # then retry once. This is a scheduling-resilience fix for a feed-
+    # latency race, NOT a design change to the calibration gate itself --
+    # it still requires all 6 bars on every attempt, never silently
+    # accepts 5 (which would quietly narrow the r30 range/24h value area
+    # on the feed the whole session SSOT depends on).
+    needs_retry = out.get("status") == "CALIBRATING" or (
+        out.get("status") == "ERROR" and "Insufficient calibration data" in (out.get("message") or "")
+    )
+    if needs_retry:
+        reason = out.get("message") or "Session CALIBRATING"
+        print(f"[SCHEDULER] {reason} — waiting 2 min and retrying (lock_end / 9:00 AM ET)...")
         await asyncio.sleep(120)
         try:
             out = await battlebox_pipeline.get_live_battlebox("BTCUSDT", session_mode="AUTO")
@@ -218,7 +243,26 @@ async def _fire_session_lock_pipeline(date_key: str) -> None:
             return
 
     if out.get("status") == "ERROR":
-        print(f"[SCHEDULER] Battlebox error: {out.get('message')}")
+        error_msg = out.get("message")
+        print(f"[SCHEDULER] Battlebox error: {error_msg}")
+        # 2026-09-28: a give-up here (initial fatal error, or the one
+        # retry above also failing) used to be completely silent --
+        # exactly what let the whole day pass with no lock, no email, and
+        # no alert until Andy noticed the radar himself hours later. Loud
+        # failure now, matching this codebase's own established
+        # discipline elsewhere (executor alerts, "CHECK THE EXCHANGE
+        # DIRECTLY" emails) -- never silent on a total pipeline failure.
+        try:
+            import notify
+            notify.send_admin_email(
+                f"KABRODA ALERT -- session-lock pipeline failed for {date_key}",
+                f"The session-lock pipeline could not produce today's levels: {error_msg}\n\n"
+                f"This means no BO/BD triggers, no TravelerPlan, and no lock email for {date_key} "
+                f"unless this resolves on its own before the next scheduled attempt. "
+                f"CHECK THE SITE/EXCHANGE FEED DIRECTLY.",
+            )
+        except Exception as e:
+            print(f"[SCHEDULER] Failure-alert email itself failed: {e}")
         return
 
     if not lock_existed_before:
