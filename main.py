@@ -305,8 +305,14 @@ async def _fire_session_lock_pipeline(date_key: str) -> None:
         print(f"[SCHEDULER] Session-lock pipeline direct fire failed: {e}")
 
 
-_WATCHDOG_POLL_SECONDS = 20
-_WATCHDOG_MAX_CHECKS = 6   # ~100s of polling (5 waits x 20s) before giving up
+_WATCHDOG_POLL_SECONDS = 30
+_WATCHDOG_MAX_CHECKS = 10   # ~270s of polling (9 waits x 30s) before giving up -- see the
+# 2026-09-29 correction note below: the first real observed run_mas_analysis()
+# completion took 156s (13:00:01 fire -> 13:02:37.19 mas_completed_at,
+# DeepSeek's prod-DB read, Kabroda AI Brain AGENT_LOG.md 2026-09-29 08:26 CT)
+# -- comfortably UNDER this budget with real margin, unlike this constant's
+# first value (100s), which this same real number would have already
+# exceeded had it landed a few seconds later.
 
 
 async def _alert_if_lock_pipeline_did_not_complete(date_key: str) -> None:

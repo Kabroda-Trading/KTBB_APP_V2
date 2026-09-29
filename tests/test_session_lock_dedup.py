@@ -395,6 +395,18 @@ def test_watchdog_polling_catches_completion_that_lands_during_the_wait(env, mon
     assert sent == []   # completed on the second check -- no false alarm
 
 
+def test_watchdog_poll_budget_comfortably_exceeds_the_one_real_observed_completion_time():
+    # 2026-09-29: DeepSeek's prod-DB read (Kabroda AI Brain AGENT_LOG.md,
+    # 08:26 CT) found the FIRST real run_mas_analysis() completion after
+    # this watchdog shipped took 156s (13:00:01 fire -> 13:02:37.19
+    # mas_completed_at) -- this fix's ORIGINAL budget (100s: 5 waits x
+    # 20s) would already have been too short for that exact real day.
+    # Lock in real margin above the one real data point in hand, not
+    # just an arbitrary round constant that happens to pass today.
+    total_budget = (main._WATCHDOG_MAX_CHECKS - 1) * main._WATCHDOG_POLL_SECONDS
+    assert total_budget > 156 * 1.5
+
+
 def test_watchdog_never_raises_even_if_its_own_db_query_explodes(env, monkeypatch):
     # This is a defense-in-depth backstop -- a bug in the watchdog itself
     # must never be able to affect the scheduler it's watching (e.g. crash
