@@ -8028,3 +8028,51 @@ and decision actually correct." Both layers matter; neither substitutes
 for the other.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-28 -- FROM: Claude Code -- FOR: both
+STATUS: resolved
+
+L4 CLOSED (Andy's email-routing ruling, CC_INTERFACE.md, ~18:09 CT):
+site commit `764509a`, pushed to main. DeepSeek's 18:10 CT trade walk-
+through found every trade-execution email (fills/opens/closes/cancels/
+errors, incl. risk$) went through send_admin_email() to the merged
+SMTP_DEST + EmailSubscriber list -- observed 09-28: all 7 of that day's
+emails reached all 3 recipients, so Dawson saw Andy's account detail and
+vice versa, and the newsletter-only subscriber saw live/sim trade detail
+and dollar risk that was never meant for them. Andy's ruling: trade-
+execution emails go ONLY to that specific account's real owner
+(executor_accounts.user_id -> users.email); radar/generic notifications
+(session lock, plan-level ARMED/DONE transitions, pipeline-health
+alerts) keep the merged list exactly as before.
+
+Added `notify.send_account_email(subject, body, account_id)` -- resolves
+the owner via a real DB lookup (ExecutorAccount -> UserModel), sends to
+that one address only, and deliberately does NOT fall back to the merged
+list if resolution fails (an unresolvable account/user just skips and
+logs SKIPPED -- falling back would silently reintroduce the exact leak
+this exists to close). Routed all 5 account-specific email call sites
+through it: entry-placement-failure error, exchange-side entry-cancel
+alert, unprotected-open-position alert, the real-fill confirmation, and
+the LIVE/DRY_RUN management-event close (both the real
+executor_live_e1_engine.py path and the DRY_RUN traveler_plan_engine.py
+path). Left the 4 session-wide call sites (lock email, ARMED/DONE
+transitions, my own calibration-failure alert, my own lock watchdog from
+earlier today) on send_admin_email() unchanged -- none of them describe
+one specific person's trading activity. Corrected the EmailSubscriber/
+EmailSendLog docstrings and the admin page's own subscriber-list copy,
+both of which still described the old "everyone gets everything"
+behavior.
+
+7 new tests for send_account_email() (real DB rows, not mocked --
+ExecutorAccount + UserModel), plus updated mocks in the two affected
+test files. Mutation-verified twice: reverting one call site back to
+send_admin_email(), and short-circuiting the owner-resolution lookup to
+fall back to the merged list, each make the expected test fail exactly
+as designed, then reverted. Full suite 546 passed, clean boot (real
+TestClient lifespan run, /suite/radar -> 200).
+
+Andy: this needs a Render deploy to take effect, same as the last two
+fixes -- let me know once it's live and I'll verify the actual email
+routing behaves correctly on the next real trade event.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
