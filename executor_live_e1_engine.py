@@ -208,12 +208,16 @@ async def place_traveler_entry_order(db: Session, account: ExecutorAccount, trav
             f"no real order exists on the exchange for this traveler_plan",
             account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=resp)
         import notify
-        notify.send_admin_email(
+        # 2026-09-28 (Andy L4 ruling): per-account routing, not the merged
+        # radar list -- this account's own placement failure is that
+        # account owner's business, not every subscriber's.
+        notify.send_account_email(
             f"KABRODA EXECUTOR ERROR -- traveler entry placement failed ({order_row.symbol})",
             f"Real entry order placement failed for traveler_plan_id={traveler_plan_row.id}, account={account.id}.\n"
             f"Exchange response: code={resp.get('code')} msg={resp.get('msg')!r}\n\n"
             f"No real order exists for this trade -- likely a POST_ONLY rejection (price moved past "
             f"the entry level before the order reached the exchange). No automatic retry.",
+            account.id,
         )
         return
     order_row.entry_exchange_order_id = order_id
@@ -339,13 +343,17 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
                 f"no loss booked. Exchange detail: {data}",
                 account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=data)
             import notify
-            notify.send_admin_email(
+            # 2026-09-28 (Andy L4 ruling): per-account routing -- an
+            # exchange-side cancel on this account is this account
+            # owner's business, not the whole subscriber list's.
+            notify.send_account_email(
                 f"KABRODA EXECUTOR ALERT -- traveler entry canceled on the exchange ({order_row.symbol})",
                 f"traveler_plan_id={traveler_plan_row.id}, account={account.id} ({account.label})\n\n"
                 f"The real resting entry order (orderId={order_row.entry_exchange_order_id}) was CANCELED "
                 f"on the exchange -- not by this bot's own expiry logic. No position was ever opened on "
                 f"this account for this trade, and no loss is booked. This usually means a POST_ONLY "
                 f"limit could no longer rest (price had already moved past the entry level).",
+                account.id,
             )
             return
         now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -411,11 +419,15 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
             db, "ERROR", detail_msg,
             account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system")
         import notify
-        notify.send_admin_email(
+        # 2026-09-28 (Andy L4 ruling): per-account routing -- this account
+        # owner is the one who actually has exchange access to fix an
+        # unprotected position on THEIR OWN account, not every subscriber.
+        notify.send_account_email(
             f"KABRODA EXECUTOR ALERT -- unprotected open traveler position ({order_row.symbol})",
             f"traveler_plan_id={traveler_plan_row.id}, account={account.id}, positionId={order_row.position_id}\n\n"
             f"{detail_msg}\n\nCHECK THE EXCHANGE DIRECTLY NOW and manually place whatever's missing "
             f"or close the position -- this bot will not act on it further.",
+            account.id,
         )
         return
 
@@ -448,7 +460,9 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
             "account_id": account.id, "account_label": account.label,
         }
         subject, body = traveler_plan_notify.build_traveler_real_fill_email(fill_order_dict)
-        notify.send_admin_email(subject, body)
+        # 2026-09-28 (Andy L4 ruling): a real fill is per-account trade-
+        # execution detail -- route to this account's owner only.
+        notify.send_account_email(subject, body, account.id)
     except Exception as e:
         print(f"|| EXECUTOR LIVE E1 || Real-fill notification failed for order {order_row.id}: {e}")
 
@@ -542,7 +556,9 @@ async def _finalize_traveler_close(
             "approximated": approximated,
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=True)
-        notify.send_admin_email(subject, body)
+        # 2026-09-28 (Andy L4 ruling): a real close/exit is per-account
+        # trade-execution detail (includes risk$/R) -- account owner only.
+        notify.send_account_email(subject, body, account.id)
     except Exception as e:
         print(f"|| EXECUTOR LIVE E1 || Management-event notification failed for order {order_row.id}: {e}")
 

@@ -254,7 +254,7 @@ def test_entry_fill_sends_a_real_fill_confirmed_email_with_full_manual_trade_inf
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1",
                         stop_price=84657.86, t1_price=86311.56, risk_dollars_used=100.0)
     sent = []
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
     _install(monkeypatch,
              get_order_detail=_async(_order_detail_response(status="FILLED")),
              get_position=_async(_one_position_response()),
@@ -288,7 +288,7 @@ def test_entry_fill_unprotected_state_does_not_send_the_real_fill_email(db, monk
         return {"code": 1, "msg": "boom", "data": {}}
 
     sent = []
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
     _install(monkeypatch,
              get_order_detail=_async(_order_detail_response(status="FILLED")),
              get_position=_async(_one_position_response()),
@@ -317,7 +317,7 @@ def test_entry_protection_failure_lands_in_unprotected_state(db, monkeypatch):
              get_trading_pairs=_async(_trading_pairs_response()),
              set_position_tpsl=_tpsl_fail,
              place_order=_async(_place_order_response(order_id="t1-order")))
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
     _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
     assert order.management_state == "ENTRY_FILLED_UNPROTECTED"
 
@@ -337,7 +337,7 @@ def test_entry_canceled_on_exchange_before_expiry_reconciles_not_a_loss(db, monk
     plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)   # nowhere near expiry
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
     sent = []
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
     _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="CANCELED")))
     _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
 
@@ -415,7 +415,7 @@ def test_entry_canceled_reconciliation_never_books_a_fill_or_loss(db, monkeypatc
     account = _ready_account(db)
     plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
     _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="CANCELED")))
     _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
 
@@ -508,7 +508,7 @@ def test_normal_t1_fill_sends_a_management_event_email(db, monkeypatch):
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
     sent = []
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
     _install(monkeypatch,
              get_position=_async(_no_position_response()),
              get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1-1")))
@@ -533,7 +533,7 @@ def test_stop_exit_email_has_no_approximated_caveat(db, monkeypatch):
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
     sent = []
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
     _install(monkeypatch,
              get_position=_async(_no_position_response()),
              get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
@@ -552,7 +552,7 @@ def test_c5_exit_email_has_the_approximated_caveat(db, monkeypatch):
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
     sent = []
-    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
     monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
@@ -585,9 +585,9 @@ def test_management_event_email_failure_never_blocks_the_real_bookkeeping(db, mo
     state, the audit row, record_trade_result()) that already committed
     for this tick -- run_executor_live_e1_loop() commits once per order
     per tick and rolls back the WHOLE tick on any uncaught exception."""
-    def _boom(subject, body):
+    def _boom(subject, body, account_id):
         raise RuntimeError("SMTP exploded")
-    monkeypatch.setattr("notify.send_admin_email", _boom)
+    monkeypatch.setattr("notify.send_account_email", _boom)
 
     account = _ready_account(db)
     plan = _traveler_plan(db)

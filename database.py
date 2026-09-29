@@ -2586,17 +2586,29 @@ class ExecutorMechanismTest(Base):
 
 
 class EmailSubscriber(Base):
-    """Admin-manageable recipients for Kabroda's real trade-communication
-    emails (lock/ARMED/DONE, and later the D3 management-event emails) --
-    2026-09-23, part of the strategic site audit's radar-rebuild-around-
-    Traveler-communication work. Additive to notify.py's existing SMTP_DEST
-    env var, not a replacement -- notify.send_admin_email() sends to the
-    UNION of both, deduped, so Andy's own env-var address keeps receiving
-    mail with zero config change, and anyone added here rides along on the
-    exact same emails without needing a site login (this is a distribution
-    list, not a UserModel account -- deliberately no FK to users.id, since
-    someone can be on this list without ever logging into the site, and a
-    site login carries no email-list membership either way)."""
+    """Admin-manageable recipients for Kabroda's RADAR-class emails only
+    (session lock, plan-level ARMED/DONE transitions, pipeline-health
+    alerts) -- 2026-09-23, part of the strategic site audit's radar-
+    rebuild-around-Traveler-communication work. Additive to notify.py's
+    existing SMTP_DEST env var, not a replacement -- notify.send_admin_
+    email() sends to the UNION of both, deduped, so Andy's own env-var
+    address keeps receiving mail with zero config change, and anyone
+    added here rides along on the exact same emails without needing a
+    site login (this is a distribution list, not a UserModel account --
+    deliberately no FK to users.id, since someone can be on this list
+    without ever logging into the site, and a site login carries no
+    email-list membership either way).
+
+    2026-09-28 correction (Andy's L4 ruling, CC_INTERFACE.md): this
+    docstring used to also claim the D3 management-event (fill/close)
+    emails -- wrong as of this date. Every per-account trade-execution
+    email (fills/opens/closes/cancels/errors/risk$) now routes through
+    notify.send_account_email() instead, straight to that specific
+    ExecutorAccount's own owner (executor_accounts.user_id -> users.email)
+    -- this table is never consulted for those. A subscriber added here
+    (e.g. a newsletter-only, non-trading person) gets radar-style
+    notifications only, exactly as Andy intended -- never another
+    person's real trading activity."""
     __tablename__ = "email_subscribers"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -2611,23 +2623,27 @@ class EmailSubscriber(Base):
 # TABLE migration needed.
 # ---------------------------------------------------------
 class EmailSendLog(Base):
-    """Audit trail for every email notify.send_admin_email() sends or
-    attempts -- 2026-09-27 (Andy ruling 14:55 CT, TRAVELER_D1_D2_D3_SPEC.md
-    ONE-TRUTH RULE: "every send lands in newsletter_log"). NOT the retired
-    NewsletterLog table (database.py's own comment on that table: removed
-    2026-08-30, its own writer/reader both archived along with the old
-    Content Publishing Engine) -- that table's name/shape belonged to a
-    completely different concept (published newsletters), and repurposing
-    a retired table for an unrelated purpose would be its own source of
-    confusion later. A fresh, purpose-built table instead. Written from
-    notify.py itself -- the ONE function every email in this codebase
-    already routes through (confirmed by a full-repo audit, 2026-09-27) --
-    so this logs every category (traveler lock/armed/done/closed, gravity,
-    ledger, executor error alerts, etc.), not just traveler ones. Logs
-    every outcome, not only successful sends: a skip (no SMTP config, no
-    recipients) or an SMTP failure are exactly the states this audit trail
-    exists to make visible -- Andy's own real question ("did today's
-    emails actually send?") is unanswerable from an empty log either way."""
+    """Audit trail for every email notify.py sends or attempts -- 2026-09-27
+    (Andy ruling 14:55 CT, TRAVELER_D1_D2_D3_SPEC.md ONE-TRUTH RULE: "every
+    send lands in newsletter_log"). NOT the retired NewsletterLog table
+    (database.py's own comment on that table: removed 2026-08-30, its own
+    writer/reader both archived along with the old Content Publishing
+    Engine) -- that table's name/shape belonged to a completely different
+    concept (published newsletters), and repurposing a retired table for
+    an unrelated purpose would be its own source of confusion later. A
+    fresh, purpose-built table instead. Written from notify.py's shared
+    _send()/_log_send() core -- 2026-09-28: this used to say "the ONE
+    function every email routes through," true when there was only
+    send_admin_email(); the L4 email-routing split added send_account_
+    email() as a second public entry point, but both still funnel through
+    the same internal _send() -> _log_send() core, so this table still
+    logs literally every email this codebase sends, radar-class and
+    per-account-class alike, with zero gap. Logs every outcome, not only
+    successful sends: a skip (no SMTP config, no recipients, or -- for
+    the per-account class -- no resolvable account owner) or an SMTP
+    failure are exactly the states this audit trail exists to make
+    visible -- Andy's own real question ("did today's emails actually
+    send?") is unanswerable from an empty log either way."""
     __tablename__ = "email_send_log"
 
     id = Column(Integer, primary_key=True, index=True)

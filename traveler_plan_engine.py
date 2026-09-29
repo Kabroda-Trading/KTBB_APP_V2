@@ -200,7 +200,10 @@ def _notify_traveler_management_event(order: ExecutorOrder) -> None:
             "approximated": False,  # DRY_RUN never approximates -- candle-sourced, deterministic (mgmt_e1_stack.py)
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=False)
-        notify.send_admin_email(subject, body)
+        # 2026-09-28 (Andy L4 ruling): a DRY_RUN close is still THIS
+        # account's own bookkeeping detail (risk$/R) -- route to its
+        # owner only, same as the LIVE version in executor_live_e1_engine.py.
+        notify.send_account_email(subject, body, order.account_id)
     except Exception as e:
         print(f"|| MGMT_E1_STACK || Management-event notification failed for order {order.id}: {e}")
 

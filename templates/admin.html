@@ -142,12 +142,18 @@
     </div>
 
     <!-- 2026-09-23 -- Email Distribution List, admin-manageable recipients
-         for the real trade-communication emails (notify.py's own
-         send_admin_email() reads these same rows, additive to the
-         existing SMTP_DEST env var -- see that module's header). -->
+         for RADAR-CLASS emails only (session lock, plan-level ARMED/DONE,
+         pipeline-health alerts) -- notify.py's own send_admin_email()
+         reads these same rows, additive to the existing SMTP_DEST env var
+         (see that module's header). 2026-09-28 correction (Andy's L4
+         ruling): per-account trade-execution emails (fills/opens/closes/
+         cancels/errors/risk$) do NOT come through this list any more --
+         those route to each ExecutorAccount's own real owner only
+         (notify.send_account_email()), so a subscriber added here never
+         sees another person's real trading activity. -->
     <div class="roster-card">
         <div class="card-header">
-            <span class="card-title">Email Distribution List</span>
+            <span class="card-title">Email Distribution List (radar-class only)</span>
             <div style="display:flex; gap:10px; align-items:center;">
                 <span class="card-title">{{ email_subscribers|length }} SUBSCRIBERS</span>
                 <button class="btn-test" onclick="openAddSubscriber()">+ ADD EMAIL</button>
@@ -175,7 +181,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" style="color:#64748b; text-align:center;">No subscribers yet -- SMTP_DEST's own address(es) still receive every email regardless.</td></tr>
+                <tr><td colspan="5" style="color:#64748b; text-align:center;">No subscribers yet -- SMTP_DEST's own address(es) still receive every radar-class email regardless.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -184,7 +190,7 @@
     <div id="addSubscriberModal" class="modal-overlay">
         <div class="modal">
             <h3>Add Email Subscriber</h3>
-            <p style="color:#94a3b8; font-size:14px;">They'll start receiving the same trade-communication emails Andy gets -- no site login required.</p>
+            <p style="color:#94a3b8; font-size:14px;">They'll start receiving radar-class emails only (session lock, plan-level ARMED/DONE, pipeline-health alerts) -- no site login required. They will NOT receive any specific account's fill/open/close/risk$ detail; that routes only to that account's own owner.</p>
 
             <input type="email" id="newSubEmail" class="inp-pass" placeholder="Email address">
             <input type="text" id="newSubLabel" class="inp-pass" placeholder="Label (optional, e.g. a name)">

@@ -348,3 +348,115 @@ def test_send_admin_email_logging_failure_never_blocks_the_real_send(smtp_env, m
     with patch("smtplib.SMTP", return_value=mock_server):
         ok = notify.send_admin_email("subject", "body")
     assert ok is True   # the real send still succeeded and reported success
+
+
+# ------------------------------------------------------------------ send_account_email (2026-09-28, Andy's L4 email-routing ruling)
+# CC_INTERFACE.md L4: trade-execution emails (fills/opens/closes/cancels/
+# errors/risk$) must route ONLY to the specific ExecutorAccount's real
+# owner (executor_accounts.user_id -> users.email), never the merged
+# SMTP_DEST + EmailSubscriber radar list send_admin_email() uses. Real
+# DB rows (ExecutorAccount + UserModel), not mocked -- the whole point is
+# proving the actual owner lookup works, not just that some address gets
+# used.
+
+@pytest.fixture
+def account_and_owner():
+    import database
+    database.init_db()
+    db = database.SessionLocal()
+    db.query(database.ExecutorAccount).filter(database.ExecutorAccount.label == "test_l4_account").delete()
+    db.query(database.UserModel).filter(database.UserModel.email == "owner@test.com").delete()
+    db.commit()
+    user = database.UserModel(email="owner@test.com", password_hash="x")
+    db.add(user)
+    db.flush()
+    account = database.ExecutorAccount(user_id=user.id, label="test_l4_account")
+    db.add(account)
+    db.commit()
+    account_id = account.id
+    db.close()
+    yield account_id
+    db = database.SessionLocal()
+    db.query(database.ExecutorAccount).filter(database.ExecutorAccount.id == account_id).delete()
+    db.query(database.UserModel).filter(database.UserModel.email == "owner@test.com").delete()
+    db.commit()
+    db.close()
+
+
+def test_send_account_email_delivers_only_to_the_account_owner_not_the_merged_list(smtp_env, monkeypatch, account_and_owner):
+    # The core of the L4 fix: SMTP_DEST/EmailSubscriber recipients must
+    # NOT receive this email, even though they would for send_admin_email().
+    monkeypatch.setattr(notify, "SMTP_DEST", "andy@x.com")
+    monkeypatch.setattr(notify, "_db_subscriber_recipients", lambda: ["dawson@y.com"])
+    mock_server = MagicMock()
+    mock_server.__enter__ = MagicMock(return_value=mock_server)
+    mock_server.__exit__ = MagicMock(return_value=False)
+    with patch("smtplib.SMTP", return_value=mock_server):
+        ok = notify.send_account_email("subject", "body", account_and_owner)
+    assert ok is True
+    to_addrs = mock_server.sendmail.call_args[0][1]
+    assert to_addrs == ["owner@test.com"]
+    assert "andy@x.com" not in to_addrs
+    assert "dawson@y.com" not in to_addrs
+
+
+def test_send_account_email_skips_and_does_not_fall_back_to_merged_list_for_unknown_account(smtp_env, monkeypatch):
+    # An unresolvable account must NOT silently broadcast to the merged
+    # list -- that would reintroduce the exact cross-account leak L4 exists
+    # to close. It should simply not send.
+    monkeypatch.setattr(notify, "SMTP_DEST", "andy@x.com")
+    with patch("smtplib.SMTP") as mock_smtp_cls:
+        ok = notify.send_account_email("subject", "body", 999999)
+    assert ok is False
+    mock_smtp_cls.assert_not_called()
+
+
+def test_send_account_email_skips_when_account_exists_but_user_does_not(smtp_env, monkeypatch):
+    import database
+    database.init_db()
+    db = database.SessionLocal()
+    db.query(database.ExecutorAccount).filter(database.ExecutorAccount.label == "test_l4_orphan").delete()
+    db.commit()
+    account = database.ExecutorAccount(user_id=999999, label="test_l4_orphan")   # no matching UserModel row
+    db.add(account)
+    db.commit()
+    account_id = account.id
+    db.close()
+    try:
+        with patch("smtplib.SMTP") as mock_smtp_cls:
+            ok = notify.send_account_email("subject", "body", account_id)
+        assert ok is False
+        mock_smtp_cls.assert_not_called()
+    finally:
+        db = database.SessionLocal()
+        db.query(database.ExecutorAccount).filter(database.ExecutorAccount.id == account_id).delete()
+        db.commit()
+        db.close()
+
+
+def test_send_account_email_returns_false_on_smtp_exception_never_raises(smtp_env, monkeypatch, account_and_owner):
+    with patch("smtplib.SMTP", side_effect=RuntimeError("connection refused")):
+        ok = notify.send_account_email("subject", "body", account_and_owner)
+    assert ok is False
+
+
+def test_send_account_email_logs_a_sent_row_to_only_the_owner(smtp_env, monkeypatch, account_and_owner):
+    mock_server = MagicMock()
+    mock_server.__enter__ = MagicMock(return_value=mock_server)
+    mock_server.__exit__ = MagicMock(return_value=False)
+    with patch("smtplib.SMTP", return_value=mock_server):
+        notify.send_account_email("KABRODA test subject", "test body", account_and_owner)
+    rows = _log_rows()
+    assert len(rows) == 1
+    assert rows[0].outcome == "SENT"
+    assert rows[0].recipients == "owner@test.com"
+
+
+def test_send_account_email_logs_a_skipped_row_for_an_unresolvable_account(smtp_env, monkeypatch):
+    with patch("smtplib.SMTP") as mock_smtp_cls:
+        notify.send_account_email("subject", "body", 999999)
+    mock_smtp_cls.assert_not_called()
+    rows = _log_rows()
+    assert len(rows) == 1
+    assert rows[0].outcome == "SKIPPED"
+    assert "999999" in rows[0].detail

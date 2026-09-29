@@ -97,31 +97,15 @@ def _log_send(subject: str, body: str, recipients: List[str], outcome: str, deta
         print(f"[NOTIFY] EmailSendLog write failed (non-fatal): {e}")
 
 
-def send_admin_email(subject: str, body: str) -> bool:
-    """
-    Sends a plain-text email to the union of SMTP_DEST's addresses and
-    every active EmailSubscriber row, deduped, via STARTTLS. Returns
-    True on success, False on any failure (missing config, connection
-    error, auth error). Never raises — callers should not need their own
-    try/except, but the pattern is safe to double-wrap if a caller
-    already does. Every outcome (sent, skipped, failed) is logged to
-    EmailSendLog (database.py) -- 2026-09-27 audit finding: this table had
-    zero writer, so real sends were invisible in the DB.
-    """
-    env_recipients = _parse_recipients(SMTP_DEST)
-    db_recipients = _db_subscriber_recipients()
-    # Case-insensitive dedupe, first-seen order preserved -- order has no
-    # real effect on delivery, this just avoids the same address getting
-    # two envelope entries if it's in both SMTP_DEST and EmailSubscriber.
-    seen = set()
-    recipients = []
-    for addr in env_recipients + db_recipients:
-        key = addr.lower()
-        if key not in seen:
-            seen.add(key)
-            recipients.append(addr)
+def _send(subject: str, body: str, recipients: List[str]) -> bool:
+    """Shared SMTP-send + EmailSendLog-logging core for send_admin_email()
+    and send_account_email() (2026-09-28, the L4 email-routing split) --
+    both deliver the identical way (STARTTLS, the same SKIPPED/SENT/FAILED
+    outcomes); only recipient RESOLUTION differs between the two, which is
+    exactly what each of them computes before calling this. Never raises,
+    matching both callers' existing contract."""
     if not (SMTP_USER and SMTP_PASS and recipients):
-        reason = "SMTP_USER/SMTP_PASS not configured, or no recipients (SMTP_DEST + EmailSubscriber both empty)."
+        reason = "SMTP_USER/SMTP_PASS not configured, or no recipients."
         print(f"[NOTIFY] Skipped — {reason}")
         _log_send(subject, body, recipients, "SKIPPED", reason)
         return False
@@ -143,3 +127,96 @@ def send_admin_email(subject: str, body: str) -> bool:
         print(f"[NOTIFY ERROR] Failed to send '{subject}': {e}")
         _log_send(subject, body, recipients, "FAILED", str(e))
         return False
+
+
+def send_admin_email(subject: str, body: str) -> bool:
+    """
+    Sends a plain-text email to the union of SMTP_DEST's addresses and
+    every active EmailSubscriber row, deduped, via STARTTLS. Returns
+    True on success, False on any failure (missing config, connection
+    error, auth error). Never raises — callers should not need their own
+    try/except, but the pattern is safe to double-wrap if a caller
+    already does. Every outcome (sent, skipped, failed) is logged to
+    EmailSendLog (database.py) -- 2026-09-27 audit finding: this table had
+    zero writer, so real sends were invisible in the DB.
+
+    2026-09-28 (Andy's L4 ruling -- see send_account_email() below): this
+    is now the RADAR class only -- session-wide/generic notifications
+    (lock emails, plan-level ARMED/DONE transitions, pipeline-health
+    alerts) with no single real person's trading activity in them. Any
+    email describing a SPECIFIC account's fill/open/close/cancel/error
+    must go through send_account_email() instead, never this function --
+    see that function's own docstring for why.
+    """
+    env_recipients = _parse_recipients(SMTP_DEST)
+    db_recipients = _db_subscriber_recipients()
+    # Case-insensitive dedupe, first-seen order preserved -- order has no
+    # real effect on delivery, this just avoids the same address getting
+    # two envelope entries if it's in both SMTP_DEST and EmailSubscriber.
+    seen = set()
+    recipients = []
+    for addr in env_recipients + db_recipients:
+        key = addr.lower()
+        if key not in seen:
+            seen.add(key)
+            recipients.append(addr)
+    return _send(subject, body, recipients)
+
+
+def _resolve_account_owner_email(account_id: int):
+    """Looks up the real person who owns this ExecutorAccount, for
+    send_account_email() below. Self-contained lazy-import/short-lived-
+    session pattern, matching _db_subscriber_recipients() above. Returns
+    None (never raises) if the account or its owning user can't be
+    resolved -- the caller must treat that as "cannot deliver," never
+    fall back to the merged radar list, which would silently reintroduce
+    the exact cross-account leak this whole mechanism exists to close."""
+    try:
+        from database import SessionLocal, ExecutorAccount, UserModel
+        db = SessionLocal()
+        try:
+            account = db.query(ExecutorAccount).filter(ExecutorAccount.id == account_id).first()
+            if account is None:
+                return None
+            user = db.query(UserModel).filter(UserModel.id == account.user_id).first()
+            if user is None or not user.email:
+                return None
+            return user.email.strip()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[NOTIFY] Account-owner email lookup failed for account_id={account_id}: {e}")
+        return None
+
+
+def send_account_email(subject: str, body: str, account_id: int) -> bool:
+    """2026-09-28 (Andy's L4 ruling, Kabroda AI Brain CC_INTERFACE.md,
+    "RULED BY ANDY 09-28 ~18:09 CT"): trade-execution emails -- fills,
+    opens, closes, cancels, unprotected-position/placement errors,
+    risk$ -- must route ONLY to that specific ExecutorAccount's real
+    owner (executor_accounts.user_id -> users.email), never the merged
+    radar list send_admin_email() uses. Each ExecutorAccount is a
+    distinct real person's own exchange account (own API credentials,
+    own risk) -- broadcasting one person's fill/close/error detail to
+    every subscriber, as every trade email did before this fix, leaks
+    another person's real trading activity, not just noise. Andy's own
+    words on the finding (AGENT_LOG.md, Kabroda AI Brain, 09-28 18:10 CT):
+    "they don't need to know that I'm trading on the exchange or not."
+
+    Deliberately does NOT fall back to the merged list if the owner's
+    email can't be resolved (missing account row, missing user, missing
+    email) -- that fallback would silently reintroduce the exact leak
+    this function exists to prevent. A resolution failure is logged
+    (SKIPPED, EmailSendLog) and printed loudly instead, matching this
+    codebase's loud-failure-never-silent-degradation discipline; it
+    should never actually happen in practice since
+    ExecutorAccount.user_id is a required, non-null column.
+    """
+    owner_email = _resolve_account_owner_email(account_id)
+    if owner_email is None:
+        reason = (f"Could not resolve an owner email for account_id={account_id} -- "
+                  f"trade-execution email NOT sent to the merged list (that would defeat per-account routing).")
+        print(f"[NOTIFY] Skipped — {reason}")
+        _log_send(subject, body, [], "SKIPPED", reason)
+        return False
+    return _send(subject, body, [owner_email])

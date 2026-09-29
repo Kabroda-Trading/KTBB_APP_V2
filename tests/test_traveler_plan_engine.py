@@ -652,9 +652,12 @@ def test_mgmt_e1_stack_closure_email_failure_never_blocks_the_real_bookkeeping(p
     in the new email-dispatch code must never roll back the closure's own
     real DB writes (management_state, the audit row, record_trade_result())
     that already committed for this tick."""
-    def _boom(subject, body):
+    def _boom_admin(subject, body):
         raise RuntimeError("SMTP exploded")
-    monkeypatch.setattr(notify, "send_admin_email", _boom)
+    def _boom_account(subject, body, account_id):
+        raise RuntimeError("SMTP exploded")
+    monkeypatch.setattr(notify, "send_admin_email", _boom_admin)
+    monkeypatch.setattr(notify, "send_account_email", _boom_account)
 
     account_id = poll_env["make_traveler_account"]()
     ct = 1700000000
@@ -762,11 +765,22 @@ def test_mgmt_e1_stack_closure_audit_write_handles_none_realized_pnl_r(poll_env)
 # already uses for v1/v2, tagged TRAVELER throughout.)
 
 def _capture_emails(monkeypatch):
+    # 2026-09-28 (Andy's L4 email-routing ruling): plan-level ARMED/DONE
+    # transitions still go through send_admin_email() (radar class), but
+    # the per-account management-event closure email now goes through
+    # send_account_email() instead (routes to that account's own owner,
+    # not the merged list) -- capture BOTH into the same list so callers
+    # of this helper don't need to know or care which one a given
+    # scenario actually used.
     sent = []
-    def fake_send(subject, body):
+    def fake_send_admin(subject, body):
         sent.append((subject, body))
         return True
-    monkeypatch.setattr(notify, "send_admin_email", fake_send)
+    def fake_send_account(subject, body, account_id):
+        sent.append((subject, body))
+        return True
+    monkeypatch.setattr(notify, "send_admin_email", fake_send_admin)
+    monkeypatch.setattr(notify, "send_account_email", fake_send_account)
     return sent
 
 
