@@ -305,6 +305,10 @@ async def _fire_session_lock_pipeline(date_key: str) -> None:
         print(f"[SCHEDULER] Session-lock pipeline direct fire failed: {e}")
 
 
+_WATCHDOG_POLL_SECONDS = 20
+_WATCHDOG_MAX_CHECKS = 6   # ~100s of polling (5 waits x 20s) before giving up
+
+
 async def _alert_if_lock_pipeline_did_not_complete(date_key: str) -> None:
     """2026-09-28 (Andy's own request, after two consecutive real
     incidents where a day's session silently never locked): a backstop,
@@ -321,31 +325,68 @@ async def _alert_if_lock_pipeline_did_not_complete(date_key: str) -> None:
     function's own control flow (an early return, an unhandled path)
     can't also silently skip this check the way it skipped the pipeline
     itself. Never raises -- a bug in this watchdog must never affect the
-    scheduler it's watching."""
-    try:
-        db = SessionLocal()
+    scheduler it's watching.
+
+    2026-09-29 correction (Andy's own live observation, the first day
+    this watchdog ran end-to-end against the ordinary happy path):
+    _fire_session_lock_pipeline()'s "new lock" branch above fires
+    run_mas_analysis() via asyncio.create_task() -- fire-and-forget, not
+    awaited -- specifically so callers of get_live_battlebox() elsewhere
+    (e.g. a radar page load) never block on a full analysis run. That
+    means on the NORMAL every-day path (no prior lock for today, which is
+    every day), _fire_session_lock_pipeline() returns the instant the
+    SessionLock row is created, well before the background task actually
+    finishes fetching candles across 5 timeframes and writing
+    mas_completed_at. A single immediate check here was firing a false
+    "did not complete" alert on ordinary days, not just genuine failures
+    -- exactly what Andy saw 2026-09-29 at the 13:00 UTC / 8:00 AM CT
+    scheduled fire: a first "couldn't find anything" alert, followed
+    shortly after by the real, correct lock email once run_mas_analysis()
+    actually finished. (The restart-recovery branch is unaffected by this
+    -- it awaits run_mas_analysis() directly via asyncio.to_thread, so
+    it's already fully resolved by the time this function is even
+    called; polling below is a harmless no-op there, since the very
+    first check already finds it done.)
+
+    Fix: poll with a real, bounded wait instead of one immediate check --
+    check now; if not complete, wait and recheck, up to
+    _WATCHDOG_MAX_CHECKS times, before alerting. This is not a redesign
+    of the backstop's own purpose (still fires on ANY failure mode, known
+    or not) -- it just gives the ordinary fire-and-forget completion path
+    a real chance to finish first."""
+    for attempt in range(_WATCHDOG_MAX_CHECKS):
         try:
-            completed = db.query(SessionLock).filter(
-                SessionLock.symbol == "BTC/USDT",
-                SessionLock.date_key == date_key,
-                SessionLock.mas_completed_at.isnot(None),
-            ).first()
-        finally:
-            db.close()
-        if completed is None:
-            print(f"[SCHEDULER] WATCHDOG: session-lock pipeline did NOT complete for {date_key} -- alerting")
-            import notify
-            notify.send_admin_email(
-                f"KABRODA ALERT -- no completed session lock for {date_key}",
-                f"The session-lock pipeline was attempted for {date_key} but SessionLock."
-                f"mas_completed_at is still not set -- there may be no BO/BD triggers, no "
-                f"TravelerPlan, and no lock email for today. CHECK THE SITE/EXCHANGE FEED "
-                f"DIRECTLY. This is an independent backstop check, not tied to any specific "
-                f"known failure mode -- it fires whenever the pipeline's own attempt (including "
-                f"its own retry) did not reach completion, for any reason.",
-            )
+            db = SessionLocal()
+            try:
+                completed = db.query(SessionLock).filter(
+                    SessionLock.symbol == "BTC/USDT",
+                    SessionLock.date_key == date_key,
+                    SessionLock.mas_completed_at.isnot(None),
+                ).first()
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[SCHEDULER] Watchdog check itself failed (non-fatal): {e}")
+            return
+        if completed is not None:
+            return
+        if attempt < _WATCHDOG_MAX_CHECKS - 1:
+            await asyncio.sleep(_WATCHDOG_POLL_SECONDS)
+
+    print(f"[SCHEDULER] WATCHDOG: session-lock pipeline did NOT complete for {date_key} -- alerting")
+    try:
+        import notify
+        notify.send_admin_email(
+            f"KABRODA ALERT -- no completed session lock for {date_key}",
+            f"The session-lock pipeline was attempted for {date_key} but SessionLock."
+            f"mas_completed_at is still not set after polling for it -- there may be no "
+            f"BO/BD triggers, no TravelerPlan, and no lock email for today. CHECK THE "
+            f"SITE/EXCHANGE FEED DIRECTLY. This is an independent backstop check, not tied "
+            f"to any specific known failure mode -- it fires whenever the pipeline's own "
+            f"attempt (including its own retry) did not reach completion, for any reason.",
+        )
     except Exception as e:
-        print(f"[SCHEDULER] Watchdog check itself failed (non-fatal): {e}")
+        print(f"[SCHEDULER] Failure-alert email itself failed: {e}")
 
 
 async def run_session_lock_scheduler() -> None:

@@ -339,23 +339,60 @@ def test_watchdog_sends_no_alert_when_pipeline_actually_completed(env, monkeypat
 def test_watchdog_alerts_when_lock_exists_but_never_completed(env, monkeypatch):
     # The real 2026-09-28 shape: a lock/attempt happened but
     # mas_completed_at never got set (whatever the underlying reason).
+    # Never completes across the whole poll budget -- must still alert,
+    # and must have actually polled the full budget first (not given up
+    # on the very first check).
     _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+    sleeps = []
+    async def _count_sleep(seconds):
+        sleeps.append(seconds)
+    monkeypatch.setattr(main.asyncio, "sleep", _count_sleep)
     sent = []
     monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
     _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
     assert len(sent) == 1
     assert "no completed session lock" in sent[0][0].lower()
     assert "2026-09-19" in sent[0][0]
+    assert len(sleeps) == main._WATCHDOG_MAX_CHECKS - 1   # polled the full budget before giving up
 
 
 def test_watchdog_alerts_when_no_lock_row_exists_at_all(env, monkeypatch):
     # An even more total failure than 2026-09-28's -- not even a
     # SessionLock row got written. Must still alert, not assume "no row
     # means nothing to check."
+    monkeypatch.setattr(main.asyncio, "sleep", _noop_sleep)
     sent = []
     monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
     _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
     assert len(sent) == 1
+
+
+def test_watchdog_polling_catches_completion_that_lands_during_the_wait(env, monkeypatch):
+    # 2026-09-29 REAL production shape (Andy's own live report, first day
+    # this watchdog ran against the ordinary happy path): on the "new
+    # lock created" branch, _fire_session_lock_pipeline() fires
+    # run_mas_analysis() via asyncio.create_task() and returns
+    # immediately -- mas_completed_at is genuinely still NULL the instant
+    # this watchdog first checks, even though the real background
+    # pipeline is working correctly and finishes moments later. Simulate
+    # exactly that: NOT complete on the first check, but completes during
+    # the first poll wait -- must NOT send the false "did not complete"
+    # alert Andy saw that morning.
+    _make_lock(env["db"], date_key="2026-09-19", mas_completed_at=None)
+
+    async def _complete_during_first_sleep(seconds):
+        db = SessionLocal()
+        db.query(SessionLock).filter(SessionLock.date_key == "2026-09-19").update(
+            {"mas_completed_at": dt.datetime(2026, 9, 19, 14, 5, 0)}
+        )
+        db.commit()
+        db.close()
+
+    monkeypatch.setattr(main.asyncio, "sleep", _complete_during_first_sleep)
+    sent = []
+    monkeypatch.setattr("notify.send_admin_email", lambda subject, body: sent.append((subject, body)) or True)
+    _run(main._alert_if_lock_pipeline_did_not_complete("2026-09-19"))
+    assert sent == []   # completed on the second check -- no false alarm
 
 
 def test_watchdog_never_raises_even_if_its_own_db_query_explodes(env, monkeypatch):
