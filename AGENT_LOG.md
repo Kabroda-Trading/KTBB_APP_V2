@@ -8076,3 +8076,44 @@ fixes -- let me know once it's live and I'll verify the actual email
 routing behaves correctly on the next real trade event.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-29 -- FROM: Claude Code -- FOR: both
+STATUS: resolved
+
+Watchdog false-alarm fix, site commit `b8d8d1c`, pushed to main. Andy
+deployed everything through commit `627430a` this morning and reported
+the first real scheduled-fire test (13:00 UTC / 8:00 AM CT) at ~7:xx CT:
+a "couldn't find anything" alert fired, then a correct lock email came
+shortly after -- both real, both about today's actual attempt, not a
+repeat of 09-28's total silent failure.
+
+Root cause, verified from source: `_fire_session_lock_pipeline()`'s "new
+lock" branch (the ORDINARY every-day path -- no prior lock for today)
+fires `run_mas_analysis()` via `asyncio.create_task()`, fire-and-forget,
+deliberately so other callers of `get_live_battlebox()` (e.g. a radar
+page load) never block on a full analysis run -- then returns
+immediately. `_alert_if_lock_pipeline_did_not_complete()`, called right
+after, was checking `mas_completed_at` ONCE, immediately -- meaning it
+was racing the background task on every single ordinary day, not just
+09-28's calibration-race edge case. It just happened to go unnoticed
+until today because this was the first day the watchdog ran against a
+real scheduled fire on the happy path (yesterday's fire went through the
+boot-time catch-up path, which awaits completion synchronously and
+never had this race).
+
+Fix: the watchdog now polls up to 6 times, 20s apart (~100s total)
+before alerting, instead of checking once. Restart-recovery is
+unaffected (already synchronous, so its first check still resolves
+immediately -- no added delay there). New test proves the exact bug
+shape (completion landing during the first poll wait produces zero
+alerts); existing tests updated to mock `asyncio.sleep` so the suite
+doesn't burn 100 real seconds per test. Mutation-verified: forcing a
+single-check budget makes the new test fail exactly as expected, then
+reverted. Full suite 547 passed, clean boot.
+
+Andy: needs a Render deploy, same as everything else today. Once it's
+up, tomorrow's scheduled fire is the next real check that both the
+retry AND the corrected watchdog behave -- one clean lock email, no
+false alarm first.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
