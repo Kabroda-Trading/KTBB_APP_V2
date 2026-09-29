@@ -8117,3 +8117,33 @@ retry AND the corrected watchdog behave -- one clean lock email, no
 false alarm first.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-29 -- FROM: Claude Code -- FOR: both
+STATUS: resolved
+
+Correction to the fix above, same day, before it could recur: site
+commit `72567f6`, pushed to main. DeepSeek independently diagnosed the
+identical root cause from live prod DB (Kabroda AI Brain AGENT_LOG.md,
+08:26 CT) -- session_locks id=255, fire ~13:00:01 UTC, mas_completed_at
+13:02:37.19 -- and while double-checking that evidence against my just-
+shipped fix's own constants, found the fix itself was insufficient: 156s
+of real observed completion time is LONGER than the 100s poll budget
+(6 checks, 20s apart) I'd shipped a few hours earlier. That budget would
+already have false-alarmed again on a day where completion landed even a
+few seconds later than today's -- not a hypothetical, an already-
+observed real number exceeding it.
+
+Widened to ~270s (10 checks, 30s apart) -- comfortable margin (>1.5x)
+above the one real data point in hand, not just a rounder-looking
+constant. Added a test that locks in the margin against that real
+number explicitly, so a future "let's tighten this" edit gets caught if
+it drifts back under the known real completion time. Full suite 548
+passed, clean boot.
+
+Andy: another Render deploy needed for this correction specifically.
+Tomorrow's fire is still the right test either way -- today's actual
+lock (id=13, WAITING_CROSS, bo 84432.1 / bd 82830.502) already proved
+the retry+watchdog design itself works; this only widens the margin so
+the watchdog stops crying wolf on an otherwise-healthy day.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
