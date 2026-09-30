@@ -90,6 +90,14 @@ _E1_LIVE_TERMINAL_STATES = mgmt_e1_stack.MGMT_E1_TERMINAL_STATES + ("ENTRY_FILLE
 _CLOSE_CONFIRM_INTERVAL_SEC = 1.0
 _CLOSE_CONFIRM_ATTEMPTS = 10
 
+# 2026-09-30 real production incident (DeepSeek's prod-DB find, Kabroda AI
+# Brain AGENT_LOG.md 18:26 CT) -- see run_executor_live_e1_loop()'s own
+# comment for the full incident/reasoning. Bounds each order's per-cycle
+# poll_traveler_position() call so a genuine network-level hang can never
+# freeze this loop forever. Tighter than traveler_plan_engine.py's 45s --
+# this loop's own 30s cadence is tighter too.
+_ROW_TIMEOUT_SECONDS = 25
+
 
 def _client_for(account: ExecutorAccount) -> "executor_bitunix_client.BitunixClient":
     api_key, api_secret = executor_accounts.get_decrypted_credentials(account)
@@ -726,9 +734,32 @@ async def run_executor_live_e1_loop() -> None:
     from database import SessionLocal
 
     print(">>> EXECUTOR LIVE E1 ENGINE: Initializing traveler position-watch loop...")
+    # 2026-09-30 real production incident (DeepSeek's prod-DB find,
+    # Kabroda AI Brain AGENT_LOG.md 18:26 CT): traveler_plan_engine.py's own
+    # sibling loop (same market_data.fetch_bitunix_1h/4h() calls this loop's
+    # poll_traveler_position() also makes) froze solid at the 13:00 UTC lock
+    # cycle and never resumed for the rest of the day -- a genuine coroutine
+    # hang (not a raised exception), which neither a per-row try/except nor
+    # this function's own outer one can catch on their own. market_data.py's
+    # own header already documents one prior real instance of exactly this
+    # class of bug for the Kraken/ccxt client ("hangs indefinitely: no
+    # exception, no timeout, not even cancellable via asyncio.wait_for() ...
+    # the underlying OS thread stays blocked"). This loop watches REAL,
+    # live-money positions -- the same freeze here would mean a real
+    # position's stop/exit checks silently stop running -- so it gets the
+    # same defense-in-depth timeout bound applied to traveler_plan_engine.py
+    # in the same fix, independent of pinning down today's exact stuck call
+    # (_ROW_TIMEOUT_SECONDS is a module-level constant, defined above).
     while True:
-        db = SessionLocal()
+        # db used to be opened OUTSIDE this try/except -- if that call
+        # itself ever raised (e.g. an exhausted DB connection pool during
+        # the same lock cycle's own burst of DB activity), the exception
+        # would propagate out of the whole while-loop body, silently
+        # killing this entire background task with no restart. Now inside
+        # the try, with db=None as the guard for the finally below.
+        db = None
         try:
+            db = SessionLocal()
             open_orders = db.query(ExecutorOrder).filter(
                 ExecutorOrder.management_state.isnot(None),
                 ~ExecutorOrder.management_state.in_(_E1_LIVE_TERMINAL_STATES),
@@ -741,7 +772,10 @@ async def run_executor_live_e1_loop() -> None:
                     traveler_plan_row = db.query(TravelerPlan).filter_by(id=order_row.traveler_plan_id).first()
                     if account is None or traveler_plan_row is None:
                         continue
-                    await poll_traveler_position(db, account, traveler_plan_row, order_row)
+                    await asyncio.wait_for(
+                        poll_traveler_position(db, account, traveler_plan_row, order_row),
+                        timeout=_ROW_TIMEOUT_SECONDS,
+                    )
                     db.commit()
                 except Exception as e:
                     db.rollback()
@@ -751,5 +785,6 @@ async def run_executor_live_e1_loop() -> None:
             print(f"|| EXECUTOR LIVE E1 ENGINE ERROR || {e}")
             traceback.print_exc()
         finally:
-            db.close()
+            if db is not None:
+                db.close()
         await asyncio.sleep(30)

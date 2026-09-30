@@ -65,6 +65,28 @@ import market_data
 _MGMT_E1_TERMINAL_STATES = mgmt_e1_stack.MGMT_E1_TERMINAL_STATES
 
 _POLL_SECONDS = 60
+# 2026-09-30 real production incident (DeepSeek's prod-DB find, Kabroda AI
+# Brain AGENT_LOG.md 18:26 CT): TravelerPlan id=14's own row (and, per the
+# same evidence, the candle_history writes this loop's own fetches would
+# have produced) went silent right at the 13:00 UTC lock cycle and never
+# resumed for the rest of the day -- a real 5m close beyond BO at 13:05
+# UTC was never evaluated, because nothing ever polled this row again.
+# Every per-row/per-order call below was ALREADY wrapped in its own try/
+# except (so a normal exception on one row never took down the loop or
+# blocked other rows) -- but neither that nor this file's own top-level
+# try/except can catch a coroutine that never returns at all (a genuine
+# network-level hang, not a raised exception) -- and market_data.py's own
+# header (see its "EXCHANGE CLIENT" section) already documents one prior,
+# real instance of exactly this class of bug for the Kraken/ccxt client:
+# "hangs indefinitely: no exception, no timeout, not even cancellable via
+# asyncio.wait_for() ... the underlying OS thread stays blocked." Bounding
+# every row/order's processing in asyncio.wait_for() below is a defense-
+# in-depth fix independent of pinning down today's EXACT stuck call: even
+# if some future network path hangs the same uncancellable way, the loop
+# itself gives up on that one row after this timeout and moves on to the
+# next poll cycle, instead of freezing every future poll forever the way
+# today's incident did.
+_ROW_TIMEOUT_SECONDS = 45
 
 
 def _fmt_r(value: Optional[float]) -> str:
@@ -355,14 +377,23 @@ async def run_traveler_plan_loop():
             pass
 
         now_utc = datetime.now(timezone.utc)
-        db = SessionLocal()
+        # 2026-09-30: db used to be opened OUTSIDE this try/except (a bare
+        # `db = SessionLocal()` before `try:`) -- if that call itself ever
+        # raised (e.g. a genuinely exhausted DB connection pool during the
+        # same 13:00 lock cycle's own burst of DB activity), the exception
+        # would propagate out of the entire while-loop body, silently
+        # killing this whole background task with no restart -- the exact
+        # "task just isn't there anymore" shape of today's incident. Now
+        # inside the try, with db=None as the guard for the finally below.
+        db = None
         try:
+            db = SessionLocal()
             rows = db.query(TravelerPlan).filter(
                 TravelerPlan.status.in_(["WAITING_CROSS", "WAITING_TOUCH"])
             ).all()
             for row in rows:
                 try:
-                    await _advance_one(db, row, now_utc)
+                    await asyncio.wait_for(_advance_one(db, row, now_utc), timeout=_ROW_TIMEOUT_SECONDS)
                     db.commit()
                 except Exception as _row_err:
                     db.rollback()
@@ -372,7 +403,7 @@ async def run_traveler_plan_loop():
             # own header for why it lives here, not executor_live_engine.py.
             for order in _open_dry_run_e1_orders(db):
                 try:
-                    await _advance_e1_order(db, order, now_utc)
+                    await asyncio.wait_for(_advance_e1_order(db, order, now_utc), timeout=_ROW_TIMEOUT_SECONDS)
                     db.commit()
                 except Exception as _order_err:
                     db.rollback()
@@ -393,6 +424,7 @@ async def run_traveler_plan_loop():
             except Exception:
                 pass
         finally:
-            db.close()
+            if db is not None:
+                db.close()
 
         await asyncio.sleep(_POLL_SECONDS)

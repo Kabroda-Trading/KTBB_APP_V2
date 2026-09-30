@@ -203,6 +203,117 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+# ------------------------------------------------------------------ 2026-09-30: run_executor_live_e1_loop()'s own hang resilience
+# Real production incident (DeepSeek's prod-DB find, Kabroda AI Brain
+# AGENT_LOG.md 18:26 CT): traveler_plan_engine.py's sibling loop froze
+# solid at the 13:00 UTC lock cycle and never resumed for the rest of the
+# day -- a genuine network-level hang, not a raised exception. This loop
+# watches REAL, live-money positions, so it got the identical defense-in-
+# depth fix (bound each order's poll in asyncio.wait_for(), and move
+# db = SessionLocal() inside its own try/except) in the same pass. These
+# tests drive the actual run_executor_live_e1_loop() coroutine directly
+# (not poll_traveler_position() in isolation, which the rest of this file
+# already covers) to prove the LOOP ITSELF survives both failure shapes.
+
+class _StopE1Loop(Exception):
+    pass
+
+
+def test_executor_live_loop_survives_a_hung_poll_and_resumes_next_cycle(db, monkeypatch):
+    monkeypatch.setattr(e1e, "_ROW_TIMEOUT_SECONDS", 0.05)   # keep the test fast, not 25 real seconds
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    _order_row(db, account, plan, entry_exchange_order_id="entry-order-1", management_state="PENDING_ENTRY")
+    db.commit()
+
+    calls = {"n": 0}
+
+    async def _hang_once_then_noop(db_arg, account_arg, plan_arg, order_arg):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await asyncio.Event().wait()   # never resolves -- simulates a genuine network hang
+
+    monkeypatch.setattr(e1e, "poll_traveler_position", _hang_once_then_noop)
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 2:
+            raise _StopE1Loop()
+
+    monkeypatch.setattr(e1e.asyncio, "sleep", fake_sleep)
+
+    async def main():
+        try:
+            await e1e.run_executor_live_e1_loop()
+        except _StopE1Loop:
+            pass
+
+    asyncio.run(main())
+
+    # The real assertion: a SECOND poll cycle actually happened after the
+    # first one hung -- proving the loop survived instead of freezing
+    # forever the way the real 09-30 incident did.
+    assert calls["n"] >= 2
+
+
+def test_executor_live_loop_survives_sessionlocal_itself_raising(db, monkeypatch):
+    # A second, related latent bug fixed in the same pass: db = SessionLocal()
+    # used to sit OUTSIDE the loop body's own try/except -- if opening a
+    # session itself ever raised (e.g. a genuinely exhausted DB connection
+    # pool during the same lock-cycle's own burst of DB activity), the
+    # exception would propagate out of the whole while-loop body and
+    # silently kill this entire background task with no restart.
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    _order_row(db, account, plan, entry_exchange_order_id="entry-order-1", management_state="PENDING_ENTRY")
+    db.commit()
+
+    # Isolate this test to the SessionLocal-recovery behavior only -- a real
+    # poll_traveler_position() would try a real BitunixClient network call
+    # on the second (successful) cycle, which this test has no interest in.
+    async def _noop_poll(*a, **kw):
+        return None
+    monkeypatch.setattr(e1e, "poll_traveler_position", _noop_poll)
+
+    calls = {"n": 0}
+    real_session_local = database.SessionLocal
+
+    def _explode_once_then_real():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated exhausted DB connection pool")
+        return real_session_local()
+
+    # run_executor_live_e1_loop() does `from database import SessionLocal`
+    # LOCALLY, once at the top of its own function body (not a module-level
+    # import) -- patching e1e.SessionLocal would do nothing, since the
+    # function never reads that name. Patch the actual source instead; the
+    # function's own local import re-binds fresh every time it's called,
+    # so it picks this up.
+    monkeypatch.setattr("database.SessionLocal", _explode_once_then_real)
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 2:
+            raise _StopE1Loop()
+
+    monkeypatch.setattr(e1e.asyncio, "sleep", fake_sleep)
+
+    async def main():
+        try:
+            await e1e.run_executor_live_e1_loop()
+        except _StopE1Loop:
+            pass
+
+    asyncio.run(main())
+
+    assert calls["n"] >= 2   # the second SessionLocal() call actually happened -- the loop survived
+
+
 # ------------------------------------------------------------------ place_traveler_entry_order
 
 def test_place_traveler_entry_order_places_a_resting_post_only_limit(db, monkeypatch):

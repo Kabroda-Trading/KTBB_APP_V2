@@ -215,6 +215,100 @@ def poll_env(monkeypatch):
     _clean_db_files()
 
 
+# ------------------------------------------------------------------ 2026-09-30: the per-row hang timeout
+# Real production incident (DeepSeek's prod-DB find, Kabroda AI Brain
+# AGENT_LOG.md 18:26 CT): TravelerPlan id=14 was never re-evaluated after
+# the 13:00 UTC lock cycle for the rest of the day, despite a real 5m
+# close beyond BO at 13:05 UTC -- the whole run_traveler_plan_loop() task
+# appears to have frozen on a genuine network-level hang (not a raised
+# exception), which neither the per-row nor the outer try/except could
+# catch on their own. Fixed by bounding each row's processing in
+# asyncio.wait_for(). This test does NOT use poll_env["run_polls"]() --
+# that helper unconditionally re-patches the market_data fetchers itself,
+# which would stomp the hang this test needs to inject -- so it drives
+# run_traveler_plan_loop() directly, the same way run_polls() does
+# internally.
+
+def test_traveler_engine_survives_a_hung_fetch_and_resumes_next_poll(poll_env, monkeypatch):
+    monkeypatch.setattr(tpe, "_ROW_TIMEOUT_SECONDS", 0.05)   # keep the test fast, not 45 real seconds
+    poll_env["make_plan"]()
+
+    calls = {"n": 0}
+
+    async def _hang_once_then_empty(symbol, limit=310, target_bars=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await asyncio.Event().wait()   # never resolves -- simulates a genuine network hang
+        return []   # empty candles -> _advance_one() returns early, no state change, no crash
+
+    for name in ("fetch_bitunix_5m", "fetch_bitunix_1h", "fetch_bitunix_4h",
+                 "fetch_live_5m", "fetch_live_1h", "fetch_live_4h"):
+        monkeypatch.setattr(tpe.market_data, name, _hang_once_then_empty)
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 2:
+            raise _StopLoop()
+
+    monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
+
+    async def main():
+        try:
+            await tpe.run_traveler_plan_loop()
+        except _StopLoop:
+            pass
+
+    asyncio.run(main())
+
+    # The real assertion: a SECOND poll cycle actually happened after the
+    # first one hung -- proving the loop survived instead of freezing
+    # forever the way the real 09-30 incident did.
+    assert calls["n"] >= 2
+
+
+def test_traveler_engine_survives_sessionlocal_itself_raising(poll_env, monkeypatch):
+    # A second, related latent bug fixed in the same pass: db = SessionLocal()
+    # used to sit OUTSIDE the loop body's own try/except -- if opening a
+    # session itself ever raised (e.g. a genuinely exhausted DB connection
+    # pool during the same lock-cycle's own burst of DB activity), the
+    # exception would propagate out of the whole while-loop body and
+    # silently kill this entire background task with no restart. Must now
+    # degrade to "log and retry next cycle" instead.
+    poll_env["make_plan"]()
+
+    calls = {"n": 0}
+    real_session_local = tpe.SessionLocal
+
+    def _explode_once_then_real():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated exhausted DB connection pool")
+        return real_session_local()
+
+    monkeypatch.setattr(tpe, "SessionLocal", _explode_once_then_real)
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 2:
+            raise _StopLoop()
+
+    monkeypatch.setattr(tpe.asyncio, "sleep", fake_sleep)
+
+    async def main():
+        try:
+            await tpe.run_traveler_plan_loop()
+        except _StopLoop:
+            pass
+
+    asyncio.run(main())
+
+    assert calls["n"] >= 2   # the second SessionLocal() call actually happened -- the loop survived
+
+
 def test_waiting_cross_advances_to_waiting_touch_on_a_real_cross(poll_env):
     poll_env["make_plan"]()
     candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
