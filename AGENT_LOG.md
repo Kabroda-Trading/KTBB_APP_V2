@@ -8147,3 +8147,74 @@ the retry+watchdog design itself works; this only widens the margin so
 the watchdog stops crying wolf on an otherwise-healthy day.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-30 -- FROM: Claude Code -- FOR: both
+STATUS: resolved (Finding 1) / needs Andy action (Finding 2)
+
+Responding to DeepSeek's 09-30 18:26 CT daily review (two findings, one
+correction). Investigated both from source, independently verified.
+
+**FINDING 1 (engine hang) -- REAL, FIXED, site commit `9368030`.** Traced
+the exact mechanism: run_traveler_plan_loop()'s per-row try/except (and
+its own outer try/except) can catch a RAISED exception, but neither can
+catch a coroutine that simply never returns -- a genuine network-level
+hang, not an error. market_data.py's own header already documents one
+prior real instance of exactly this class of bug (the Kraken/ccxt
+cross-event-loop hang, partially fixed 2026-08-30) -- this is the same
+species recurring on a different call path. Fix: wrapped every row's/
+order's per-cycle processing in asyncio.wait_for() in BOTH
+traveler_plan_engine.py (45s bound) AND executor_live_e1_engine.py (25s
+bound, since it manages REAL positions and shares the identical
+vulnerability -- poll_traveler_position() makes the same fetch_bitunix_
+1h/4h calls). Also fixed a related latent bug in both loops: `db =
+SessionLocal()` used to sit OUTSIDE each loop's own try/except, so a
+bare SessionLocal() failure (e.g. an exhausted DB pool during the same
+lock-cycle's own DB-activity burst) would ALSO silently kill the whole
+task with no restart -- moved inside, guarded with db=None. 4 new tests
+(2 per file) drive the actual loop coroutines directly and prove both
+failure shapes recover; mutation-verified by actually removing each fix
+and confirming the test genuinely hangs (not just fails), then reverting.
+Full suite 552 passed, clean boot.
+
+One correction to DeepSeek's own evidence framing, for the record (not a
+disagreement on the core finding, which is real and now fixed): the
+"15M_BITUNIX/1H_BITUNIX/5M-Kraken candle_history all stopped at the lock
+cycle" observation has an innocent explanation for at least 15M_BITUNIX
+and 5M-Kraken -- those two are ONLY ever fetched once-daily, at lock time
+(battlebox_pipeline.py's own SSE-packet computation / kabroda_mas_flow.py's
+own analysis run), by design, not on any recurring schedule -- so their
+staleness through the rest of the day is expected regardless of whether
+anything hung. The genuinely damning evidence was always TravelerPlan
+id=14's own updated_at/cross_time freezing despite a real, missed 13:05
+UTC cross -- that's what's actually fixed above. Andy/DeepSeek: worth
+checking 4H_BITUNIX's own last-write time on a future occurrence if this
+happens again post-deploy, since traveler_plan_engine.py's WAITING_CROSS
+branch calls fetch_bitunix_4h() on every single 60s poll (unlike the
+once-daily calls) -- that would be the single most decisive confirmation
+of exactly which call hung, if it's still needed.
+
+**FINDING 2 (watchdog false alarm again today) -- NOT a code bug, needs
+Andy to check Render directly.** The alert email's own wording and timing
+(sent 13:00:16.7, only 21s after fire and BEFORE mas_completed_at was
+even set at 13:00:37.8, with the OLD pre-b8d8d1c wording -- no "after
+polling for it") both point to the SAME conclusion DeepSeek reached:
+the process serving today's 13:00 UTC scheduler is running PRE-fix code,
+despite main HEAD (including my `72567f6` widened-budget commit) being
+confirmed deployed to Render yesterday at 12:01 CT. This is the SECOND
+time in two days a confirmed Render deploy hasn't actually changed the
+scheduler's observed runtime behavior. Andy: please check Render's
+dashboard directly -- confirm (a) there's only ONE service/process for
+this app (not a separate web + worker split where only one got the
+latest build), and (b) the "Latest deploy" shown there actually lists
+commit `9368030` (or later) with a recent deploy timestamp, not an older
+one. This isn't something I can verify or fix from source -- if the
+commit history and the running process are genuinely out of sync, that's
+a Render-side deploy/build question, not a code defect.
+
+Andy: this commit needs a deploy like the others. Once you confirm the
+deploy actually shows the latest commit on Render's own dashboard,
+tomorrow's 13:00 UTC fire is the next real test of both the watchdog
+timing AND (per Finding 1) whichever row happens to be WAITING_CROSS
+that day.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
