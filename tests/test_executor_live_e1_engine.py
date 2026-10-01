@@ -522,6 +522,80 @@ def test_init_db_backfill_does_not_touch_rows_with_a_different_real_exit_reason(
     assert row.exit_reason == "SOMETHING_ELSE"
 
 
+# ------------------------------------------------------------------ 2026-10-01: one-time manual close-out of traveler_plans id=14
+# Andy's own ruling ("let's just go with 1"): the 2026-09-30 traveler-
+# engine hang (fixed site commit 9368030) meant a real cross at 13:05 UTC
+# that day was never evaluated; by the time polling resumed, price had
+# moved back inside the range, and gate_traveler.py's own cross check
+# (_confirmed_side(), latest-bar-only) can never retroactively catch a
+# missed cross. Rather than leave that one journey polling forever with
+# no path to resolution, close it out manually via a narrowly-scoped,
+# idempotent one-time fix -- NOT a general "close stale WAITING_CROSS
+# rows" rule, which would be a real behavior change to the gate itself.
+
+def test_init_db_closes_out_the_one_known_missed_cross_plan_14(db):
+    plan = TravelerPlan(
+        id=14, symbol="BTC/USDT", date_key="2026-09-30", session_id="us_ny_futures",
+        status="WAITING_CROSS", breakout_trigger=85491.0, breakdown_trigger=82937.15,
+        r30_high=85491.0, r30_low=83832.1, rsi_4h_at_lock=51.6,
+    )
+    db.add(plan)
+    db.commit()
+
+    database.init_db()
+
+    db.expire_all()
+    row = db.query(TravelerPlan).filter_by(id=14).first()
+    assert row.status == "DONE"
+    assert "missed cross" in row.last_transition_reason.lower()
+    assert "9368030" in row.last_transition_reason   # cites the actual hang fix, not a vague note
+    # Never touched the real journey fields -- it genuinely never crossed,
+    # and fabricating cross/direction data here would be dishonest.
+    assert row.direction is None
+    assert row.cross_time is None
+
+
+def test_init_db_close_out_fix_does_not_touch_a_different_id_even_with_the_same_status(db):
+    # Guard against an overly-broad match: the fix is scoped to id=14
+    # specifically, not "any WAITING_CROSS row" -- a different plan that
+    # happens to also be WAITING_CROSS (a real, still-watching journey on
+    # some other day) must be left completely alone.
+    other_plan = TravelerPlan(
+        symbol="BTC/USDT", date_key="2026-10-02", session_id="us_ny_futures",
+        status="WAITING_CROSS", breakout_trigger=90000.0, breakdown_trigger=88000.0,
+        r30_high=90000.0, r30_low=88500.0, rsi_4h_at_lock=55.0,
+    )
+    db.add(other_plan)
+    db.commit()
+    other_id = other_plan.id
+    assert other_id != 14   # sanity: a fresh-inserted row must not collide with the one we're protecting
+
+    database.init_db()
+
+    db.expire_all()
+    row = db.query(TravelerPlan).filter_by(id=other_id).first()
+    assert row.status == "WAITING_CROSS"   # untouched
+    assert row.last_transition_reason is None
+
+
+def test_init_db_close_out_fix_is_idempotent_once_already_done(db):
+    plan = TravelerPlan(
+        id=14, symbol="BTC/USDT", date_key="2026-09-30", session_id="us_ny_futures",
+        status="DONE", last_transition_reason="some other, already-correct reason",
+        breakout_trigger=85491.0, breakdown_trigger=82937.15,
+        r30_high=85491.0, r30_low=83832.1, rsi_4h_at_lock=51.6,
+    )
+    db.add(plan)
+    db.commit()
+
+    database.init_db()   # must not overwrite an already-DONE row's reason
+
+    db.expire_all()
+    row = db.query(TravelerPlan).filter_by(id=14).first()
+    assert row.status == "DONE"
+    assert row.last_transition_reason == "some other, already-correct reason"
+
+
 def test_entry_canceled_reconciliation_never_books_a_fill_or_loss(db, monkeypatch):
     account = _ready_account(db)
     plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)

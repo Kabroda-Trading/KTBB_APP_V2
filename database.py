@@ -61,6 +61,35 @@ def init_db():
     except Exception:
         pass
 
+    # 2026-10-01 (Andy's own ruling -- "let's just go with 1"): traveler_
+    # plans.id=14 (the 2026-09-30 session) can never resolve on its own.
+    # The 2026-09-30 traveler-engine hang (site commit 9368030) meant
+    # nothing was polling when a real 5m close printed above that
+    # session's breakout_trigger at 13:05 UTC that day; gate_traveler.py's
+    # own cross check (_confirmed_side()) only evaluates the LATEST
+    # confirmed close, not a scan of history, so by the time polling
+    # resumed and price had moved back inside the range, the missed cross
+    # could never be retroactively caught -- confirmed live (2026-10-01):
+    # price $83,720 sits between that session's bd $82,937.15 and bo
+    # $85,491.00. Zero live exposure either way -- WAITING_CROSS never
+    # reaches the executor, no order was ever placed for this journey.
+    # Narrowly scoped to this one id (not a general "close stale
+    # WAITING_CROSS rows" rule -- that would be a real behavior change to
+    # the gate itself, not ordered), and idempotent -- matches nothing
+    # once corrected, same convention as the other one-time fixes above.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE traveler_plans SET status = 'DONE', "
+                "last_transition_reason = 'Closed out manually 2026-10-01 -- missed cross "
+                "(2026-09-30 traveler-engine hang, site commit 9368030); price moved back "
+                "inside the range before polling resumed and could not be retroactively "
+                "caught. No order was ever placed; zero live exposure.' "
+                "WHERE id = 14 AND status = 'WAITING_CROSS'"
+            ))
+    except Exception:
+        pass
+
     # --- MIGRATION PATCHES (POSTGRESQL SAFE) ---
     try:
         with engine.begin() as conn:
