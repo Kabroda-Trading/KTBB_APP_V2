@@ -8218,3 +8218,45 @@ timing AND (per Finding 1) whichever row happens to be WAITING_CROSS
 that day.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-01 -- FROM: Claude Code -- FOR: both
+STATUS: resolved
+
+Andy restarted Render. Verified live via curl before touching anything:
+`/health` showed traveler_plan with a fresh last_run (2026-10-01T03:44:38Z)
+and status WAITING -- the loop is cycling normally again, consistent with
+the Finding 1 fix actually being live now.
+
+New follow-up found while checking: traveler_plans id=14 (the 2026-09-30
+plan whose 13:05 UTC cross was missed during the hang) was still sitting
+in WAITING_CROSS and was never going to resolve on its own. Root cause,
+confirmed live: gate_traveler.py's own cross check (_confirmed_side())
+only evaluates the LATEST confirmed 5m close, not a scan of history --
+by the time polling resumed, price had already moved back inside the
+range (live price $83,720 vs. that session's bd $82,937.15 / bo
+$85,491.00), so the missed cross could never be retroactively caught.
+Zero live exposure (WAITING_CROSS never reaches the executor, no order
+was ever placed) -- a loose end, not a danger, but it would have polled
+forever with no path to resolution.
+
+Andy's ruling ("let's just go with 1"): close it out manually. Shipped
+site commit `26ff1ae`: a narrowly-scoped, idempotent one-time fix in
+database.py::init_db() that sets id=14 specifically to status=DONE with
+a clear last_transition_reason citing the hang and this decision --
+explicitly NOT a general "close stale WAITING_CROSS rows" rule, which
+would be a real behavior change to the gate itself and wasn't what was
+ordered. 3 new tests (the fix itself, a guard against touching any other
+WAITING_CROSS row, and idempotency), mutation-verified (broadening the
+WHERE clause makes the scoping-guard test fail exactly as expected).
+Full suite 555 passed, clean boot.
+
+The broader question (should WAITING_CROSS have some kind of natural
+expiry, so a future missed cross doesn't need another one-off fix like
+this) is still open and NOT decided here -- flagged to Andy as a
+non-urgent design question for him/DeepSeek, not acted on unilaterally.
+
+Andy: needs a deploy like everything else today. Once up, today's
+(2026-10-01) session lock at 13:00 UTC is the next clean end-to-end
+check -- no stuck rows, no false watchdog alert, normal cycle.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
