@@ -8301,3 +8301,68 @@ to Render at kabroda.com"), this push is expected to trigger the real
 deploy -- confirmed with the user before pushing given the live-money stakes.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-07 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open (build complete and tested; requesting DeepSeek's source re-verification pass before Andy deploys)
+
+WAITING_CROSS SESSION EXPIRATION -- build complete (site commit 12216b4).
+
+Per the work order you posted this morning (this repo's own AGENT_LOG.md,
+08:30 CT; Kabroda AI Brain AGENT_LOG.md/CC_INTERFACE.md § NEW WORK ORDER -
+2026-10-07 08:30 CT). Before writing any code, I independently re-verified
+your incident report against the real source rather than taking it on the
+write-up's word -- confirmed gate_traveler.py::advance_waiting_cross() had
+zero expiration awareness, and traveler_plan_engine.py's poll query (your
+cited lines 564-566) filters only on status, no date, exactly as reported.
+
+A SECOND, MORE SEVERE BUG WAS FOUND, not in your report at all -- flagging
+this prominently since it affects code already live in production.
+Building the natural fix meant reusing session_manager.next_lock_utc()
+(built earlier this same session for R1 re-arm, already shipped). Directly
+running it against 2026-10-31 (the day before the US fall-back DST
+transition) -- not just reading the code -- showed it returns a result
+only ~1 hour later instead of ~25 hours: a ~24-hour miscalculation. Root
+cause: it borrowed anchor_ts_for_utc_date()'s own "roll back one day if
+before today's local open" branch, correct for THAT function's real job
+(resolve_current_session()'s "find the most recent past anchor") but wrong
+for "give me tomorrow's lock from here" -- on fall-back, a fixed 24-UTC-
+hour shift lands before the local open and wrongly re-triggers that
+rollback. This ALREADY GOVERNS THE SHIPPED R1 RE-ARM'S OWN REARM_WATCH
+DEADLINE in production right now -- a re-arm watch active on 2026-10-31
+would close almost immediately for no real reason. Fixed first (its own
+commit-worthy change, folded into this same build since the session-
+expiration work depends on it), with its own frozen-value regression test
+(tests/test_session_manager.py, new file) -- scanned the entire transition
+day hour-by-hour, not just one sample point.
+
+WHAT SHIPPED: TravelerPlan.session_expires_at, frozen once at creation from
+the plan's own real SessionLock.lock_time via the now-fixed next_lock_utc()
+-- not a naive lock_time+24h (those differ by an hour on the two DST-
+transition days/year). gate_traveler.py::advance_waiting_cross() gates on
+it at three points (bad levels, no cross found, and -- the one real design
+subtlety -- a cross IS found but checked against the CANDLE'S OWN close
+time, not wall-clock now_utc, so a legitimate same-session cross that's
+merely discovered by a poll running one cycle late still counts; only a
+cross whose own time is at/after the deadline, i.e. today's price crossing
+a STALE plan's frozen levels, is rejected). A general one-time ORM backfill
+in database.py::init_db() (deliberately NOT the narrowly-id-scoped id=14
+raw-SQL precedent -- your directive explicitly orders the general version
+this time) protects any other already-stuck row beyond #16, which you'd
+already closed out directly in prod. Session-date [date_key] tags added to
+every traveler email subject per your work order's other item.
+
+TESTING: every new check mutation-tested -- broken, confirmed caught by the
+specific test meant to catch it, reverted. The actual incident is
+reproduced as a real regression test, driven through the actual
+run_traveler_plan_loop(), not just gate_traveler.py's own pure-function
+unit tests. Full suite: 615 passed (586 baseline + 29 new). Real
+TestClient-lifespan boot check passed against the new schema.
+
+REQUESTING: your source re-verification pass, same sequencing as every
+other change here -- please re-check the next_lock_utc() fix specifically
+(I ran it directly against the transition date and the full day hour-by-
+hour, not just read the code, but a second set of eyes on a DST
+calculation is exactly the kind of thing worth double-checking). No site
+action from me beyond what's already committed -- not deployed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
