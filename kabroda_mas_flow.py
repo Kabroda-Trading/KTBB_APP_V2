@@ -36,6 +36,7 @@ from database import (
     TravelerPlan,
     SessionLock,
 )
+import session_manager
 
 
 # ==============================================================================
@@ -323,12 +324,41 @@ def _inject_traveler_plan_to_database(
             print(f"|| TRAVELER PLAN || Row already exists for {symbol} | {session_id} | {date_key} -- not re-generated.")
             return
 
+        # 2026-10-07 P0 fix (Andy directive 08:28 CT): freeze this plan's own
+        # 24h session-expiration deadline NOW, from the REAL SessionLock row
+        # that locked these levels -- not from datetime.utcnow() at this
+        # exact instant, which could drift from the true lock on a restart-
+        # recovery re-run of run_mas_analysis(). SessionLock.lock_time is a
+        # real Unix epoch (Integer column); session_manager.next_lock_utc()
+        # gives the next DST-correct 13:00/14:00 UTC lock, not a naive
+        # lock_time + 24h (those differ by an hour on the two DST-transition
+        # days/year). The lock row is guaranteed to already exist by the
+        # time this function runs -- battlebox_pipeline.py's own lock-write
+        # always commits before run_mas_analysis() is called -- but this
+        # still never raises if it's somehow missing; a failure here must
+        # never affect the already-locked levels (same convention this
+        # function's own non-blocking caller in kabroda_mas_flow.py already
+        # uses).
+        session_expires_at = None
+        try:
+            session_lock = (
+                db.query(SessionLock)
+                .filter_by(symbol=symbol, session_id=session_id, date_key=date_key)
+                .first()
+            )
+            if session_lock is not None:
+                lock_dt = datetime.fromtimestamp(session_lock.lock_time, tz=timezone.utc)
+                session_expires_at = session_manager.next_lock_utc(lock_dt, session_id)
+        except Exception as _expiry_err:
+            print(f"[TRAVELER PLAN] session_expires_at computation failed (non-fatal, plan written without it): {_expiry_err}")
+
         row = TravelerPlan(
             symbol=symbol, session_id=session_id, date_key=date_key,
             status="WAITING_CROSS",
             breakout_trigger=breakout_trigger, breakdown_trigger=breakdown_trigger,
             r30_high=r30_high, r30_low=r30_low,
             rsi_4h_at_lock=rsi_4h_at_lock,
+            session_expires_at=session_expires_at,
         )
         db.add(row)
         db.commit()
@@ -345,7 +375,7 @@ def _inject_traveler_plan_to_database(
             import notify
             import traveler_plan_notify
             mail_fields = {
-                "id": row.id, "symbol": symbol,
+                "id": row.id, "symbol": symbol, "date_key": date_key,
                 "breakout_trigger": breakout_trigger, "breakdown_trigger": breakdown_trigger,
                 "r30_high": r30_high, "r30_low": r30_low, "rsi_4h_at_lock": rsi_4h_at_lock,
             }

@@ -92,10 +92,35 @@ def next_lock_utc(now_utc: datetime, session_id: str = "us_ny_futures") -> datet
     -- "13:00 UTC" is only true during EDT (America/New_York daylight
     saving); during EST it's 14:00 UTC, the exact class of DST bug this
     project already hit once this session (the "7:00->8:00 AM CT" slip,
-    2026-09-29 AGENT_LOG.md both repos). Reuses anchor_ts_for_utc_date()'s
-    own pytz-based, already-DST-correct math, called with now_utc shifted
-    forward one day so it resolves to the NEXT day's own open -- the same
-    function resolve_current_session() already uses for TODAY's anchor."""
+    2026-09-29 AGENT_LOG.md both repos).
+
+    2026-10-07 P0 fix (found while auditing a WAITING_CROSS session-
+    expiration fix, not reported by anyone -- caught by actually running
+    this function against the fall-back date, not just reading it): the
+    original implementation shifted `now_utc` forward by a fixed 24 UTC
+    hours and fed that into anchor_ts_for_utc_date(), reusing that
+    function's own "if before today's local open, roll back one day"
+    branch -- correct for ITS real job (resolve_current_session()'s "find
+    the most recent past anchor"), but wrong here: on the US fall-back
+    date, a fixed 24-UTC-hour shift lands at local 08:00 (before the 08:30
+    open), wrongly firing the rollback and undoing the entire +1 day
+    shift -- confirmed by direct reproduction: next_lock_utc(2026-10-31
+    13:00 UTC) returned 2026-10-31 14:00 UTC (1 hour later) instead of the
+    correct 2026-11-01 14:00 UTC (25 hours later). This already governed
+    the shipped R1 re-arm's own REARM_WATCH deadline in production before
+    this fix. Rewritten below as its own direct calendar-date computation
+    (tz.localize() on tomorrow's own date, not borrowed "shift + rollback"
+    logic) -- independently verified to match the old function exactly on
+    every plain day and on spring-forward eve, and to give the correct
+    23h/25h deltas on the two real transition days. Do not revert to
+    reusing anchor_ts_for_utc_date() here -- that function must keep its
+    current rollback behavior for resolve_current_session()'s different
+    job; this one needs its own."""
     config = get_session_config(session_id)
-    tomorrow_anchor_ts = anchor_ts_for_utc_date(config, now_utc + timedelta(days=1))
-    return datetime.fromtimestamp(tomorrow_anchor_ts + 1800, timezone.utc)
+    tz = pytz.timezone(config["tz"])
+    now_local = now_utc.astimezone(tz)
+    tomorrow_date = (now_local + timedelta(days=1)).date()
+    target_open = tz.localize(datetime(
+        tomorrow_date.year, tomorrow_date.month, tomorrow_date.day,
+        config["open_h"], config["open_m"]))
+    return (target_open + timedelta(seconds=1800)).astimezone(timezone.utc)

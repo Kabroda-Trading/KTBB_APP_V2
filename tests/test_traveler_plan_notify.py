@@ -255,3 +255,56 @@ def test_dispatch_waiting_cross_to_waiting_touch_produces_no_email():
     # same "not everything gets emailed" philosophy as v2's own STOPPED/
     # REENTRY_ARMED transitions.
     assert tpn.notification_for_traveler_transition("WAITING_CROSS", _plan("WAITING_TOUCH")) is None
+
+
+# ------------------------------------------------------------------ session-date subject tag (2026-10-07, Andy directive 08:28 CT)
+# Every traveler email subject carries [date_key] so a reader can never
+# confuse a stale/delayed alert with today's -- the exact confusion the
+# 2026-10-02 -> 2026-10-07 incident (traveler_plans.id=16) produced. One
+# per-builder assertion, plus one proving the tag is cleanly omitted (not
+# a literal "[None]") when date_key is genuinely absent.
+
+def test_lock_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_lock_email(_plan("WAITING_CROSS", date_key="2026-10-07"))
+    assert subject == "KABRODA - [2026-10-07] BTCUSDT - Levels Locked"
+
+
+def test_armed_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_armed_email(_plan("FILLED", date_key="2026-10-07"))
+    assert "[2026-10-07]" in subject
+
+
+def test_done_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_done_email(_plan("DONE", date_key="2026-10-07"))
+    assert "[2026-10-07]" in subject
+
+
+def test_management_event_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_management_event_email(_order(date_key="2026-10-07"), is_live=True)
+    assert "[2026-10-07]" in subject
+
+
+def test_real_fill_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_real_fill_email(_fill_order(date_key="2026-10-07"))
+    assert "[2026-10-07]" in subject
+
+
+def test_rearm_watch_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_rearm_watch_email(_plan("FILLED", date_key="2026-10-07"))
+    assert "[2026-10-07]" in subject
+
+
+def test_rearm_armed_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_rearm_armed_email(_plan("FILLED", date_key="2026-10-07", rearm_fill_price=86200.0))
+    assert "[2026-10-07]" in subject
+
+
+def test_rearm_done_email_carries_the_date_tag():
+    subject, _ = tpn.build_traveler_rearm_done_email(_plan("FILLED", date_key="2026-10-07", rearm_status="REARM_WINDOW_CLOSED"))
+    assert "[2026-10-07]" in subject
+
+
+def test_date_tag_cleanly_omitted_not_a_literal_none_when_absent():
+    subject, _ = tpn.build_traveler_lock_email(_plan("WAITING_CROSS"))  # no date_key at all
+    assert subject == "KABRODA - BTCUSDT - Levels Locked"
+    assert "None" not in subject

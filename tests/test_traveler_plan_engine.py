@@ -329,6 +329,55 @@ def test_waiting_cross_no_cross_yet_stays_waiting(poll_env):
     assert row.status == "WAITING_CROSS"
 
 
+# ------------------------------------------------------------------ 2026-10-07 P0: WAITING_CROSS session expiration
+# Real production incident (DeepSeek's find, Kabroda AI Brain AGENT_LOG.md
+# 08:30 CT, traveler_plans.id=16): a plan created at the 2026-10-02 lock
+# sat in WAITING_CROSS for 5 real days (nothing expired it), and on
+# 2026-10-07 a real price move "crossed" its own stale, days-old frozen
+# levels, producing a phantom DRY_RUN fill. These are the real end-to-end
+# regression cases, driven through the actual run_traveler_plan_loop(), not
+# just the pure gate_traveler.py unit tests.
+
+def test_waiting_cross_past_its_own_deadline_with_no_cross_expires_to_done(poll_env):
+    past_deadline = dt.datetime.fromtimestamp(1700000000 - 86400, tz=timezone.utc)
+    poll_env["make_plan"](session_expires_at=past_deadline)
+    candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)]  # never crosses
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "session expired" in row.last_transition_reason
+
+
+def test_waiting_cross_stale_plan_crossed_by_later_price_expires_instead_of_a_phantom_fill(poll_env):
+    # The actual incident, reproduced: this plan's own deadline passed 5
+    # days before these candles' own time -- a later day's real price
+    # crossing a stale plan's frozen levels must expire it, not arm a
+    # phantom trade.
+    past_deadline = dt.datetime.fromtimestamp(1700000000 - 86400 * 5, tz=timezone.utc)
+    poll_env["make_plan"](session_expires_at=past_deadline)
+    candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "DONE"
+    assert "session expired" in row.last_transition_reason
+    assert row.direction is None   # never armed -- no cross-processing happened at all
+
+
+def test_waiting_cross_still_within_its_own_deadline_crosses_normally(poll_env):
+    # Regression guard: a plan well within its own deadline must behave
+    # exactly as before -- the fix must never affect a normal, timely cross.
+    future_deadline = dt.datetime.fromtimestamp(1700000000 + 86400, tz=timezone.utc)
+    poll_env["make_plan"](session_expires_at=future_deadline)
+    candles = [_c5m(95.0, 1700000000 + i * 300) for i in range(5)] + [_c5m(105.0, 1700000000 + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
+
+    row = poll_env["get_plan"]()
+    assert row.status == "WAITING_TOUCH"
+    assert row.direction == "LONG"
+
+
 def test_waiting_touch_fills_and_fires_the_executor_hook_for_a_gate_traveler_account(poll_env):
     # BTC-scale prices with a realistic, tight box (0.6% of price) -- a
     # toy 100/90-style box (10% of price) fails the liquidation-vs-stop
@@ -739,6 +788,44 @@ def test_mgmt_e1_stack_closure_sends_a_management_event_email(poll_env, monkeypa
     assert "stop hit" in body
     assert "Simulated close -- no real order was placed." in body  # this order's own DRY_RUN caveat, never mistaken for a real order
     assert "-1.0000" in body
+
+
+def test_mgmt_e1_stack_closure_email_carries_the_session_date_tag(poll_env, monkeypatch):
+    # 2026-10-07 (Andy directive 08:28 CT): _notify_traveler_management_
+    # event() only receives the closing ExecutorOrder, not the TravelerPlan
+    # row -- the one genuine gap in threading date_key to this specific
+    # email (every other builder gets it for free via row.__dict__ or an
+    # already-in-scope ORM row). Proves the fix end-to-end through the
+    # real poll loop, not just a direct call to the notify builder.
+    sent = _capture_emails(monkeypatch)
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    poll_env["make_plan"](
+        date_key="2026-10-07",
+        status="WAITING_TOUCH", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
+        stop_price=49664.0, t1_price=50300.0, rsi_4h_at_lock=55.0,
+        cross_time=dt.datetime.fromtimestamp(ct, tz=timezone.utc),
+        journey_cap_at=dt.datetime.fromtimestamp(ct, tz=timezone.utc) + timedelta(days=7),
+    )
+    fill_candles = [_c5m(50100.0, ct), _c5m(49900.0, ct + 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": fill_candles}, polls=1)
+    sent.clear()
+
+    walk_candles = [
+        _c5m(49900.0, ct + 300),
+        _c5m(49600.0, ct + 600, high=49700.0, low=49500.0),
+    ]
+    flat_htf = [{"close": 50000.0} for _ in range(20)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": walk_candles},
+        candles_1h_by_symbol={"BTC/USDT": flat_htf}, candles_4h_by_symbol={"BTC/USDT": flat_htf},
+        polls=1,
+    )
+
+    assert len(sent) == 1
+    subject, _ = sent[0]
+    assert "[2026-10-07]" in subject
 
 
 def test_mgmt_e1_stack_closure_email_failure_never_blocks_the_real_bookkeeping(poll_env, monkeypatch):

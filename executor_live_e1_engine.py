@@ -485,6 +485,7 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
             "traveler_plan_id": traveler_plan_row.id,
             "account_id": account.id, "account_label": account.label,
             "is_rearm": order_row.is_rearm,  # 2026-10-06 -- subject-line clarity only
+            "date_key": traveler_plan_row.date_key,  # 2026-10-07 -- session-date subject tag
         }
         subject, body = traveler_plan_notify.build_traveler_real_fill_email(fill_order_dict)
         # 2026-09-28 (Andy L4 ruling): a real fill is per-account trade-
@@ -582,6 +583,7 @@ async def _finalize_traveler_close(
             "account_id": account.id, "account_label": account.label,  # 2026-09-27 item 4
             "approximated": approximated,
             "is_rearm": order_row.is_rearm,  # 2026-10-06 -- subject-line clarity only
+            "date_key": traveler_plan_row.date_key,  # 2026-10-07 -- session-date subject tag
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=True)
         # 2026-09-28 (Andy L4 ruling): a real close/exit is per-account

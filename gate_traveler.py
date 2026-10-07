@@ -170,13 +170,18 @@ def _confirmed_side(candles_5m: List[Dict[str, Any]], bo: float, bd: float) -> O
     return None
 
 
+_SESSION_EXPIRED_REASON = "session expired at next lock with no cross"
+
+
 def advance_waiting_cross(
     plan: Dict[str, Any],
     candles_5m: List[Dict[str, Any]],
     now_utc: datetime.datetime,
     candles_4h: Optional[List[Dict[str, Any]]] = None,
+    session_expires_at: Optional[datetime.datetime] = None,
 ) -> Optional[Dict[str, Any]]:
-    """WAITING_CROSS -> TERCILE_SKIPPED (terminal, no trade) | WAITING_TOUCH.
+    """WAITING_CROSS -> TERCILE_SKIPPED (terminal, no trade) | WAITING_TOUCH
+    | DONE (terminal -- session expired with no valid cross).
 
     candles_5m: confirmed 5m closes (caller strips the still-forming
     trailing candle first, same as trade_plan.py's own callers).
@@ -189,14 +194,43 @@ def advance_waiting_cross(
     transient fetch gap is not worth inventing a retry-the-cross state for.
     Returns None if no cross yet (stay WAITING_CROSS), or a dict of field
     updates once a cross is confirmed either way.
+
+    session_expires_at (2026-10-07 P0, Andy directive 08:28 CT): this
+    plan's own frozen 24h deadline (TravelerPlan.session_expires_at, see
+    its own comment) -- before this parameter existed, a plan with no
+    cross just sat in WAITING_CROSS forever, and a LATER day's real price
+    action could "cross" its own stale, days-old frozen levels (the real
+    2026-10-02 -> 2026-10-07 incident, traveler_plans.id=16). Checked at
+    THREE points, mirroring advance_rearm_watch()'s own rearm_watch_
+    deadline pattern:
+      1. Bad/missing levels -- without this, a plan with corrupt triggers
+         would poll forever even past its own deadline, same bug class.
+      2. No cross found this poll -- `now_utc` vs the deadline is the
+         right comparison here; there's no candle to anchor to yet.
+      3. A cross WAS found -- checked against the CROSS CANDLE'S OWN close
+         time (`cross_time`), NOT wall-clock `now_utc`. This is
+         deliberate, not an oversight: confirmed_5m_closes() guarantees
+         cross_time < now_utc always, so a legitimate same-session cross
+         that closed just under the deadline but is only discovered by a
+         poll running one cycle late (a tolerance this codebase already
+         extends everywhere else) must still count. Only a cross whose OWN
+         candle time is at/after the deadline -- i.e. today's price
+         crossing a stale plan's frozen levels, the actual incident -- is
+         rejected.
+    Backward compatible: omitted (None) reproduces the exact prior
+    behavior with no expiry check at all.
     """
     if plan.get("status") != "WAITING_CROSS":
         return None
     bo, bd = plan.get("breakout_trigger"), plan.get("breakdown_trigger")
     if not bo or not bd or bo <= bd:
+        if session_expires_at is not None and now_utc >= session_expires_at:
+            return {"status": "DONE", "last_transition_reason": "session expired -- levels were never valid"}
         return None  # can't evaluate without real levels -- stay WAITING_CROSS
     side = _confirmed_side(candles_5m, bo, bd)
     if side is None:
+        if session_expires_at is not None and now_utc >= session_expires_at:
+            return {"status": "DONE", "last_transition_reason": _SESSION_EXPIRED_REASON}
         return None
 
     is_long = side == _LONG
@@ -213,6 +247,8 @@ def advance_waiting_cross(
         datetime.datetime.fromtimestamp(cross_time_epoch, tz=datetime.timezone.utc)
         if cross_time_epoch is not None else now_utc
     )
+    if session_expires_at is not None and cross_time >= session_expires_at:
+        return {"status": "DONE", "last_transition_reason": _SESSION_EXPIRED_REASON}
 
     rsi_4h_at_cross = rsi_at_cross(candles_4h, cross_time_epoch)
     skipped = tercile_skip(rsi_4h_at_cross, side)

@@ -176,6 +176,73 @@ def test_advance_waiting_cross_bad_levels_returns_none():
     assert gt.advance_waiting_cross(plan, candles, NOW) is None
 
 
+# ------------------------------------------------------------------ advance_waiting_cross -- session expiration
+# (2026-10-07 P0, Andy directive 08:28 CT): a plan with no expiration check
+# at all sat in WAITING_CROSS for 5 real days (traveler_plans.id=16,
+# 2026-10-02 -> 2026-10-07) and got "crossed" by a later day's price action
+# against its own stale, frozen levels. These reproduce that incident and
+# prove the fix, plus prove the deliberate "checked against the cross
+# candle's own time, not wall-clock now_utc" late-poll tolerance.
+
+_CROSS_TIME = datetime.datetime.fromtimestamp(CROSS_EPOCH, tz=datetime.timezone.utc)
+
+
+def test_advance_waiting_cross_no_cross_and_past_deadline_expires_to_done():
+    plan = _cross_plan()
+    candles = [{"close": 95.0}] * 10  # inside the box, never crosses
+    deadline = NOW - datetime.timedelta(hours=1)  # already passed
+    result = gt.advance_waiting_cross(plan, candles, NOW, candles_4h=LONG_IN_ZONE_H4, session_expires_at=deadline)
+    assert result == {"status": "DONE", "last_transition_reason": gt._SESSION_EXPIRED_REASON}
+
+
+def test_advance_waiting_cross_no_cross_and_before_deadline_stays_waiting():
+    plan = _cross_plan()
+    candles = [{"close": 95.0}] * 10
+    deadline = NOW + datetime.timedelta(hours=1)  # not yet passed
+    result = gt.advance_waiting_cross(plan, candles, NOW, candles_4h=LONG_IN_ZONE_H4, session_expires_at=deadline)
+    assert result is None
+
+
+def test_advance_waiting_cross_late_poll_but_cross_time_before_deadline_still_processes_normally():
+    # The real cross candle closed BEFORE the deadline; this poll merely
+    # RUNS a bit after the deadline (now_utc past it) -- a legitimate
+    # same-session cross must still count. Checked against cross_time
+    # (the candle's own timestamp), not now_utc.
+    plan = _cross_plan()
+    candles = [{"close": 95.0}] * 5 + [{"close": 105.0, "time": CROSS_EPOCH}]
+    deadline = _CROSS_TIME + datetime.timedelta(seconds=10)
+    late_now = _CROSS_TIME + datetime.timedelta(minutes=5)  # poll runs after the deadline
+    result = gt.advance_waiting_cross(plan, candles, late_now, candles_4h=LONG_IN_ZONE_H4, session_expires_at=deadline)
+    assert result["status"] == "WAITING_TOUCH"   # normal processing, not expired
+
+
+def test_advance_waiting_cross_stale_cross_after_deadline_expires_to_done_not_a_phantom_fill():
+    # The actual 2026-10-07 incident, reproduced: a cross candle IS found,
+    # but its own time is at/after this plan's deadline -- a later day's
+    # price crossing a stale plan's frozen levels. Must expire, not arm.
+    plan = _cross_plan()
+    candles = [{"close": 95.0}] * 5 + [{"close": 105.0, "time": CROSS_EPOCH}]
+    deadline = _CROSS_TIME - datetime.timedelta(days=1)  # plan expired BEFORE this candle
+    result = gt.advance_waiting_cross(plan, candles, NOW, candles_4h=LONG_IN_ZONE_H4, session_expires_at=deadline)
+    assert result == {"status": "DONE", "last_transition_reason": gt._SESSION_EXPIRED_REASON}
+
+
+def test_advance_waiting_cross_bad_levels_and_past_deadline_expires_to_done():
+    plan = _cross_plan(breakout_trigger=0.0, breakdown_trigger=0.0)
+    candles = [{"close": 105.0}]
+    deadline = NOW - datetime.timedelta(hours=1)
+    result = gt.advance_waiting_cross(plan, candles, NOW, session_expires_at=deadline)
+    assert result == {"status": "DONE", "last_transition_reason": "session expired -- levels were never valid"}
+
+
+def test_advance_waiting_cross_bad_levels_and_before_deadline_stays_none():
+    plan = _cross_plan(breakout_trigger=0.0, breakdown_trigger=0.0)
+    candles = [{"close": 105.0}]
+    deadline = NOW + datetime.timedelta(hours=1)
+    result = gt.advance_waiting_cross(plan, candles, NOW, session_expires_at=deadline)
+    assert result is None
+
+
 # ------------------------------------------------------------------ advance_waiting_touch
 # (2026-09-22 D2 restore: entry limit AT THE TRIGGER, wick-touch fill --
 # CC_WORK_ORDER_D2_RESTORE_TRIGGER_LIMIT.md. Was advance_waiting_pullback(),

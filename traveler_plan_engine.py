@@ -166,7 +166,14 @@ async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
         # skipped), not a reason to delay cross detection on the already-
         # confirmed 5m data.
         candles_4h = await market_data.fetch_bitunix_4h(symbol, target_bars=200)
-        updates = gate_traveler.advance_waiting_cross(plan_dict, candles_5m, now_utc, candles_4h=candles_4h)
+        # 2026-10-07 P0 fix (Andy directive 08:28 CT): this plan's own
+        # frozen 24h deadline -- see TravelerPlan.session_expires_at's own
+        # comment. _as_utc() handles the SQLite-strips-tzinfo round-trip,
+        # same convention already used for cross_time/journey_cap_at.
+        updates = gate_traveler.advance_waiting_cross(
+            plan_dict, candles_5m, now_utc, candles_4h=candles_4h,
+            session_expires_at=_as_utc(row.session_expires_at),
+        )
         await _apply(db, row, updates, symbol)
         # 2026-09-27 (item 3, root cause of the same-day incident): place
         # LIVE accounts' real resting entry order NOW, at the confirmed
@@ -330,7 +337,7 @@ def _notify_traveler_rearm_transition(prev_rearm_status, row: TravelerPlan, symb
         print(f"|| TRAVELER PLAN (RE-ARM) || Notification failed for {symbol}: {e}")
 
 
-def _notify_traveler_management_event(order: ExecutorOrder) -> None:
+def _notify_traveler_management_event(order: ExecutorOrder, traveler_plan_row: Optional[TravelerPlan] = None) -> None:
     """The one post-fill D3 email MGMT_E1_STACK ever produces -- a single
     full-exit design (no partial T1 leg, no runner), so there is exactly
     one terminal management event per journey, never a sequence (see
@@ -342,7 +349,14 @@ def _notify_traveler_management_event(order: ExecutorOrder) -> None:
     bookkeeping (management_state, the audit row, record_trade_result())
     that has already committed for this tick -- see run_traveler_plan_loop()
     below, which commits per-order and would otherwise roll back the whole
-    tick on any uncaught exception here."""
+    tick on any uncaught exception here.
+
+    traveler_plan_row (2026-10-07, session-date-tag work order): the
+    caller already queries this row a few lines above its own call site
+    (for journey_cap_at) -- passed through here for the email's own
+    [date_key] subject tag rather than a second DB query. Optional and
+    defaults to None (tag simply omitted) so this stays callable exactly
+    as before anywhere the plan row isn't already in scope."""
     try:
         import notify
         import traveler_plan_notify
@@ -354,6 +368,7 @@ def _notify_traveler_management_event(order: ExecutorOrder) -> None:
             "account_id": order.account_id,   # 2026-09-27 item 4 -- which account this closure applies to
             "approximated": False,  # DRY_RUN never approximates -- candle-sourced, deterministic (mgmt_e1_stack.py)
             "is_rearm": order.is_rearm,  # 2026-10-06 -- subject-line clarity only, see build_traveler_management_event_email()
+            "date_key": traveler_plan_row.date_key if traveler_plan_row is not None else None,
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=False)
         # 2026-09-28 (Andy L4 ruling): a DRY_RUN close is still THIS
@@ -509,7 +524,7 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
         f"traveler trade closed (bookkeeping): {order.exit_reason}, realized {_fmt_r(order.realized_pnl_r)}R",
         account_id=order.account_id, traveler_plan_id=order.traveler_plan_id,
         executor_order_id=order.id, actor="system")
-    _notify_traveler_management_event(order)
+    _notify_traveler_management_event(order, traveler_plan)
 
     # R1 re-arm (2026-10-06, Andy ruling 15:24 CT) -- mgmt_e1_stack.start_
     # rearm_watch_if_eligible() is the ONE shared guard (its own docstring

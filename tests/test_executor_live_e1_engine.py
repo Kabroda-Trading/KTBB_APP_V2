@@ -23,11 +23,12 @@ import pytest
 from cryptography.fernet import Fernet
 
 import database
-from database import SessionLocal, ExecutorAccount, ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorGlobalConfig, TravelerPlan
+from database import SessionLocal, ExecutorAccount, ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorGlobalConfig, TravelerPlan, SessionLock
 import executor_accounts as ea
 import executor_control as ec
 import executor_bitunix_client as ebc
 import executor_live_e1_engine as e1e
+import gate_traveler
 import mgmt_e1_stack
 
 
@@ -42,7 +43,7 @@ def _clean_db_files():
 
 
 def _clean_rows(session):
-    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorAccount, ExecutorGlobalConfig, TravelerPlan):
+    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorAccount, ExecutorGlobalConfig, TravelerPlan, SessionLock):
         session.query(model).delete()
     session.commit()
 
@@ -520,6 +521,108 @@ def test_init_db_backfill_does_not_touch_rows_with_a_different_real_exit_reason(
     db.expire_all()
     row = db.query(ExecutorOrder).filter_by(id=order_id).first()
     assert row.exit_reason == "SOMETHING_ELSE"
+
+
+# ------------------------------------------------------------------ 2026-10-07 P0: general one-time backfill of WAITING_CROSS/WAITING_TOUCH
+# rows that predate TravelerPlan.session_expires_at. Unlike the narrowly-
+# scoped id=14 close-out below, this backfill is general (Andy's 2026-10-07
+# directive explicitly orders the general behavior change) -- see
+# database.py::init_db()'s own comment for the full "why".
+
+def _session_lock(db, symbol="BTC/USDT", session_id="us_ny_futures", date_key="2026-09-20", lock_time=None):
+    lock = SessionLock(
+        symbol=symbol, session_id=session_id, date_key=date_key,
+        lock_time=lock_time if lock_time is not None else int(_FAR_PAST.timestamp()),
+        packet_data="{}",
+    )
+    db.add(lock)
+    db.flush()
+    return lock
+
+
+def test_init_db_backfill_sets_session_expires_at_and_self_resolves_an_already_expired_stale_row(db):
+    # traveler_plans.id=16's own real shape: a WAITING_CROSS row written
+    # before session_expires_at existed, whose own real session lock is
+    # long past its 24h deadline. The backfill must populate the column;
+    # once populated, the REAL gate_traveler.py check (not re-implemented
+    # here) must then resolve it to DONE on its own next poll.
+    plan = _traveler_plan(db, status="WAITING_CROSS")
+    assert plan.session_expires_at is None   # pre-fix shape
+    # lock_time 10 days ago -- next_lock_utc() from there is ~9 days in the past
+    _session_lock(db, symbol=plan.symbol, session_id=plan.session_id, date_key=plan.date_key,
+                   lock_time=int((_FAR_PAST).timestamp()))
+    db.commit()
+    plan_id = plan.id
+
+    database.init_db()
+
+    db.expire_all()
+    row = db.query(TravelerPlan).filter_by(id=plan_id).first()
+    assert row.session_expires_at is not None
+    assert row.session_expires_at.replace(tzinfo=datetime.timezone.utc) < datetime.datetime.now(datetime.timezone.utc)
+
+    # The backfill itself must NOT have flipped status directly (per its
+    # own documented design) -- it's the real gate function, called with
+    # the now-populated deadline, that resolves it.
+    assert row.status == "WAITING_CROSS"
+    result = gate_traveler.advance_waiting_cross(
+        {"status": row.status, "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
+         "r30_high": row.r30_high, "r30_low": row.r30_low},
+        [{"close": 95.0, "time": 1}],  # never crosses -- irrelevant, deadline alone governs here
+        datetime.datetime.now(datetime.timezone.utc),
+        session_expires_at=row.session_expires_at.replace(tzinfo=datetime.timezone.utc),
+    )
+    assert result == {"status": "DONE", "last_transition_reason": gate_traveler._SESSION_EXPIRED_REASON}
+
+
+def test_init_db_backfill_does_not_close_an_in_window_waiting_cross_row(db):
+    plan = _traveler_plan(db, status="WAITING_CROSS")
+    _session_lock(db, symbol=plan.symbol, session_id=plan.session_id, date_key=plan.date_key,
+                   lock_time=int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
+    db.commit()
+    plan_id = plan.id
+
+    database.init_db()
+
+    db.expire_all()
+    row = db.query(TravelerPlan).filter_by(id=plan_id).first()
+    assert row.session_expires_at is not None
+    assert row.session_expires_at.replace(tzinfo=datetime.timezone.utc) > datetime.datetime.now(datetime.timezone.utc)
+    assert row.status == "WAITING_CROSS"   # untouched -- still well within its own window
+
+
+def test_init_db_backfill_is_idempotent_once_already_populated(db):
+    plan = _traveler_plan(db, status="WAITING_CROSS")
+    _session_lock(db, symbol=plan.symbol, session_id=plan.session_id, date_key=plan.date_key,
+                   lock_time=int(_FAR_PAST.timestamp()))
+    db.commit()
+    plan_id = plan.id
+
+    database.init_db()
+    db.expire_all()
+    first_value = db.query(TravelerPlan).filter_by(id=plan_id).first().session_expires_at
+
+    database.init_db()   # second run -- must not re-process or change the already-set value
+    db.expire_all()
+    second_value = db.query(TravelerPlan).filter_by(id=plan_id).first().session_expires_at
+    assert first_value == second_value
+
+
+def test_init_db_backfill_skips_a_row_with_no_matching_session_lock(db):
+    # Data-integrity edge case (shouldn't happen -- the lock always
+    # commits before the plan row -- but never assumed). Must not crash
+    # init_db(), and must leave the column None rather than fabricate a
+    # boundary.
+    plan = _traveler_plan(db, status="WAITING_CROSS")
+    db.commit()   # deliberately NO matching SessionLock row
+    plan_id = plan.id
+
+    database.init_db()   # must not raise
+
+    db.expire_all()
+    row = db.query(TravelerPlan).filter_by(id=plan_id).first()
+    assert row.session_expires_at is None
+    assert row.status == "WAITING_CROSS"
 
 
 # ------------------------------------------------------------------ 2026-10-01: one-time manual close-out of traveler_plans id=14

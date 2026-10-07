@@ -804,6 +804,69 @@ def init_db():
         except Exception:
             pass
 
+    # --- WAITING_CROSS SESSION EXPIRATION (2026-10-07, Andy directive 08:28
+    # CT) -- see TravelerPlan.session_expires_at's own comment for the full
+    # "why". TIMESTAMP, never DATETIME -- see the mas_completed_at comment
+    # above for the real production incident that convention exists to
+    # prevent. ---
+    for _col in ["session_expires_at TIMESTAMP"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE traveler_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    # --- ONE-TIME BACKFILL: WAITING_CROSS/WAITING_TOUCH rows that predate
+    # the session_expires_at column above (2026-10-07). Unlike the id=14
+    # close-out further up this function (explicitly scoped to one id,
+    # "not ordered" as a general rule, 2026-10-01), THIS one is deliberately
+    # general -- Andy's 2026-10-07 directive explicitly orders the general
+    # behavior change this time, so that earlier scope objection no longer
+    # applies. Must run via the ORM (not raw SQL): the computation needs
+    # per-row logic (each row joined to its OWN SessionLock, then run
+    # through session_manager.next_lock_utc()'s real DST-correct math) that
+    # SQLite/Postgres don't share a portable datetime-arithmetic dialect
+    # for. Only populates the column -- deliberately does NOT flip `status`
+    # directly; any row this touches is still WAITING_CROSS/WAITING_TOUCH,
+    # still inside run_traveler_plan_loop()'s own query scope, and will
+    # correctly self-resolve to DONE on its very next real poll now that
+    # session_expires_at is populated (gate_traveler.py::advance_waiting_
+    # cross() does that check). traveler_plans.id=16, the row that actually
+    # caused the 2026-10-07 incident, was already closed out directly in
+    # prod by DeepSeek before this shipped -- this backfill is insurance
+    # for any OTHER already-stuck row, not a re-fix of #16. Query scoped to
+    # IS NULL so this is naturally idempotent and self-terminating (zero
+    # rows match once every row has been backfilled or has since resolved
+    # through the normal engine). A row whose own SessionLock can't be
+    # found (shouldn't happen -- the lock always commits before the plan
+    # row per battlebox_pipeline.py's own ordering -- but never assumed)
+    # is left alone, NULL, same as today's existing non-regressing
+    # behavior for that one row, rather than fabricating a boundary. ---
+    try:
+        import session_manager
+        _backfill_db = SessionLocal()
+        try:
+            _stuck_rows = _backfill_db.query(TravelerPlan).filter(
+                TravelerPlan.status.in_(["WAITING_CROSS", "WAITING_TOUCH"]),
+                TravelerPlan.session_expires_at.is_(None),
+            ).all()
+            for _row in _stuck_rows:
+                try:
+                    _lock = _backfill_db.query(SessionLock).filter_by(
+                        symbol=_row.symbol, session_id=_row.session_id, date_key=_row.date_key,
+                    ).first()
+                    if _lock is None:
+                        continue
+                    _lock_dt = datetime.datetime.fromtimestamp(_lock.lock_time, tz=datetime.timezone.utc)
+                    _row.session_expires_at = session_manager.next_lock_utc(_lock_dt, _row.session_id)
+                except Exception:
+                    continue
+            _backfill_db.commit()
+        finally:
+            _backfill_db.close()
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1267,6 +1330,26 @@ class TravelerPlan(Base):
     t1_price = Column(Float, nullable=True)             # trigger +- 1.0*box -- E1's full-exit target
     rsi_4h_at_lock = Column(Float, nullable=True)        # same frozen lock-time value TradePlan.rsi_4h_at_lock carries -- audit/display only, NOT read by the skip or F_A (see rsi_4h_at_cross)
     rsi_4h_at_cross = Column(Float, nullable=True)       # 2026-09-21: closed-4H-bars-at-the-cross RSI, the actual DP0/measured-basis value -- gate_traveler.py::rsi_at_cross(). The tercile skip and F_A read THIS field, not rsi_4h_at_lock (CC_WORK_ORDER_D1_RSI_AT_CROSS.md)
+
+    # 2026-10-07 P0 fix (Andy directive 08:28 CT, Kabroda AI Brain AGENT_LOG.md
+    # commit 6676c1c): WAITING_CROSS previously had NO expiration at all --
+    # a plan created at one day's lock would sit in WAITING_CROSS forever if
+    # price never crossed, and a LATER day's price action could "cross" its
+    # own stale, days-old frozen levels (the real 2026-10-02 -> 2026-10-07
+    # incident, traveler_plans.id=16). Frozen ONCE at creation (kabroda_mas_
+    # flow.py::_inject_traveler_plan_to_database()) from that session's own
+    # real SessionLock.lock_time via session_manager.next_lock_utc() -- the
+    # next real 13:00/14:00 UTC lock, DST-correct, NOT a naive lock_time +
+    # 24h (those differ by an hour on the two DST-transition days/year).
+    # gate_traveler.py::advance_waiting_cross() reads this; once a plan
+    # actually crosses (WAITING_TOUCH), this field no longer governs anything
+    # -- journey_cap_at below (cross_time + 7d) takes over for the post-fill
+    # D3 window, same "two different boundaries for two different phases"
+    # split R1 re-arm's own rearm_entry_expires_at/journey_cap_at pair uses.
+    # NOTE: CampaignLog.session_expires_at (a different table, dead V2-
+    # retirement-era field, NY-equity-close semantics) is unrelated -- same
+    # column name, different table, different meaning. Don't confuse them.
+    session_expires_at = Column(DateTime, nullable=True)
 
     cross_time = Column(DateTime, nullable=True)
     cross_price = Column(Float, nullable=True)           # the confirmed cross bar's own close (audit only -- NOT the fill price)

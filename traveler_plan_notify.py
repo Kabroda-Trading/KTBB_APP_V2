@@ -76,6 +76,17 @@ def _fmt(value: Optional[float], spec: str = ",.2f") -> str:
     return format(value, spec) if value is not None else "?"
 
 
+def _date_tag(date_key: Optional[str]) -> str:
+    """2026-10-07 (Andy directive 08:28 CT, session-isolation work order):
+    every traveler email subject gets this so a reader can never confuse a
+    stale/delayed alert with today's -- see this whole fix's root cause
+    (TravelerPlan.session_expires_at's own comment) for why that confusion
+    is a real, not hypothetical, failure mode. Empty string if date_key is
+    missing (never fabricate a date) -- the subject just reads as it always
+    did, same as the leg_tag convention already used elsewhere here."""
+    return f"[{date_key}] " if date_key else ""
+
+
 def build_traveler_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     """Fires once per TravelerPlan row, unconditionally -- GATE_TRAVELER
     has no lock-time gate/disposition to evaluate (see this module's own
@@ -84,7 +95,7 @@ def build_traveler_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     bo, bd = plan.get("breakout_trigger"), plan.get("breakdown_trigger")
     r30_high, r30_low = plan.get("r30_high"), plan.get("r30_low")
     rsi = plan.get("rsi_4h_at_lock")
-    subject = f"KABRODA - {symbol} - Levels Locked"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} - Levels Locked"
     body = (
         f"Session levels locked for {symbol}.\n\n"
         f"  Breakout level:   {_fmt(bo)}\n"
@@ -108,7 +119,7 @@ def build_traveler_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     fill_price = plan.get("fill_price")
     stop = plan.get("stop_price")
     t1 = plan.get("t1_price")
-    subject = f"KABRODA - {symbol} {direction} - Position Opened @ {_fmt(fill_price, ',.0f')}"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Position Opened @ {_fmt(fill_price, ',.0f')}"
     body = (
         f"{symbol} {direction} opened at {_fmt(fill_price)}.\n\n"
         f"  Stop:   {_fmt(stop)}\n"
@@ -139,7 +150,7 @@ def build_traveler_real_fill_email(order: Dict[str, Any]) -> Tuple[str, str]:
     risk = order.get("risk_dollars_used")
     account_label = order.get("account_label") or f"account #{order.get('account_id')}"
     leg_tag = " (re-arm)" if order.get("is_rearm") else ""
-    subject = f"KABRODA - {symbol} {direction} - Real Fill Confirmed{leg_tag} @ {_fmt(entry, ',.0f')} ({account_label})"
+    subject = f"KABRODA - {_date_tag(order.get('date_key'))}{symbol} {direction} - Real Fill Confirmed{leg_tag} @ {_fmt(entry, ',.0f')} ({account_label})"
     body = (
         f"{symbol} {direction} filled for real on {account_label}, confirmed by the exchange, at {_fmt(entry)}.\n\n"
         f"  Stop:   {_fmt(stop)}\n"
@@ -164,7 +175,7 @@ def build_traveler_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     status = plan.get("status")
     direction = plan.get("direction") or "?"
     cross_price = plan.get("cross_price")
-    subject = f"KABRODA - {symbol} - No Trade"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} - No Trade"
 
     if status == "TERCILE_SKIPPED":
         rsi = plan.get("rsi_4h_at_cross")
@@ -227,7 +238,7 @@ def build_traveler_management_event_email(order: Dict[str, Any], is_live: bool) 
     # one place a reader can tell which position this was, especially
     # since the primary's own close already happened earlier the same day.
     leg_tag = " (re-arm)" if order.get("is_rearm") else ""
-    subject = f"KABRODA - {symbol} {direction} - Closed{leg_tag} ({reason_label}) @ {_fmt(exit_price, ',.0f')}"
+    subject = f"KABRODA - {_date_tag(order.get('date_key'))}{symbol} {direction} - Closed{leg_tag} ({reason_label}) @ {_fmt(exit_price, ',.0f')}"
 
     lineage_line = (
         "Real order -- live money." if is_live else
@@ -289,7 +300,7 @@ def build_traveler_rearm_watch_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     radar-class -- not account-specific (no fill/risk$ to report yet)."""
     symbol = _symbol_compact(plan.get("symbol", ""))
     direction = plan.get("direction") or "?"
-    subject = f"KABRODA - {symbol} {direction} - Re-arm Watch"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Re-arm Watch"
     body = (
         f"{symbol} {direction} closed via momentum-decay exhaustion (C5). "
         f"Watching for exhaustion to clear and a re-cross of the same level "
@@ -310,7 +321,7 @@ def build_traveler_rearm_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     fill_price = plan.get("rearm_fill_price")
     stop = plan.get("stop_price")
     t1 = plan.get("t1_price")
-    subject = f"KABRODA - {symbol} {direction} - Re-arm Position Opened @ {_fmt(fill_price, ',.0f')}"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Re-arm Position Opened @ {_fmt(fill_price, ',.0f')}"
     body = (
         f"{symbol} {direction} re-armed and opened at {_fmt(fill_price)}.\n\n"
         f"  Stop:   {_fmt(stop)}\n"
@@ -330,7 +341,7 @@ def build_traveler_rearm_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     rearm_status = plan.get("rearm_status")
     direction = plan.get("direction") or "?"
     rearm_cross_price = plan.get("rearm_cross_price")
-    subject = f"KABRODA - {symbol} - No Re-arm Trade"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} - No Re-arm Trade"
 
     if rearm_status == "REARM_TERCILE_SKIPPED":
         rsi = plan.get("rearm_rsi_4h_at_cross")
