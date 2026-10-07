@@ -8260,3 +8260,23 @@ Andy: needs a deploy like everything else today. Once up, today's
 check -- no stuck rows, no false watchdog alert, normal cycle.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-06 (R1 Re-arm, Arm A, same-lock-day -- build complete) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open (build complete and tested; needs DeepSeek's source re-verification pass before Andy deploys -- per CC_INTERFACE.md's division of labor, not deployed from here)
+
+Built and committed (`KTBB_app_v2` commit `d910772`), per Andy's ruling (this repo's own AGENT_LOG.md, 2026-10-06 15:24 CT: "we're good to go if CC truly understands the process here and can do the correct editing to the code in kabroda.com"). Worked from `TRAVELER_D1_D2_D3_SPEC.md` § R1 RE-ARM AMENDMENT, `CC_INTERFACE.md` § NEW WORK ORDER - 2026-10-06 15:24 CT, and `LIVE_BEHAVIOR_BASELINE.md` § 7 (all commit `43ee57b`) -- not re-derived, implemented as specified.
+
+**What this is:** after a journey closes via C5 momentum-decay specifically (not STOP/T1/TIME/BBWP_EXIT), the Traveler now watches for the exhaustion to clear and price to re-cross the SAME trigger before the next session lock. If it does and the tercile gate still passes, a second, real entry gets placed and managed through the identical D2/D3 mechanics as the primary, bounded by its own 90-bar (7.5h) entry-waiting cap rather than the primary's 7-day `journey_cap_at`.
+
+**Scope, following your own spec exactly, not reinterpreted:**
+- New `ExecutorOrder.is_rearm` column; both unique constraints widened to `(plan, account, is_rearm)` so a primary and a re-arm leg can legitimately coexist per account without weakening the original idempotency guarantee (still impossible to double-place either leg).
+- `gate_traveler.advance_rearm_watch()` / `advance_rearm_waiting_touch()` -- pure functions, same wick-touch-fill and tercile-skip mechanics as the primary's own D1/D2, reusing `FULL_D1_CUTS`/`STOP_BUFFER_BOX`/`T1_BOX` unchanged.
+- `mgmt_e1_stack.start_rearm_watch_if_eligible()` -- the ONE shared guard (C5_EXIT only, not already re-armed) called from both the DRY_RUN walk and the LIVE poll, so they can't drift from each other the way V2 Crown's old three-call-site problem could have.
+- D3 management for a re-arm order is literally the same `mgmt_e1_stack.advance()` the primary uses -- zero new code there, exactly as the spec called for.
+- Two real bugs this work surfaced and fixed before they could bite: (1) `executor_live_e1_engine.py::_plan_has_expired()` would have left a re-arm's real resting limit order on the exchange for up to 7 days instead of 7.5h if it used `journey_cap_at` like the primary -- now explicitly branches on `is_rearm` to read `rearm_entry_expires_at` instead; (2) `traveler_radar.py` and `main.py`'s `/api/admin/traveler-plan-status` both picked "most recent ExecutorOrder by id" with no awareness of `is_rearm` -- the moment a re-arm order existed (always the higher id), it would have silently replaced the PRIMARY's own final state on both the public and admin radar. Both now scope `mgmt_*` to the primary and `rearm_mgmt_*` to the re-arm explicitly, never conflated.
+
+**Testing, same discipline as every other change in this project:** every load-bearing fix above (the dedup key becoming `is_rearm`-aware, the 90-bar-vs-7-day cap distinction, the radar/admin `is_rearm` filters, the `REARM_WAITING_TOUCH`-only cross hook) was mutation-tested -- deliberately broken, confirmed caught by the specific test meant to catch it, then reverted. Added a full DRY_RUN end-to-end walk (primary FILLED -> CLOSED_C5_EXIT -> REARM_WATCH -> re-cross -> re-arm FILLED -> re-arm closes) plus direct LIVE-side coverage for `_advance_live_rearm_watch()` and the REARM_WATCH hook inside `_finalize_traveler_close()`, plus direct tests against the real SQLAlchemy-declared `UniqueConstraint` itself (not just the application-level dedup check) confirming a primary+re-arm pair coexists and a second of either is rejected by the real schema. Full suite: 586 passed. Also ran a real `TestClient`-lifespan boot check (not just `python -c "import main"`) against the new schema -- startup/shutdown both clean, `/api/radar/traveler-snapshot` and `/api/admin/traveler-plan-status` both correct post-migration.
+
+**Not done from here, by design:** no deploy. Requesting your source re-verification pass per `CC_INTERFACE.md` -- Andy deploys only after that, same sequencing as every other change this project has shipped.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
