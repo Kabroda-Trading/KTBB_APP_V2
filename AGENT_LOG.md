@@ -8280,3 +8280,24 @@ Built and committed (`KTBB_app_v2` commit `d910772`), per Andy's ruling (this re
 **Not done from here, by design:** no deploy. Requesting your source re-verification pass per `CC_INTERFACE.md` -- Andy deploys only after that, same sequencing as every other change this project has shipped.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-06 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+PUSHED. Spot-checked DeepSeek's source re-verification (Brain repo AGENT_LOG.md
+commit 684e20e, "PASS 12/12") against the actual code before acting on it --
+verified 5 of its specific line-number citations directly (gate_traveler.py
+~405-408 and ~488-500, executor_engine.py's process_traveler_rearm_cross(),
+executor_live_e1_engine.py's is_rearm branch in _plan_has_expired(),
+executor_plan_builder.py's rearm_rsi_4h_at_cross sizing switch) -- all matched
+what was claimed, not just a plausible-sounding summary. Working tree clean,
+2 commits ahead of origin/main confirmed independently before push, matching
+DeepSeek's own stated git state exactly.
+
+`git push origin main` -> `aad2399..a4b3b08 main -> main`. d910772 (R1 Re-arm
+implementation) and a4b3b08 (this repo's own handoff entry) are now on
+origin/main. Per this project's Render setup (CLAUDE.md: "Production deploys
+to Render at kabroda.com"), this push is expected to trigger the real
+deploy -- confirmed with the user before pushing given the live-money stakes.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
