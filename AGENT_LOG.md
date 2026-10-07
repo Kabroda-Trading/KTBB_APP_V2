@@ -8366,3 +8366,33 @@ calculation is exactly the kind of thing worth double-checking). No site
 action from me beyond what's already committed -- not deployed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-07 (10:42 CT) — FROM: DeepSeek/Antigravity — FOR: Claude Code + Andy
+STATUS: resolved
+
+SOURCE RE-VERIFICATION COMPLETE — SESSION EXPIRATION & DST FIX ACCEPTED. 100% GO FOR PUSH & DEPLOY.
+
+Conducted the independent source re-verification of CC's build in KTBB_app_v2 (site commits 12216b4 and ce526a4) against TRAVELER_D1_D2_D3_SPEC.md and CC_INTERFACE.md:
+
+1. NEXT_LOCK_UTC DST BUG & REWRITE: VERIFIED & ACCEPTED.
+   - Root cause confirmed: reusing anchor_ts_for_utc_date()'s rollback logic caused fall-back eve (2026-10-31) to return a 1h delta instead of a 25h delta.
+   - CC's direct calendar-date rewrite using pytz.timezone + tz.localize() on tomorrow's date at (open_h, open_m) + 1800s is mathematically clean, timezone-correct, and eliminates the rollback anomaly completely.
+   - test_session_manager.py's regression tests verify standard days, 23h on spring-forward, and 25h on fall-back across the whole 24h window.
+
+2. TRAVELER_PLAN SESSION EXPIRATION: VERIFIED & ACCEPTED.
+   - database.py: TravelerPlan.session_expires_at added; init_db() ORM backfill safely handles pre-existing rows without fabricating boundaries.
+   - gate_traveler.py::advance_waiting_cross(): 3-point expiration check (bad levels, no cross found, and cross candle time >= session_expires_at) correctly transitions to DONE with "session expired at next lock with no cross". Legitimate same-session crosses within 1-poll tolerance are cleanly preserved.
+   - traveler_plan_engine.py: passes session_expires_at to advance_waiting_cross(); once status becomes DONE, the row is excluded from future poll cycles.
+   - Active post-cross journeys (FILLED) retain their 7-day journey_cap_at for trade management; the 24h expiration strictly governs the uncrossed phase.
+
+3. EMAIL NOTIFICATIONS [DATE_KEY] TAGS: VERIFIED & ACCEPTED.
+   - traveler_plan_notify.py: _date_tag() prepends "[YYYY-MM-DD] " to every traveler email subject (LOCK, ARMED, REAL FILL, CLOSED, RE-ARM). Prevents any trader-facing confusion between active and stale sessions.
+
+4. TEST SUITE & APP BOOT: VERIFIED & ACCEPTED.
+   - Full pytest suite: 615 passed / 615 in 216.02s.
+   - test_waiting_cross_stale_plan_crossed_by_later_price_expires_instead_of_a_phantom_fill passes cleanly through run_traveler_plan_loop().
+   - FastAPI TestClient boot check clean (health 200 OK, background loops initialize/shutdown cleanly).
+
+VERDICT:
+All acceptance criteria met. Working tree clean. 100% GO for git push to origin/main and refresh Render.
+
