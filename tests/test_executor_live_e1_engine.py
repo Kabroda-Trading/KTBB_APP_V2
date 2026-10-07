@@ -668,6 +668,68 @@ def test_expiry_cancel_call_failure_retries_next_tick(db, monkeypatch):
     assert order.management_state == "PENDING_ENTRY"
 
 
+# ------------------------------------------------------------------ 2026-10-06 (R1 re-arm): a re-arm order's expiry reads rearm_entry_expires_at
+# (the 90-bar/7.5h window), NOT the primary's own 7-day journey_cap_at --
+# see _plan_has_expired()'s own docstring. These prove the two caps are
+# genuinely independent, not just "same field, different name".
+
+def test_rearm_order_expires_on_its_own_90_bar_cap_even_with_a_far_future_journey_cap(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)
+    plan.rearm_entry_expires_at = _FAR_PAST
+    db.flush()
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1", is_rearm=True)
+    _install(monkeypatch,
+             get_order_detail=_async_seq([_order_detail_response(status="NEW"), _order_detail_response(status="CANCELED")]),
+             cancel_orders=_async(_cancel_orders_response(order_id="entry-order-1")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.management_state == "CLOSED_EXPIRED"
+    assert order.close_reason == "EXPIRED"
+
+
+def test_rearm_order_not_expired_while_within_its_90_bar_cap_even_with_a_past_journey_cap(db, monkeypatch):
+    # cancel_orders is tracked (not left unset) because
+    # _cancel_expired_traveler_entry_order() swallows ANY cancel_orders
+    # exception into an audit-log write and a silent return -- leaving
+    # management_state at the same PENDING_ENTRY a correctly-not-expired
+    # order would also show. Asserting management_state alone would pass
+    # even if the expiry branch wrongly fired and then failed to cancel;
+    # asserting cancel_orders was never called is what actually proves the
+    # expiry branch didn't fire at all.
+    account = _ready_account(db)
+    plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)   # primary's own cap already elapsed
+    plan.rearm_entry_expires_at = _FAR_FUTURE              # re-arm's own cap has not
+    db.flush()
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1", is_rearm=True)
+    cancel_calls = []
+
+    async def _track_cancel(self, *a, **kw):
+        cancel_calls.append((a, kw))
+        return _cancel_orders_response(order_id="entry-order-1")
+
+    _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="NEW")), cancel_orders=_track_cancel)
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.management_state == "PENDING_ENTRY"   # still resting -- rearm cap governs, not journey_cap_at
+    assert cancel_calls == []   # expiry/cancel path must never have fired
+
+
+def test_rearm_order_with_no_rearm_expiry_set_never_expires_on_journey_cap_alone(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)   # primary's own cap already elapsed
+    assert plan.rearm_entry_expires_at is None
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1", is_rearm=True)
+    cancel_calls = []
+
+    async def _track_cancel(self, *a, **kw):
+        cancel_calls.append((a, kw))
+        return _cancel_orders_response(order_id="entry-order-1")
+
+    _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="NEW")), cancel_orders=_track_cancel)
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.management_state == "PENDING_ENTRY"
+    assert cancel_calls == []   # expiry/cancel path must never have fired
+
+
 # ------------------------------------------------------------------ (a) normal T1 fill
 
 def test_normal_t1_fill_closes_100_percent_and_records_result(db, monkeypatch):
@@ -1132,7 +1194,7 @@ def test_live_traveler_row_does_not_inherit_the_dry_run_fill_booking(db, monkeyp
     plan = _filled_plan(db)
     assert ec.is_live_orders_enabled(db) is False   # switch OFF: no exchange call can happen here
 
-    async def _fake_build(db_, plan_, account_, risk_):
+    async def _fake_build(db_, plan_, account_, risk_, is_rearm=False):
         return _would_place_dict(plan_, account_)
     monkeypatch.setattr(executor_plan_builder, "build_hypothetical_traveler_order", _fake_build)
 
@@ -1147,7 +1209,7 @@ def test_dry_run_traveler_row_still_books_the_fill_immediately(db, monkeypatch):
     account = _traveler_account(db, "DRY_RUN", "dry_still_books")
     plan = _filled_plan(db)
 
-    async def _fake_build(db_, plan_, account_, risk_):
+    async def _fake_build(db_, plan_, account_, risk_, is_rearm=False):
         return _would_place_dict(plan_, account_)
     monkeypatch.setattr(executor_plan_builder, "build_hypothetical_traveler_order", _fake_build)
 
@@ -1175,3 +1237,193 @@ def test_simulated_e1_walk_selects_only_dry_run_orders(db):
 
     selected = traveler_plan_engine._open_dry_run_e1_orders(db)
     assert [o.id for o in selected] == [o_dry.id]
+
+
+# ------------------------------------------------------------------ 2026-10-06 (R1 re-arm): _advance_live_rearm_watch() LIVE wrapper
+# gate_traveler.advance_rearm_watch()'s own math is already fully unit-
+# tested (tests/test_gate_traveler.py) and the DRY_RUN walk's own call to
+# it is covered end-to-end (tests/test_traveler_plan_engine.py's rearm
+# full-walk test). These tests cover ONLY what's new and LIVE-specific:
+# that the wrapper fetches candles, applies gate_traveler's returned
+# updates to the real TravelerPlan row, and fires executor_engine.
+# process_traveler_rearm_cross() on (and only on) a genuine REARM_WATCH ->
+# REARM_WAITING_TOUCH transition -- same "mock at the already-tested
+# pure-function boundary" discipline this file already uses for mgmt_e1_
+# stack.check_c5_or_bbwp() in the C5/BBWP tests above.
+
+def _fake_rearm_candle_fetchers(monkeypatch, n=20):
+    async def _fake_5m(symbol, target_bars=310):
+        return _fake_candles(n=n)
+
+    async def _fake_1h(symbol, target_bars=200):
+        return _fake_candles(n=n)
+
+    async def _fake_4h(symbol, target_bars=200):
+        return _fake_candles(n=n)
+
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_5m", _fake_5m)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_1h", _fake_1h)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_4h)
+    monkeypatch.setattr(e1e.market_data, "confirmed_5m_closes", lambda candles, now_ts=None: candles)
+
+
+def test_rearm_watch_transition_to_waiting_touch_fires_the_rearm_cross_hook(db, monkeypatch):
+    plan = _traveler_plan(db, status="FILLED")
+    plan.rearm_status = "REARM_WATCH"
+    db.flush()
+    _fake_rearm_candle_fetchers(monkeypatch)
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (False, False))
+    monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {
+        "rearm_status": "REARM_WAITING_TOUCH",
+        "rearm_cross_time": datetime.datetime(2026, 9, 21, 15, 0, tzinfo=datetime.timezone.utc),
+        "rearm_cross_price": 101.5, "rearm_last_transition_reason": "re-crossed, tercile passed",
+    })
+
+    cross_calls = []
+
+    async def _fake_rearm_cross(db_, plan_):
+        cross_calls.append(plan_.id)
+    monkeypatch.setattr(executor_engine, "process_traveler_rearm_cross", _fake_rearm_cross)
+    monkeypatch.setattr("notify.send_admin_email", lambda *a, **kw: None)
+
+    _run(e1e._advance_live_rearm_watch(db, plan, datetime.datetime.now(datetime.timezone.utc)))
+
+    assert plan.rearm_status == "REARM_WAITING_TOUCH"
+    assert plan.rearm_cross_price == 101.5
+    assert cross_calls == [plan.id]
+
+
+def test_rearm_watch_no_update_makes_no_change_and_fires_no_hook(db, monkeypatch):
+    plan = _traveler_plan(db, status="FILLED")
+    plan.rearm_status = "REARM_WATCH"
+    db.flush()
+    _fake_rearm_candle_fetchers(monkeypatch)
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {})
+
+    cross_calls = []
+
+    async def _fake_rearm_cross(db_, plan_):
+        cross_calls.append(plan_.id)
+    monkeypatch.setattr(executor_engine, "process_traveler_rearm_cross", _fake_rearm_cross)
+
+    _run(e1e._advance_live_rearm_watch(db, plan, datetime.datetime.now(datetime.timezone.utc)))
+
+    assert plan.rearm_status == "REARM_WATCH"   # unchanged
+    assert cross_calls == []
+
+
+def test_rearm_watch_window_closed_transition_does_not_fire_the_cross_hook(db, monkeypatch):
+    # A transition DID happen (REARM_WATCH -> REARM_WINDOW_CLOSED), but it's
+    # not the specific REARM_WAITING_TOUCH transition that means "place the
+    # real order" -- the cross hook must stay silent.
+    plan = _traveler_plan(db, status="FILLED")
+    plan.rearm_status = "REARM_WATCH"
+    db.flush()
+    _fake_rearm_candle_fetchers(monkeypatch)
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (False, False))
+    monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {
+        "rearm_status": "REARM_WINDOW_CLOSED", "rearm_last_transition_reason": "window closed, no re-cross",
+    })
+
+    cross_calls = []
+
+    async def _fake_rearm_cross(db_, plan_):
+        cross_calls.append(plan_.id)
+    monkeypatch.setattr(executor_engine, "process_traveler_rearm_cross", _fake_rearm_cross)
+    monkeypatch.setattr("notify.send_admin_email", lambda *a, **kw: None)
+
+    _run(e1e._advance_live_rearm_watch(db, plan, datetime.datetime.now(datetime.timezone.utc)))
+
+    assert plan.rearm_status == "REARM_WINDOW_CLOSED"
+    assert cross_calls == []
+
+
+# ------------------------------------------------------------------ 2026-10-06 (R1 re-arm): the REARM_WATCH-entry hook inside _finalize_traveler_close()
+# mgmt_e1_stack.start_rearm_watch_if_eligible() itself is already covered
+# by its own module's test (test_mgmt_e1_stack.py / this session's own
+# mutation-testing pass on it). These tests cover the LIVE wiring: that a
+# real C5_EXIT closure flips TravelerPlan.rearm_status via this hook, and
+# that STOP/T1/TIME closures (not C5_EXIT) never do.
+
+def test_live_c5_exit_closure_enters_rearm_watch(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    _install(monkeypatch,
+             get_position=_async_seq([_one_position_response(), _no_position_response()]),
+             close_position=_async(_close_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             cancel_orders=_async(_cancel_orders_response(order_id="t1-1")))
+
+    async def _fake_1h(symbol, target_bars=200):
+        return _fake_candles()
+
+    async def _fake_4h(symbol, target_bars=200):
+        return _fake_candles()
+
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_1h", _fake_1h)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_4h)
+    monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=104.5))
+    monkeypatch.setattr("notify.send_admin_email", lambda *a, **kw: None)
+
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_C5_EXIT"
+    assert plan.rearm_status == "REARM_WATCH"
+
+
+def test_live_stop_closure_does_not_enter_rearm_watch(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             cancel_orders=_async(_cancel_orders_response(order_id="t1-1")))
+
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_STOP"
+    assert plan.rearm_status is None
+
+
+# ------------------------------------------------------------------ 2026-10-06 (R1 re-arm): the real DB-level UniqueConstraint
+# Distinct from executor_plan_builder.py's own application-level dedup
+# check (already mutation-tested there) -- this proves the actual
+# SQLAlchemy-declared schema itself. The `db` fixture builds a real,
+# file-backed SQLite database via database.init_db(), so a UniqueConstraint
+# collision here is a genuine sqlite integrity error, not a mock.
+# ExecutorOrder.__table_args__ now includes is_rearm in both unique
+# constraints -- this must allow exactly one primary (is_rearm=False) and
+# one re-arm (is_rearm=True) row per (plan, account), and reject a second
+# of either.
+
+def test_db_allows_one_primary_and_one_rearm_order_per_plan_and_account(db):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    _order_row(db, account, plan, is_rearm=False)
+    _order_row(db, account, plan, is_rearm=True)   # must not raise
+    db.commit()
+    assert db.query(ExecutorOrder).filter_by(traveler_plan_id=plan.id, account_id=account.id).count() == 2
+
+
+def test_db_rejects_a_second_rearm_order_for_the_same_plan_and_account(db):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    _order_row(db, account, plan, is_rearm=True)
+    db.commit()
+    with pytest.raises(Exception):
+        _order_row(db, account, plan, is_rearm=True)
+    db.rollback()
+
+
+def test_db_rejects_a_second_primary_order_for_the_same_plan_and_account(db):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    _order_row(db, account, plan, is_rearm=False)
+    db.commit()
+    with pytest.raises(Exception):
+        _order_row(db, account, plan, is_rearm=False)
+    db.rollback()

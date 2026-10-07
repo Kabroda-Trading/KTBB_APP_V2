@@ -46,43 +46,53 @@ def _iso(dt) -> Optional[str]:
     return dt.isoformat() if dt else None
 
 
-def _mgmt_fields(db: Session, plan_id: int) -> Dict[str, Any]:
+def _mgmt_fields(db: Session, plan_id: int, is_rearm: bool = False) -> Dict[str, Any]:
     """Same LIVE-preferred order-selection main.py's own
     /api/admin/traveler-plan-status route uses -- see that route's
     docstring for the full 'why' (ExecutorOrder's real unique constraint
-    is (traveler_plan_id, account_id), so multiple accounts can each hold
-    their own order against one journey; a blind order_by(id.desc())
-    could silently flip between accounts)."""
+    is (traveler_plan_id, account_id, is_rearm), so multiple accounts can
+    each hold their own order against one journey; a blind
+    order_by(id.desc()) could silently flip between accounts).
+
+    is_rearm (2026-10-06, R1 re-arm): REAL bug fix, not just an extension
+    -- before this parameter existed, this function's own order_by(id.
+    desc()) would silently start returning the RE-ARM order's state (its
+    id is always higher) the moment one existed, making the PRIMARY
+    order's own final state vanish from this surface. Now explicitly
+    scoped -- the caller gets each leg's own state by calling this twice
+    (see get_public_traveler_snapshot() below), never a blind "whichever
+    is latest" pick across both legs."""
+    key_prefix = "rearm_mgmt" if is_rearm else "mgmt"
     order = (
         db.query(ExecutorOrder)
-        .filter(ExecutorOrder.traveler_plan_id == plan_id, ExecutorOrder.mode == "LIVE")
+        .filter(ExecutorOrder.traveler_plan_id == plan_id, ExecutorOrder.mode == "LIVE", ExecutorOrder.is_rearm == is_rearm)
         .order_by(ExecutorOrder.id.desc()).first()
         or db.query(ExecutorOrder)
-        .filter(ExecutorOrder.traveler_plan_id == plan_id, ExecutorOrder.mode == "DRY_RUN")
+        .filter(ExecutorOrder.traveler_plan_id == plan_id, ExecutorOrder.mode == "DRY_RUN", ExecutorOrder.is_rearm == is_rearm)
         .order_by(ExecutorOrder.id.desc()).first()
     )
     if order is None:
         return {
-            "mgmt_mode": None, "mgmt_state": None,
-            "mgmt_entry_fill_price": None, "mgmt_entry_fill_time": None,
-            "mgmt_exit_reason": None, "mgmt_exit_price": None, "mgmt_exit_time": None,
-            "mgmt_realized_pnl_r": None, "mgmt_exit_approximated": False,
+            f"{key_prefix}_mode": None, f"{key_prefix}_state": None,
+            f"{key_prefix}_entry_fill_price": None, f"{key_prefix}_entry_fill_time": None,
+            f"{key_prefix}_exit_reason": None, f"{key_prefix}_exit_price": None, f"{key_prefix}_exit_time": None,
+            f"{key_prefix}_realized_pnl_r": None, f"{key_prefix}_exit_approximated": False,
         }
     return {
-        "mgmt_mode": order.mode,
-        "mgmt_state": order.management_state,
-        "mgmt_entry_fill_price": order.entry_fill_price,
-        "mgmt_entry_fill_time": _iso(order.entry_fill_time),
-        "mgmt_exit_reason": order.exit_reason,
-        "mgmt_exit_price": order.exit_price,
-        "mgmt_exit_time": _iso(order.exit_time),
-        "mgmt_realized_pnl_r": order.realized_pnl_r,
+        f"{key_prefix}_mode": order.mode,
+        f"{key_prefix}_state": order.management_state,
+        f"{key_prefix}_entry_fill_price": order.entry_fill_price,
+        f"{key_prefix}_entry_fill_time": _iso(order.entry_fill_time),
+        f"{key_prefix}_exit_reason": order.exit_reason,
+        f"{key_prefix}_exit_price": order.exit_price,
+        f"{key_prefix}_exit_time": _iso(order.exit_time),
+        f"{key_prefix}_realized_pnl_r": order.realized_pnl_r,
         # Computed here, not stored -- exit_reason alone fully and
         # permanently determines this (STOP/T1 are real fills on both
         # lineages; C5_EXIT/BBWP_EXIT/TIME are only ever approximated on
         # LIVE -- see executor_live_e1_engine.py::_finalize_traveler_close()'s
         # own approximated parameter, the authoritative source this mirrors).
-        "mgmt_exit_approximated": (
+        f"{key_prefix}_exit_approximated": (
             order.mode == "LIVE" and order.exit_reason in ("C5_EXIT", "BBWP_EXIT", "TIME")
         ),
     }
@@ -165,7 +175,23 @@ def get_public_traveler_snapshot(db: Session) -> Dict[str, Any]:
             "fill_price": plan_row.fill_price,
             "journey_cap_at": _iso(plan_row.journey_cap_at),
             "last_transition_reason": plan_row.last_transition_reason,
-            **_mgmt_fields(db, plan_row.id),
+            **_mgmt_fields(db, plan_row.id, is_rearm=False),
+            # R1 re-arm (2026-10-06) -- a SEPARATE field set, never
+            # conflated with the primary's own fields above (see
+            # database.py's TravelerPlan.rearm_status comment for why).
+            # rearm_status is None for every journey that never re-armed --
+            # the frontend's own job to decide whether to render this
+            # section at all, same as the primary's direction/stop_price/
+            # t1_price already being None pre-cross.
+            "rearm_status": plan_row.rearm_status,
+            "rearm_cross_time": _iso(plan_row.rearm_cross_time),
+            "rearm_cross_price": plan_row.rearm_cross_price,
+            "rearm_tercile_skipped": plan_row.rearm_tercile_skipped,
+            "rearm_fill_time": _iso(plan_row.rearm_fill_time),
+            "rearm_fill_price": plan_row.rearm_fill_price,
+            "rearm_entry_expires_at": _iso(plan_row.rearm_entry_expires_at),
+            "rearm_last_transition_reason": plan_row.rearm_last_transition_reason,
+            **_mgmt_fields(db, plan_row.id, is_rearm=True),
         }
 
     return out

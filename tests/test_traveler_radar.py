@@ -255,3 +255,33 @@ def test_mgmt_prefers_live_order_over_dry_run_order(env):
     plan_out = resp.json()["plan"]
     assert plan_out["mgmt_mode"] == "LIVE"
     assert plan_out["mgmt_exit_reason"] == "T1"
+
+
+def test_mgmt_and_rearm_mgmt_stay_separate_even_though_rearm_has_the_higher_id(env):
+    # 2026-10-06 (R1 re-arm): the real bug this proves fixed -- before
+    # _mgmt_fields() took an is_rearm filter, its order_by(id.desc()) would
+    # silently pick the re-arm order's state (always the higher id, since
+    # it's created after the primary) for the PRIMARY's own mgmt_* keys,
+    # making the primary's real closure vanish from this surface.
+    plan = _make_plan(env["db"], status="FILLED", direction="LONG")
+    from database import UserModel
+    u = UserModel(email="traveler_radar_owner4@kabroda.com", password_hash="x", username="tr_owner4",
+                  tier="basic", is_admin=False, subscription_status="active")
+    env["db"].add(u)
+    env["db"].commit()
+    account = _make_account(env["db"], u.id, mode="DRY_RUN")
+    _make_order(
+        env["db"], plan.id, account.id, mode="DRY_RUN", is_rearm=False,
+        management_state="CLOSED_C5_EXIT", exit_reason="C5_EXIT", exit_price=81700.0, realized_pnl_r=0.4,
+    )
+    _make_order(   # created after -- always the higher id
+        env["db"], plan.id, account.id, mode="DRY_RUN", is_rearm=True,
+        management_state="CLOSED_T1", exit_reason="T1", exit_price=82000.0, realized_pnl_r=1.0,
+    )
+    client = TestClient(app)
+    resp = client.get("/api/radar/traveler-snapshot")
+    plan_out = resp.json()["plan"]
+    assert plan_out["mgmt_exit_reason"] == "C5_EXIT"
+    assert plan_out["mgmt_realized_pnl_r"] == 0.4
+    assert plan_out["rearm_mgmt_exit_reason"] == "T1"
+    assert plan_out["rearm_mgmt_realized_pnl_r"] == 1.0

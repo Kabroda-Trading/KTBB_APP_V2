@@ -62,6 +62,21 @@ STOP_BUFFER_BOX = 0.12   # decision_engine.py's own constant, same formula
 T1_BOX = 1.0             # E1's full-exit target, decision_engine.py's own box multiple
 JOURNEY_CAP_SECONDS = 7 * 24 * 3600   # journey_recipes.py:190
 
+# R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT, TRAVELER_D1_D2_D3_SPEC.md "R1
+# RE-ARM AMENDMENT" -- Arm A, same-lock-day only, see advance_rearm_watch()/
+# advance_rearm_waiting_touch() below). The re-arm's OWN waiting-for-touch
+# window: 90 confirmed 5m bars (7.5h) from the re-cross -- "90-bar cap ->
+# CLOSED_EXPIRED" per the spec -- computed as simple wall-clock arithmetic
+# from the re-cross timestamp, the same style JOURNEY_CAP_SECONDS above
+# already uses, NOT a literal bar-counting scan. Deliberately NOT the
+# primary's own 7-day JOURNEY_CAP_SECONDS -- a materially tighter window
+# for a materially different thing (see TRAVELER_D1_D2_D3_SPEC.md's own
+# "re-anchored to re-fill... TIME = journey cap" wording: the FILLED
+# re-arm trade's own D3 TIME exit still uses the ORIGINAL journey_cap_at,
+# unchanged -- this constant only bounds the entry-order's own resting
+# window before any fill happens).
+REARM_TOUCH_CAP_SECONDS = 90 * 300
+
 # Frozen production tercile cuts (RSI-4h-at-lock), per the 2026-09-15 ruling
 # above -- (lo, hi) per side. LONG skips the LOWEST tercile (rsi < lo);
 # SHORT skips the HIGHEST tercile (rsi > hi). Source: lab_d1 dated rows,
@@ -307,5 +322,194 @@ def advance_waiting_touch(
         return {
             "status": "DONE",
             "last_transition_reason": "7-day journey cap reached with no trigger touch fill -- not taken",
+        }
+    return None
+
+
+# ==============================================================================
+# R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT) -- TRAVELER_D1_D2_D3_SPEC.md
+# "R1 RE-ARM AMENDMENT". Arm A ONLY (same-lock-day window) -- Arm B (7-day
+# journey-cap window) was measured but SHELVED, not built (collides with
+# next-day primaries, an unresolved design question). Mirrors advance_
+# waiting_cross()/advance_waiting_touch() above exactly in mechanics (same
+# wick-touch TF_CROSS fill, same tercile gate, same frozen stop/T1 levels)
+# -- the only real differences are: (a) eligibility requires the primary's
+# own exhaustion condition to have cleared first (checked by the caller via
+# mgmt_e1_stack.check_c5_or_bbwp() -- passed in as a plain bool so this
+# module stays decoupled from the D3 module, matching this file's own "D1/
+# D2 only" header), (b) the re-cross must be the SAME trigger/side the
+# primary already took (re-arm never flips sides), and (c) the waiting-for-
+# touch window is REARM_TOUCH_CAP_SECONDS (90 bars / 7.5h) instead of the
+# primary's own 7-day journey_cap_at.
+#
+# rearm_status vocabulary is deliberately separate from the primary's own
+# `status` column values (REARM_WATCH/REARM_TERCILE_SKIPPED/REARM_WAITING_
+# TOUCH/REARM_FILLED/REARM_WINDOW_CLOSED, never bare WAITING_TOUCH/FILLED/
+# DONE reused on a second field) -- same "distinct causes get distinct
+# names" convention this codebase already applies elsewhere (e.g.
+# ExecutorOrder's CLOSED_EXPIRED vs CLOSED_ENTRY_CANCELED, kept separate on
+# purpose). REARM_WINDOW_CLOSED covers every "did not result in a trade"
+# outcome (no re-cross before the next lock, opposite trigger broke, 90-bar
+# touch cap passed) -- the same one-terminal-status-many-reasons shape
+# advance_waiting_touch() above already uses for its own DONE outcomes,
+# not a new status per cause.
+# ==============================================================================
+
+def advance_rearm_watch(
+    plan: Dict[str, Any],
+    candles_5m: List[Dict[str, Any]],
+    candles_4h: Optional[List[Dict[str, Any]]],
+    now_utc: datetime.datetime,
+    exhaustion_cleared: bool,
+    rearm_watch_deadline: datetime.datetime,
+) -> Optional[Dict[str, Any]]:
+    """REARM_WATCH -> REARM_TERCILE_SKIPPED (terminal, no re-entry) |
+    REARM_WAITING_TOUCH | REARM_WINDOW_CLOSED (terminal -- the window
+    closed, next lock arrived, with no re-cross).
+
+    Caller (traveler_plan_engine.py / executor_live_e1_engine.py) only
+    invokes this once plan["rearm_status"] == "REARM_WATCH", set right
+    after the PRIMARY ExecutorOrder closes with exit_reason=="C5_EXIT"
+    specifically -- not T1/STOP/TIME/BBWP_EXIT (the study's own re-arm
+    population was C5_EXIT journeys only).
+
+    exhaustion_cleared: the caller's own mgmt_e1_stack.check_c5_or_bbwp()
+    result, inverted (True once BOTH c5_hit and bbwp_hit read False on a
+    confirmed bar) -- passed in rather than recomputed here so the
+    "cleared" check can never drift from the "fired" check it's the
+    literal inverse of, and so this module stays decoupled from the D3
+    module (mgmt_e1_stack.py), matching this file's own "D1/D2 only"
+    design.
+    rearm_watch_deadline: the next 13:00 UTC lock, computed once by the
+    caller (session_manager.py) at the moment REARM_WATCH is entered --
+    kept out of this module for the same decoupling reason.
+    plan: needs "direction" (the PRIMARY journey's own confirmed side --
+    a re-cross is ALWAYS the same side, "the SAME trigger", never a flip)
+    and "breakout_trigger"/"breakdown_trigger" (the journey's frozen
+    levels, never recomputed).
+    """
+    direction = plan.get("direction")
+    bo, bd = plan.get("breakout_trigger"), plan.get("breakdown_trigger")
+    if direction not in (_LONG, _SHORT) or not bo or not bd or bo <= bd:
+        return None
+    if rearm_watch_deadline is not None and now_utc >= rearm_watch_deadline:
+        return {
+            "rearm_status": "REARM_WINDOW_CLOSED",
+            "rearm_last_transition_reason": "re-arm window closed at the next lock with no re-cross",
+        }
+    if not candles_5m or not exhaustion_cleared:
+        return None   # exhaustion still active, or no fresh data this poll -- stay REARM_WATCH
+
+    is_long = direction == _LONG
+    trigger = bo if is_long else bd
+    price = float(candles_5m[-1]["close"])
+    crossed = (price > trigger) if is_long else (price < trigger)
+    if not crossed:
+        return None
+
+    re_cross_price = price
+    re_cross_time_epoch = candles_5m[-1].get("time")
+    re_cross_time = (
+        datetime.datetime.fromtimestamp(re_cross_time_epoch, tz=datetime.timezone.utc)
+        if re_cross_time_epoch is not None else now_utc
+    )
+
+    rsi_4h_at_rearm_cross = rsi_at_cross(candles_4h, re_cross_time_epoch)
+    skipped = tercile_skip(rsi_4h_at_rearm_cross, direction)
+
+    updates: Dict[str, Any] = {
+        "rearm_cross_time": re_cross_time,
+        "rearm_cross_price": re_cross_price,
+        "rearm_rsi_4h_at_cross": rsi_4h_at_rearm_cross,
+        "rearm_tercile_skipped": skipped,
+    }
+    if skipped:
+        updates["rearm_status"] = "REARM_TERCILE_SKIPPED"
+        updates["rearm_last_transition_reason"] = (
+            f"{direction} re-cross confirmed at {re_cross_price:,.2f} -- tercile-skipped "
+            f"(RSI-4h-at-re-cross {rsi_4h_at_rearm_cross}) -- not taken, no re-entry"
+        )
+    else:
+        updates["rearm_status"] = "REARM_WAITING_TOUCH"
+        updates["rearm_entry_expires_at"] = re_cross_time + datetime.timedelta(seconds=REARM_TOUCH_CAP_SECONDS)
+        updates["rearm_last_transition_reason"] = (
+            f"{direction} re-cross confirmed at {re_cross_price:,.2f} -- resting limit at "
+            f"{trigger:,.2f}, watching for a trigger touch (90-bar cap)"
+        )
+    return updates
+
+
+def advance_rearm_waiting_touch(
+    plan: Dict[str, Any],
+    candles_5m: List[Dict[str, Any]],
+    now_utc: datetime.datetime,
+) -> Optional[Dict[str, Any]]:
+    """REARM_WAITING_TOUCH -> REARM_FILLED | REARM_WINDOW_CLOSED (terminal
+    -- opposite trigger broke, or the 90-bar/7.5h touch cap passed with no
+    fill; both "did not result in a trade", never a loss -- the executor-
+    order-level equivalent for the touch-cap case is CLOSED_EXPIRED, the
+    SAME terminal state the primary's own never-touched resting order
+    already uses, not a new order-level state).
+
+    Same wick-touch TF_CROSS mechanics as advance_waiting_touch() above
+    (a resting limit AT the trigger, fills on ANY subsequent wick touch,
+    no close-back condition) -- bounded by plan["rearm_entry_expires_at"]
+    (90 bars / 7.5h from the re-cross) instead of the primary's own 7-day
+    journey_cap_at. plan needs: "direction", "breakout_trigger"/
+    "breakdown_trigger", "opposite_trigger" (SAME as the primary -- the
+    journey's frozen levels), "rearm_cross_time", "rearm_entry_expires_at".
+    """
+    direction = plan.get("direction")
+    is_long = direction == _LONG
+    trigger = plan.get("breakout_trigger") if is_long else plan.get("breakdown_trigger")
+    opposite_trigger = plan.get("opposite_trigger")
+    rearm_cross_time = plan.get("rearm_cross_time")
+    rearm_entry_expires_at = plan.get("rearm_entry_expires_at")
+    if trigger is None or rearm_cross_time is None:
+        return None
+
+    after_cross = [c for c in candles_5m if c.get("time") is not None and c["time"] > rearm_cross_time.timestamp()]
+    after_cross.sort(key=lambda c: c["time"])
+
+    # Re-arm end #1: the OPPOSITE trigger gets a confirmed close beyond it
+    # first -- same journey-invalidation condition advance_waiting_touch()
+    # uses for the primary, confirmed-close based (not the entry's own
+    # wick-based fill condition below).
+    for c in after_cross:
+        close = float(c["close"])
+        opposite_broken = (close < opposite_trigger) if is_long else (close > opposite_trigger)
+        if opposite_broken:
+            return {
+                "rearm_status": "REARM_WINDOW_CLOSED",
+                "rearm_last_transition_reason": (
+                    f"opposite trigger ({opposite_trigger:,.2f}) broke before any re-arm trigger "
+                    f"touch fill -- re-arm ended, not taken"
+                ),
+            }
+
+    # The re-arm trigger touch fill itself: first bar whose WICK (high/low)
+    # touches the resting limit's own price -- no close-back condition,
+    # same as the primary's own entry.
+    for c in after_cross:
+        lo, hi = float(c["low"]), float(c["high"])
+        filled = (lo <= trigger) if is_long else (hi >= trigger)
+        if filled:
+            fill_time_epoch = c["time"]
+            fill_time = datetime.datetime.fromtimestamp(fill_time_epoch, tz=datetime.timezone.utc)
+            return {
+                "rearm_status": "REARM_FILLED",
+                "rearm_fill_time": fill_time,
+                "rearm_fill_price": trigger,
+                "rearm_last_transition_reason": f"re-arm trigger touch fill at {trigger:,.2f}",
+            }
+
+    # Re-arm end #2: the 90-bar/7.5h touch cap passed with no fill and no
+    # opposite-trigger break either -- disclosed, never a loss (matches
+    # TRAVELER_D1_D2_D3_SPEC.md's own "90-bar cap -> CLOSED_EXPIRED,
+    # never a loss" wording).
+    if rearm_entry_expires_at is not None and now_utc >= rearm_entry_expires_at:
+        return {
+            "rearm_status": "REARM_WINDOW_CLOSED",
+            "rearm_last_transition_reason": "90-bar re-arm touch cap reached with no trigger touch fill -- not taken",
         }
     return None

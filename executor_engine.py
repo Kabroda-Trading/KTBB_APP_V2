@@ -50,16 +50,26 @@ def _audit_event_type(order_dict: Dict[str, Any]) -> str:
     return "ORDER_REJECTED"
 
 
-async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan, account: ExecutorAccount) -> None:
+async def _process_traveler_account(
+    db: Session, traveler_plan_row: TravelerPlan, account: ExecutorAccount, is_rearm: bool = False,
+) -> None:
     """GATE_TRAVELER's counterpart to _process_account() above -- fires on
     TravelerPlan's own FILLED transition (traveler_plan_engine.py), never
     on TradePlan's. Skips every account NOT explicitly set to GATE_
-    TRAVELER, symmetric to _process_account()'s own skip for GATE_V2."""
+    TRAVELER, symmetric to _process_account()'s own skip for GATE_V2.
+
+    is_rearm (2026-10-06, R1 re-arm): threaded straight through to
+    build_hypothetical_traveler_order() -- see that function's own
+    docstring. Also changes which pair of TravelerPlan timestamp/price
+    fields the DRY_RUN bookkeeping stamp below reads (rearm_fill_price/
+    rearm_fill_time vs. the primary's own fill_price/fill_time)."""
     if executor_accounts.gate_profile_of(account) != "GATE_TRAVELER":
         return
     risk_state = executor_accounts.get_or_init_risk_state(db, account)
 
-    order_dict = await executor_plan_builder.build_hypothetical_traveler_order(db, traveler_plan_row, account, risk_state)
+    order_dict = await executor_plan_builder.build_hypothetical_traveler_order(
+        db, traveler_plan_row, account, risk_state, is_rearm=is_rearm,
+    )
 
     if account.mode == "PAPER":
         raise NotImplementedError("PAPER execution is not built yet")
@@ -86,8 +96,12 @@ async def _process_traveler_account(db: Session, traveler_plan_row: TravelerPlan
     # terminal state while a real position was still open. A LIVE row's fill
     # comes from the exchange (executor_live_e1_engine.py), never from here.
     if account.mode == "DRY_RUN" and order_dict.get("decision") == "WOULD_PLACE":
-        order_dict["entry_fill_price"] = traveler_plan_row.fill_price
-        order_dict["entry_fill_time"] = traveler_plan_row.fill_time
+        if is_rearm:
+            order_dict["entry_fill_price"] = traveler_plan_row.rearm_fill_price
+            order_dict["entry_fill_time"] = traveler_plan_row.rearm_fill_time
+        else:
+            order_dict["entry_fill_price"] = traveler_plan_row.fill_price
+            order_dict["entry_fill_time"] = traveler_plan_row.fill_time
         order_dict["management_state"] = "ENTRY_FILLED_ORDERS_PLACED"
     filtered = {k: v for k, v in order_dict.items() if k in _ORDER_COLUMNS}
     order = ExecutorOrder(**filtered)
@@ -182,4 +196,36 @@ async def process_traveler_fill(db: Session, traveler_plan_row: TravelerPlan) ->
             await _process_traveler_account(db, traveler_plan_row, account)
         except Exception as e:
             print(f"|| EXECUTOR || account {account.id} ({account.label}) failed for "
+                  f"traveler_plan {traveler_plan_row.id}: {e}")
+
+
+async def process_traveler_rearm_cross(db: Session, traveler_plan_row: TravelerPlan) -> None:
+    """2026-10-06 (R1 re-arm, Andy ruling 15:24 CT) -- the re-arm's own
+    counterpart to process_traveler_cross() above, fired on the REARM_
+    WATCH -> REARM_WAITING_TOUCH transition (traveler_plan_engine.py), the
+    re-arm's own confirmed re-cross + tercile-gate pass. Same LIVE-only
+    scoping and same reasoning as the primary's own cross-vs-fill split
+    (DRY_RUN's own bookkeeping fill stamps at the re-arm's simulated touch,
+    process_traveler_rearm_fill() below, not here)."""
+    accounts = db.query(ExecutorAccount).filter_by(is_active=True, mode="LIVE").all()
+    for account in accounts:
+        try:
+            await _process_traveler_account(db, traveler_plan_row, account, is_rearm=True)
+        except Exception as e:
+            print(f"|| EXECUTOR || account {account.id} ({account.label}) failed at re-arm cross for "
+                  f"traveler_plan {traveler_plan_row.id}: {e}")
+
+
+async def process_traveler_rearm_fill(db: Session, traveler_plan_row: TravelerPlan) -> None:
+    """2026-10-06 (R1 re-arm) -- fires on the candle-simulated REARM_
+    WAITING_TOUCH -> REARM_FILLED transition. Same LIVE-exclusion reasoning
+    as process_traveler_fill() above: process_traveler_rearm_cross()
+    already created and placed a LIVE account's real re-arm order at the
+    re-cross."""
+    accounts = db.query(ExecutorAccount).filter_by(is_active=True).filter(ExecutorAccount.mode != "LIVE").all()
+    for account in accounts:
+        try:
+            await _process_traveler_account(db, traveler_plan_row, account, is_rearm=True)
+        except Exception as e:
+            print(f"|| EXECUTOR || account {account.id} ({account.label}) failed at re-arm fill for "
                   f"traveler_plan {traveler_plan_row.id}: {e}")

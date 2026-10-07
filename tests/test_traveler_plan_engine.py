@@ -945,3 +945,169 @@ def test_waiting_cross_to_waiting_touch_sends_no_email_via_loop(poll_env, monkey
     row = poll_env["get_plan"]()
     assert row.status == "WAITING_TOUCH"
     assert sent == []
+
+
+# ==============================================================================
+# R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT) -- full DRY_RUN walk, end to
+# end: primary cross -> touch fill -> D3 closes via C5_EXIT -> REARM_WATCH
+# -> exhaustion clears + re-cross -> REARM_WAITING_TOUCH -> re-arm wick-
+# touch fill (a SECOND, real ExecutorOrder, is_rearm=True) -> that order's
+# OWN D3 walk closes it via T1 -- proving the whole mechanism wired
+# together, not just its individual pieces in isolation (those are
+# covered by tests/test_gate_traveler.py's own advance_rearm_watch()/
+# advance_rearm_waiting_touch() unit tests). check_c5_or_bbwp() is
+# monkeypatched directly (not constructed via real RSI-triggering candle
+# series) -- that function's own real math is already covered by study_
+# indicators.py's and mgmt_e1_stack.py's own test suites; this test's job
+# is the WIRING, not re-proving the indicator formulas. candles_4h_by_
+# symbol is left empty throughout (same as every other WAITING_CROSS test
+# in this file) -- rsi_at_cross() on empty data returns None, and
+# tercile_skip(None, ...) is never skipped, same established convention.
+
+def test_rearm_full_dry_run_walk_primary_c5_exit_to_rearm_fill_and_close(poll_env, monkeypatch):
+    # Realistic BTC-scale price levels (NOT gate_traveler.py's own unit-
+    # test scale of ~100/90) -- this test goes through the REAL sizing/
+    # leverage/liquidation pipeline (build_hypothetical_traveler_order()),
+    # unlike gate_traveler.py's own pure-function tests. A tiny-scale box
+    # (e.g. box=10 on a 100 entry = 10% of price) puts liquidation INSIDE
+    # the stop at normal leverage and trips a real, unrelated safety
+    # rejection -- caught by direct debugging before assuming the first
+    # failure was a re-arm bug (it was not one).
+    poll_env["make_plan"](breakout_trigger=50000.0, breakdown_trigger=49000.0, r30_high=50000.0, r30_low=49000.0)
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    fake_htf = [{"close": 50000.0, "time": ct}]   # non-empty so _advance_e1_order()'s own guard doesn't short-circuit
+    # stop = r30_low(49000) - 0.12*box(1000) = 48880; t1 = trigger(50000) + 1.0*box = 51000
+
+    # Stage 1: primary cross (WAITING_CROSS -> WAITING_TOUCH).
+    cross_candles = [_c5m(49500.0, ct + i * 300) for i in range(5)] + [_c5m(50500.0, ct + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": cross_candles}, polls=1)
+    assert poll_env["get_plan"]().status == "WAITING_TOUCH"
+
+    # Stage 2: primary touch fill (WAITING_TOUCH -> FILLED) -- wick touches
+    # trigger=50000, close stays above it (genuinely wick-driven, not close-based).
+    touch_candles = cross_candles + [_c5m(50200.0, ct + 6 * 300, low=49950.0, high=50300.0)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": touch_candles}, polls=1)
+    plan = poll_env["get_plan"]()
+    assert plan.status == "FILLED"
+    orders = poll_env["get_orders"](plan.id)
+    assert len(orders) == 1
+    assert orders[0].is_rearm is False
+    assert orders[0].management_state == "ENTRY_FILLED_ORDERS_PLACED"
+
+    # Stage 3: D3 closes the primary via C5_EXIT -- this is the ONLY exit
+    # reason that starts a re-arm watch (confirmed separately by the
+    # negative-case test below).
+    def _c5_active(candles_1h, candles_4h, now_ts=None, candles_4h_bbwp=None):
+        return (True, False)
+    monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", _c5_active)
+    # mgmt_e1_stack.advance()'s own since_entry filter needs a bar STRICTLY
+    # AFTER entry_fill_time (ct+6*300, the touch bar itself) -- without one
+    # it returns None before ever reaching the (monkeypatched) C5 check,
+    # no matter what check_c5_or_bbwp() says. A close well clear of
+    # stop=48880 so STOP (checked first, before C5/BBWP) doesn't fire instead.
+    c5_poll_candles = touch_candles + [_c5m(50100.0, ct + 7 * 300)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": c5_poll_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+    plan = poll_env["get_plan"]()
+    primary_order = poll_env["get_orders"](plan.id)[0]
+    assert primary_order.management_state == "CLOSED_C5_EXIT"
+    assert plan.rearm_status == "REARM_WATCH"
+    assert "C5_EXIT" in (plan.rearm_last_transition_reason or "")
+
+    # Stage 4: exhaustion clears + a fresh confirmed close beyond the SAME
+    # trigger (50000) -- REARM_WATCH -> REARM_WAITING_TOUCH.
+    def _c5_cleared(candles_1h, candles_4h, now_ts=None, candles_4h_bbwp=None):
+        return (False, False)
+    monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", _c5_cleared)
+    recross_candles = [_c5m(50600.0, ct + 10 * 300)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": recross_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+    plan = poll_env["get_plan"]()
+    assert plan.rearm_status == "REARM_WAITING_TOUCH"
+    assert plan.rearm_cross_price == 50600.0
+    # Stop/T1 are UNCHANGED from the primary -- "levels frozen from lock",
+    # never recomputed for the re-arm leg.
+    assert plan.stop_price == pytest.approx(48880.0)
+    assert plan.t1_price == pytest.approx(51000.0)
+
+    # Stage 5: the re-arm's own wick-touch fill -- a pullback wick touches
+    # the trigger again (same mechanics as the primary's own D2 entry).
+    # Creates a SECOND, real ExecutorOrder (is_rearm=True) for the SAME
+    # account -- the exact DB uniqueness fix this session's plan called out.
+    rearm_touch_candles = [_c5m(50400.0, ct + 11 * 300, low=49950.0, high=50500.0)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": rearm_touch_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+    plan = poll_env["get_plan"]()
+    assert plan.rearm_status == "REARM_FILLED"
+    assert plan.rearm_fill_price == 50000.0
+    orders = poll_env["get_orders"](plan.id)
+    assert len(orders) == 2
+    rearm_order = next(o for o in orders if o.is_rearm)
+    assert rearm_order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
+    assert rearm_order.entry_fill_price == 50000.0
+    # Levels on the re-arm ORDER itself are also the frozen primary values.
+    assert rearm_order.stop_price == pytest.approx(48880.0)
+    assert rearm_order.t1_price == pytest.approx(51000.0)
+
+    # Stage 6: the re-arm order's OWN D3 walk closes it via T1 -- proving
+    # mgmt_e1_stack.advance() needed ZERO code changes to manage a re-arm
+    # order (it's already a pure function over a plain order dict).
+    t1_candles = [_c5m(50900.0, ct + 12 * 300, high=51100.0)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": t1_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+    orders = poll_env["get_orders"](plan.id)
+    rearm_order = next(o for o in orders if o.is_rearm)
+    primary_order = next(o for o in orders if not o.is_rearm)
+    assert rearm_order.management_state == "CLOSED_T1"
+    assert rearm_order.realized_pnl_r == pytest.approx((51000.0 - 50000.0) / (50000.0 - 48880.0))
+    # The primary's own already-terminal state is untouched by any of this.
+    assert primary_order.management_state == "CLOSED_C5_EXIT"
+
+
+def test_rearm_watch_not_started_when_primary_closes_via_stop_not_c5(poll_env, monkeypatch):
+    # The real scoping guard, proven negative: STOP (and by the same logic
+    # T1/TIME/BBWP_EXIT) must NOT start a re-arm watch -- only C5_EXIT,
+    # the study's own re-arm population (lab_rearm_after_c5_results.md:
+    # "BBWP-only exits excluded from the primary population"). Same
+    # realistic BTC-scale levels as the full-walk test above -- see that
+    # test's own comment for why the gate_traveler.py unit-test scale
+    # (~100/90) trips an unrelated liquidation-safety rejection here.
+    poll_env["make_plan"](breakout_trigger=50000.0, breakdown_trigger=49000.0, r30_high=50000.0, r30_low=49000.0)
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    cross_candles = [_c5m(49500.0, ct + i * 300) for i in range(5)] + [_c5m(50500.0, ct + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": cross_candles}, polls=1)
+    touch_candles = cross_candles + [_c5m(50200.0, ct + 6 * 300, low=49950.0, high=50300.0)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": touch_candles}, polls=1)
+    plan = poll_env["get_plan"]()
+    assert plan.status == "FILLED"
+
+    # A wick through stop=48880 -- closes via STOP, not C5_EXIT. Non-empty
+    # 1h/4h candles required -- _advance_e1_order()'s own guard returns
+    # before even reaching mgmt_e1_stack.advance() (STOP included) without
+    # them, "can't check C5/BBWP this poll" being a blanket precondition,
+    # not a C5/BBWP-only one.
+    fake_htf = [{"close": 50000.0, "time": ct}]
+    stop_candles = touch_candles + [_c5m(48900.0, ct + 7 * 300, low=48800.0, high=49000.0)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": stop_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+    plan = poll_env["get_plan"]()
+    order = poll_env["get_orders"](plan.id)[0]
+    assert order.management_state == "CLOSED_STOP"
+    assert plan.rearm_status is None   # no watch started

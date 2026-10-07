@@ -389,6 +389,32 @@ def test_traveler_plan_status_mgmt_prefers_live_order_over_dry_run_order(env):
     assert row["mgmt_realized_pnl_r"] == 1.0
 
 
+def test_traveler_plan_status_mgmt_and_rearm_mgmt_stay_separate_even_though_rearm_has_the_higher_id(env):
+    """2026-10-06 (R1 re-arm): the real bug this proves fixed -- without
+    _select_mgmt_fields()'s is_rearm filter, its order_by(id.desc()) would
+    silently pick the re-arm order's state (always the higher id, since
+    it's created after the primary closes) for the PRIMARY's own mgmt_*
+    keys, making the primary's real closure vanish from this route."""
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    account = _make_account(env["db"], admin_user.id, mode="DRY_RUN", gate_profile="GATE_TRAVELER")
+    _make_order(
+        env["db"], plan.id, account.id, mode="DRY_RUN", is_rearm=False,
+        management_state="CLOSED_C5_EXIT", exit_reason="C5_EXIT", exit_price=81700.0, realized_pnl_r=0.4,
+    )
+    _make_order(   # created after -- always the higher id
+        env["db"], plan.id, account.id, mode="DRY_RUN", is_rearm=True,
+        management_state="CLOSED_T1", exit_reason="T1", exit_price=82000.0, realized_pnl_r=1.0,
+    )
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-status")
+    row = resp.json()["rows"][0]
+    assert row["mgmt_exit_reason"] == "C5_EXIT"
+    assert row["mgmt_realized_pnl_r"] == 0.4
+    assert row["rearm_mgmt_exit_reason"] == "T1"
+    assert row["rearm_mgmt_realized_pnl_r"] == 1.0
+
+
 def test_traveler_plan_status_mgmt_falls_back_to_most_recent_dry_run_when_no_live_order(env):
     plan = _make_plan(env["db"])
     admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()

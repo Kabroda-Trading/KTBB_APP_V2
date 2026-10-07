@@ -138,7 +138,8 @@ def build_traveler_real_fill_email(order: Dict[str, Any]) -> Tuple[str, str]:
     t1 = order.get("t1_price")
     risk = order.get("risk_dollars_used")
     account_label = order.get("account_label") or f"account #{order.get('account_id')}"
-    subject = f"KABRODA - {symbol} {direction} - Real Fill Confirmed @ {_fmt(entry, ',.0f')} ({account_label})"
+    leg_tag = " (re-arm)" if order.get("is_rearm") else ""
+    subject = f"KABRODA - {symbol} {direction} - Real Fill Confirmed{leg_tag} @ {_fmt(entry, ',.0f')} ({account_label})"
     body = (
         f"{symbol} {direction} filled for real on {account_label}, confirmed by the exchange, at {_fmt(entry)}.\n\n"
         f"  Stop:   {_fmt(stop)}\n"
@@ -221,7 +222,12 @@ def build_traveler_management_event_email(order: Dict[str, Any], is_live: bool) 
     exit_price = order.get("exit_price")
     r = order.get("realized_pnl_r")
 
-    subject = f"KABRODA - {symbol} {direction} - Closed ({reason_label}) @ {_fmt(exit_price, ',.0f')}"
+    # 2026-10-06 (R1 re-arm): a closure email reads identically otherwise
+    # whether it's the primary or the re-arm leg -- the subject tag is the
+    # one place a reader can tell which position this was, especially
+    # since the primary's own close already happened earlier the same day.
+    leg_tag = " (re-arm)" if order.get("is_rearm") else ""
+    subject = f"KABRODA - {symbol} {direction} - Closed{leg_tag} ({reason_label}) @ {_fmt(exit_price, ',.0f')}"
 
     lineage_line = (
         "Real order -- live money." if is_live else
@@ -264,4 +270,96 @@ def notification_for_traveler_transition(prev_status: str, plan: Dict[str, Any])
         return build_traveler_armed_email(plan)
     if status in ("DONE", "TERCILE_SKIPPED"):
         return build_traveler_done_email(plan)
+    return None
+
+
+# ==============================================================================
+# R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT) -- the rearm_status
+# counterpart to LOCK/ARMED/DONE above. Two new plan-level events (REARM_
+# WATCH-entered, REARM done-without-a-trade), reusing build_traveler_real_
+# fill_email()/build_traveler_management_event_email() UNCHANGED for the
+# per-account fill/close events (both already take a plain order dict, not
+# touching plan-level rearm_* fields at all -- genuinely re-arm-agnostic
+# already, same L4 per-account routing applies unchanged).
+# ==============================================================================
+
+def build_traveler_rearm_watch_email(plan: Dict[str, Any]) -> Tuple[str, str]:
+    """Fires once, right when a primary journey's C5 exit starts the re-arm
+    watch (mgmt_e1_stack.start_rearm_watch_if_eligible()). Plan-level,
+    radar-class -- not account-specific (no fill/risk$ to report yet)."""
+    symbol = _symbol_compact(plan.get("symbol", ""))
+    direction = plan.get("direction") or "?"
+    subject = f"KABRODA - {symbol} {direction} - Re-arm Watch"
+    body = (
+        f"{symbol} {direction} closed via momentum-decay exhaustion (C5). "
+        f"Watching for exhaustion to clear and a re-cross of the same level "
+        f"before the next lock -- one re-arm max today.\n\n"
+        f"  Ref: #{plan.get('id')}"
+    )
+    return subject, body
+
+
+def build_traveler_rearm_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
+    """Fires on the re-arm's own trigger touch fill (REARM_WAITING_TOUCH ->
+    REARM_FILLED) -- the rearm_status counterpart to build_traveler_armed_
+    email() above, reading the rearm_* fields instead of the primary's own
+    (already-closed) fill_price/stop_price -- stop/T1 are UNCHANGED from
+    the primary (frozen levels), only the fill price/timing are new."""
+    symbol = _symbol_compact(plan.get("symbol", ""))
+    direction = plan.get("direction") or "?"
+    fill_price = plan.get("rearm_fill_price")
+    stop = plan.get("stop_price")
+    t1 = plan.get("t1_price")
+    subject = f"KABRODA - {symbol} {direction} - Re-arm Position Opened @ {_fmt(fill_price, ',.0f')}"
+    body = (
+        f"{symbol} {direction} re-armed and opened at {_fmt(fill_price)}.\n\n"
+        f"  Stop:   {_fmt(stop)}\n"
+        f"  Target: {_fmt(t1)}\n\n"
+        f"  Ref: #{plan.get('id')}"
+    )
+    return subject, body
+
+
+def build_traveler_rearm_done_email(plan: Dict[str, Any]) -> Tuple[str, str]:
+    """Covers BOTH real terminal "no re-arm trade" outcomes -- REARM_
+    TERCILE_SKIPPED (a real re-cross, excluded) and REARM_WINDOW_CLOSED
+    (no re-cross before the next lock, opposite trigger broke, or the
+    90-bar touch cap passed) -- same one-headline-plus-detail-line shape
+    as build_traveler_done_email() above, reading rearm_* fields."""
+    symbol = _symbol_compact(plan.get("symbol", ""))
+    rearm_status = plan.get("rearm_status")
+    direction = plan.get("direction") or "?"
+    rearm_cross_price = plan.get("rearm_cross_price")
+    subject = f"KABRODA - {symbol} - No Re-arm Trade"
+
+    if rearm_status == "REARM_TERCILE_SKIPPED":
+        rsi = plan.get("rearm_rsi_4h_at_cross")
+        headline = (
+            f"{direction} re-cross confirmed at {_fmt(rearm_cross_price)} -- outside "
+            "system guidelines, no re-arm trade taken."
+        )
+        detail = f"  RSI (4H) at re-cross: {_fmt(rsi, ',.1f')}\n\n"
+    else:
+        headline = "No re-arm trade taken this session."
+        reason = plan.get("rearm_last_transition_reason") or ""
+        detail = f"  Detail: {reason}\n\n" if reason else ""
+
+    body = f"{headline}\n\n{detail}  Ref: #{plan.get('id')}"
+    return subject, body
+
+
+def notification_for_traveler_rearm_transition(prev_rearm_status, plan: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """The rearm_status counterpart to notification_for_traveler_
+    transition() above. REARM_WATCH fires on entry (prev_rearm_status is
+    None -> REARM_WATCH, the only transition INTO this value); REARM_
+    WAITING_TOUCH is a real, logged transition but not an emailed one (same
+    "intermediate transition" treatment WAITING_CROSS -> WAITING_TOUCH
+    already gets above)."""
+    rearm_status = plan.get("rearm_status")
+    if rearm_status == "REARM_WATCH":
+        return build_traveler_rearm_watch_email(plan)
+    if rearm_status == "REARM_FILLED":
+        return build_traveler_rearm_armed_email(plan)
+    if rearm_status in ("REARM_WINDOW_CLOSED", "REARM_TERCILE_SKIPPED"):
+        return build_traveler_rearm_done_email(plan)
     return None

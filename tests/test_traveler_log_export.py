@@ -74,6 +74,13 @@ _MGMT_COLUMNS = ["mgmt_mode", "mgmt_management_state", "mgmt_entry_fill_price",
                  "mgmt_entry_fill_time", "mgmt_exit_reason", "mgmt_exit_price",
                  "mgmt_exit_time", "mgmt_realized_pnl_r", "mgmt_c5_fired", "mgmt_bbwp_fired"]
 
+# 2026-10-06 (R1 re-arm): the SAME 10 fields, for the re-arm leg
+# specifically -- see main.py's own route comment for why this is a
+# separate column set, not a conflated "latest order wins" pick.
+_REARM_MGMT_COLUMNS = ["rearm_mgmt_mode", "rearm_mgmt_management_state", "rearm_mgmt_entry_fill_price",
+                       "rearm_mgmt_entry_fill_time", "rearm_mgmt_exit_reason", "rearm_mgmt_exit_price",
+                       "rearm_mgmt_exit_time", "rearm_mgmt_realized_pnl_r", "rearm_mgmt_c5_fired", "rearm_mgmt_bbwp_fired"]
+
 
 def test_export_requires_api_key(export_env):
     resp = export_env["client"].get("/api/export/traveler-log.csv")
@@ -90,7 +97,7 @@ def test_export_empty_still_returns_header_only(export_env):
     assert resp.status_code == 200
     reader = csv.DictReader(io.StringIO(resp.text))
     assert list(reader) == []
-    assert reader.fieldnames == _plan_columns() + _MGMT_COLUMNS
+    assert reader.fieldnames == _plan_columns() + _MGMT_COLUMNS + _REARM_MGMT_COLUMNS
 
 
 def test_export_plan_with_no_order_yet_has_null_mgmt_columns(export_env):
@@ -100,7 +107,7 @@ def test_export_plan_with_no_order_yet_has_null_mgmt_columns(export_env):
     rows = list(reader)
     assert len(rows) == 1
     assert rows[0]["status"] == "WAITING_CROSS"
-    for col in _MGMT_COLUMNS:
+    for col in _MGMT_COLUMNS + _REARM_MGMT_COLUMNS:
         assert rows[0][col] == ""
 
 
@@ -166,6 +173,53 @@ def test_export_prefers_live_order_over_dry_run(export_env):
     assert len(rows) == 1
     assert rows[0]["mgmt_mode"] == "LIVE"
     assert rows[0]["mgmt_exit_reason"] == "T1"
+
+
+def test_export_separates_primary_and_rearm_mgmt_columns(export_env):
+    # 2026-10-06 (R1 re-arm) -- the real bug this session found and fixed:
+    # before is_rearm was part of the selection key, the re-arm order's
+    # always-higher id would win the "latest wins" tie-break (both LIVE,
+    # neither check looked at is_rearm), silently replacing the PRIMARY
+    # order's own row with the re-arm's. Insert the re-arm order SECOND
+    # (higher id) specifically to catch a regression back to that.
+    plan = export_env["make_plan"](status="FILLED", direction="LONG")
+    user = UserModel(email="traveler_export_rearm@kabroda.com", password_hash="x", username="tle_rearm",
+                      tier="basic", is_admin=False, subscription_status="active")
+    export_env["db"].add(user)
+    export_env["db"].commit()
+    account = ea.create_account(export_env["db"], user_id=user.id, label="traveler_export_rearm_acct")
+
+    primary = ExecutorOrder(
+        trade_plan_id=plan.id, traveler_plan_id=plan.id, account_id=account.id, mode="LIVE", is_rearm=False,
+        symbol="BTC/USDT", direction="LONG", entry_price=90000.0, stop_price=89000.0, t1_price=91000.0,
+        qty=0.01, risk_dollars_used=100.0, decision="WOULD_PLACE", management_state="CLOSED_C5_EXIT",
+        gate_profile_used="GATE_TRAVELER", mgmt_profile_used="MGMT_E1_STACK",
+        exit_reason="C5_EXIT", exit_price=90200.0, realized_pnl_r=0.2,
+    )
+    export_env["db"].add(primary)
+    export_env["db"].commit()
+
+    rearm = ExecutorOrder(
+        trade_plan_id=plan.id, traveler_plan_id=plan.id, account_id=account.id, mode="LIVE", is_rearm=True,
+        symbol="BTC/USDT", direction="LONG", entry_price=90000.0, stop_price=89000.0, t1_price=91000.0,
+        qty=0.01, risk_dollars_used=100.0, decision="WOULD_PLACE", management_state="CLOSED_T1",
+        gate_profile_used="GATE_TRAVELER", mgmt_profile_used="MGMT_E1_STACK",
+        exit_reason="T1", exit_price=91000.0, realized_pnl_r=1.0,
+    )
+    export_env["db"].add(rearm)
+    export_env["db"].commit()
+
+    resp = export_env["client"].get("/api/export/traveler-log.csv", headers={"X-API-Key": "test-export-key"})
+    reader = csv.DictReader(io.StringIO(resp.text))
+    rows = list(reader)
+    assert len(rows) == 1
+    # The PRIMARY's own fields must still show the primary's own outcome --
+    # not silently overwritten by the re-arm's higher-id row.
+    assert rows[0]["mgmt_exit_reason"] == "C5_EXIT"
+    assert rows[0]["mgmt_realized_pnl_r"] == "0.2"
+    # The re-arm's own outcome shows up in its OWN columns, not conflated.
+    assert rows[0]["rearm_mgmt_exit_reason"] == "T1"
+    assert rows[0]["rearm_mgmt_realized_pnl_r"] == "1.0"
 
 
 def test_export_since_filters_by_date_key(export_env):

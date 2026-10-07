@@ -771,6 +771,39 @@ def init_db():
         except Exception:
             pass
 
+    # --- R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT) -- see TravelerPlan's
+    # own rearm_* field comments above and ExecutorOrder.is_rearm's own
+    # comment for what each column is. Note (confirmed by reading the
+    # existing traveler_plan_id/account_id migration above, 2026-09-15):
+    # the UniqueConstraint declared on the ExecutorOrder ORM model was
+    # NEVER actually retroactively added to the real production table by
+    # any ADD COLUMN-style migration -- that constraint only ever took
+    # effect on a brand-new database built via create_all(); in production
+    # the real enforcement has always been executor_plan_builder.py's own
+    # application-level duplicate-order query. So this is a plain ADD
+    # COLUMN, same as every other column here -- there is no existing
+    # live constraint to drop/recreate. is_rearm defaults FALSE so every
+    # pre-existing order (all of them primary, re-arm didn't exist before
+    # today) backfills correctly without a separate UPDATE. ---
+    for _col in ["is_rearm BOOLEAN DEFAULT FALSE"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_orders ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    for _col in [
+        "rearm_status VARCHAR", "rearm_cross_time TIMESTAMP", "rearm_cross_price FLOAT",
+        "rearm_rsi_4h_at_cross FLOAT", "rearm_tercile_skipped BOOLEAN",
+        "rearm_fill_time TIMESTAMP", "rearm_fill_price FLOAT",
+        "rearm_entry_expires_at TIMESTAMP", "rearm_last_transition_reason VARCHAR",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE traveler_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -1248,6 +1281,40 @@ class TravelerPlan(Base):
     last_transition_reason = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # --- R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT, Kabroda AI Brain repo
+    # TRAVELER_D1_D2_D3_SPEC.md "R1 RE-ARM AMENDMENT" -- Arm A, same-lock-day
+    # only; Arm B, the 7-day-journey-cap window, was measured but SHELVED,
+    # not built). Fires only off a primary ExecutorOrder closing with
+    # exit_reason=="C5_EXIT" specifically (not STOP/T1/TIME/BBWP_EXIT -- the
+    # study's own population was C5_EXIT journeys only). A SEPARATE field
+    # set, never overwriting the primary leg's own cross_time/fill_price/
+    # etc. above -- those stay exactly what they were at the primary fill,
+    # permanently, the historical record of that first trade. Own status
+    # vocabulary (REARM_WATCH/REARM_TERCILE_SKIPPED/REARM_WAITING_TOUCH/
+    # REARM_FILLED/REARM_EXPIRED/REARM_WINDOW_CLOSED), deliberately NOT the
+    # primary's bare WAITING_TOUCH/FILLED strings reused on the same
+    # `status` column -- same "distinct causes get distinct names"
+    # convention this file already uses elsewhere (CLOSED_EXPIRED vs
+    # CLOSED_ENTRY_CANCELED on ExecutorOrder, see that class's own history).
+    rearm_status = Column(String, nullable=True)         # NULL until a primary C5_EXIT close fires REARM_WATCH
+    rearm_cross_time = Column(DateTime, nullable=True)
+    rearm_cross_price = Column(Float, nullable=True)
+    rearm_rsi_4h_at_cross = Column(Float, nullable=True)  # RE-CROSS RSI, NOT the primary's own rsi_4h_at_cross above -- F_A and the tercile re-check both read THIS value for the re-arm leg
+    rearm_tercile_skipped = Column(Boolean, nullable=True)
+    rearm_fill_time = Column(DateTime, nullable=True)
+    rearm_fill_price = Column(Float, nullable=True)
+    # The re-arm's OWN waiting-for-touch boundary -- 90 confirmed 5m bars
+    # (7.5h) from rearm_cross_time, computed as wall-clock arithmetic the
+    # same way journey_cap_at above is (cross_time + JOURNEY_CAP_SECONDS),
+    # NOT a reuse of journey_cap_at itself -- a materially different, much
+    # tighter window. See gate_traveler.py::REARM_TOUCH_CAP_SECONDS. A
+    # filled re-arm trade's own D3 TIME exit still uses the ORIGINAL
+    # journey_cap_at above, unchanged -- these are two different boundaries
+    # for two different things, see TRAVELER_D1_D2_D3_SPEC.md's own
+    # "re-anchored to re-fill... TIME = journey cap" wording.
+    rearm_entry_expires_at = Column(DateTime, nullable=True)
+    rearm_last_transition_reason = Column(String, nullable=True)
 
 
 # ---------------------------------------------------------
@@ -2272,6 +2339,14 @@ class ExecutorOrder(Base):
     # (traveler_plan_id, account_id) unique constraint below is a no-op for
     # those rows (NULLs are never equal to each other in a unique index).
     traveler_plan_id = Column(Integer, nullable=True, index=True)   # traveler_plans.id
+    # 2026-10-06 (R1 re-arm, Andy ruling 15:24 CT): distinguishes a re-arm
+    # order from the primary order for the SAME (traveler_plan_id,
+    # account_id) pair -- see the updated unique constraint below. Always
+    # explicitly False/True, never NULL, for any GATE_TRAVELER order (the
+    # NULL-uniqueness quirk the comment above describes only matters for
+    # legacy v1/v2 rows, which have traveler_plan_id NULL regardless and
+    # are already a no-op under either constraint).
+    is_rearm = Column(Boolean, nullable=False, default=False)
     account_id = Column(Integer, nullable=False, index=True)      # executor_accounts.id
     mode = Column(String, nullable=False)   # snapshot of account.mode at decision time
 
@@ -2397,12 +2472,26 @@ class ExecutorOrder(Base):
     t2_reval_fuel_verdict = Column(String, nullable=True)
     t2_reval_micro_regime = Column(String, nullable=True)
 
+    # 2026-10-06 (R1 re-arm): BOTH constraints below now include is_rearm --
+    # a re-arm order for a GATE_TRAVELER account has the SAME trade_plan_id
+    # AND the SAME traveler_plan_id as its own primary order (the comment
+    # above: trade_plan_id "is STILL populated too, pointing at the SAME-
+    # session TradePlan row TravelerPlan was created alongside"), so without
+    # this fix the FIRST constraint alone would still reject a legitimate
+    # second (re-arm) order even after the second constraint was fixed.
+    # Preserves the exact original idempotency guarantee for each leg
+    # independently -- still impossible to double-place the same leg twice
+    # -- while allowing exactly one primary (is_rearm=False) and one re-arm
+    # (is_rearm=True) row per (plan, account). is_rearm is non-nullable
+    # (always False/True, never NULL) for any row where trade_plan_id/
+    # traveler_plan_id are populated, so this is a real, enforced
+    # constraint for those rows, not a NULL-uniqueness no-op.
     __table_args__ = (
-        UniqueConstraint("trade_plan_id", "account_id", name="uq_executor_order_plan_account"),
+        UniqueConstraint("trade_plan_id", "account_id", "is_rearm", name="uq_executor_order_plan_account"),
         # Phase 2: same idempotency guarantee for GATE_TRAVELER orders, keyed
         # off traveler_plan_id instead -- a no-op constraint for every row
         # where traveler_plan_id is NULL (all v1/v2 orders).
-        UniqueConstraint("traveler_plan_id", "account_id", name="uq_executor_order_traveler_account"),
+        UniqueConstraint("traveler_plan_id", "account_id", "is_rearm", name="uq_executor_order_traveler_account"),
     )
 
 

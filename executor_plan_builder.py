@@ -288,6 +288,7 @@ async def _size_and_check_order(
 
 async def build_hypothetical_traveler_order(
     db: Session, traveler_plan_row: TravelerPlan, account: ExecutorAccount, risk_state: ExecutorRiskState,
+    is_rearm: bool = False,
 ) -> Dict[str, Any]:
     """GATE_TRAVELER's plan builder -- sizing/leverage/liquidation core
     (_size_and_check_order()), fed from TravelerPlan. Idempotency is keyed on
@@ -302,7 +303,19 @@ async def build_hypothetical_traveler_order(
     rsi_4h_at_lock is v2-only now), and passed through as compute_stake()'s
     sizing_multiplier -- a dollar-ledger-only scale, per that function's
     own docstring.
-    """
+
+    is_rearm (2026-10-06, R1 re-arm, Andy ruling 15:24 CT): True for the
+    re-arm leg -- the caller is executor_engine.process_traveler_rearm_
+    cross()/process_traveler_rearm_fill(), never the primary's own process_
+    traveler_cross()/process_traveler_fill(). Entry/stop/T1 are UNCHANGED
+    by this flag -- TRAVELER_D1_D2_D3_SPEC.md's own "levels frozen from
+    lock" wording means the re-arm reuses the SAME breakout_trigger/
+    breakdown_trigger/stop_price/t1_price this row already has, never
+    recomputed. The only things that actually change are: (a) which RSI
+    value feeds F_A (rearm_rsi_4h_at_cross, the RE-cross RSI, not the
+    primary's own rsi_4h_at_cross), and (b) the dedup key below (is_rearm
+    is now part of the lookup, so a primary order's existence no longer
+    blocks the re-arm leg, and vice versa)."""
     base = {
         "trade_plan_id": traveler_plan_row.id,  # audit/join convenience only -- see database.py's own comment on this
         "traveler_plan_id": traveler_plan_row.id,
@@ -310,6 +323,7 @@ async def build_hypothetical_traveler_order(
         "mode": account.mode,
         "symbol": traveler_plan_row.symbol,
         "direction": traveler_plan_row.direction,
+        "is_rearm": is_rearm,
         "t1_price": traveler_plan_row.t1_price, "t2_price": None, "t3_price": None,  # E1 has no T2/T3 -- full exit at T1
     }
 
@@ -318,9 +332,20 @@ async def build_hypothetical_traveler_order(
         decision = "SKIPPED_KILL_SWITCH" if "kill switch" in reason else "SKIPPED_ACCOUNT_INACTIVE"
         return {**base, "decision": decision, "decision_reason": reason}
 
-    dup = db.query(ExecutorOrder).filter_by(account_id=account.id, traveler_plan_id=traveler_plan_row.id).first()
+    # 2026-10-06: is_rearm is now part of the dedup key -- a primary order
+    # already existing for this (plan, account) must NOT block the re-arm
+    # leg (a real, legitimate second order), and a re-arm order already
+    # existing must still block a SECOND re-arm attempt (the spec's own
+    # "ONE re-arm max per lock day"). Each leg's own idempotency guarantee
+    # stays exactly as strong as it was before this change -- see
+    # database.py's matching UniqueConstraint update for the DB-level
+    # backstop.
+    dup = db.query(ExecutorOrder).filter_by(
+        account_id=account.id, traveler_plan_id=traveler_plan_row.id, is_rearm=is_rearm,
+    ).first()
     if dup is not None:
-        return {**base, "decision": "SKIPPED_ALREADY_IN_TRADE", "decision_reason": "an order already exists for this exact traveler plan + account"}
+        leg = "re-arm" if is_rearm else "primary"
+        return {**base, "decision": "SKIPPED_ALREADY_IN_TRADE", "decision_reason": f"a {leg} order already exists for this exact traveler plan + account"}
 
     # One-trade-at-a-time per account, same reasoning as build_hypothetical_
     # order() above -- checked against this bot's own WOULD_PLACE record
@@ -354,8 +379,15 @@ async def build_hypothetical_traveler_order(
     # moment a real resting order actually needs it, instead of waiting on
     # a candle-simulated touch that a real order should never have been
     # gated behind in the first place.
+    # 2026-10-06: the entry trigger, stop, and T1 are ALL unchanged for the
+    # re-arm leg -- "levels frozen from lock" (TRAVELER_D1_D2_D3_SPEC.md) --
+    # it's the SAME breakout_trigger/breakdown_trigger/stop_price this row
+    # already has (t1_price is already read into `base` above, unconditionally).
+    # The only re-arm-specific input is F_A's own RSI source: the RE-cross
+    # RSI (rearm_rsi_4h_at_cross), never the primary's own rsi_4h_at_cross.
     trigger = traveler_plan_row.breakout_trigger if traveler_plan_row.direction == "LONG" else traveler_plan_row.breakdown_trigger
-    f_a = executor_sizing.f_a_multiplier(traveler_plan_row.rsi_4h_at_cross, traveler_plan_row.direction)
+    rsi_for_sizing = traveler_plan_row.rearm_rsi_4h_at_cross if is_rearm else traveler_plan_row.rsi_4h_at_cross
+    f_a = executor_sizing.f_a_multiplier(rsi_for_sizing, traveler_plan_row.direction)
     return await _size_and_check_order(
         db, base, traveler_plan_row.symbol, traveler_plan_row.direction,
         trigger, traveler_plan_row.stop_price, account, risk_state,

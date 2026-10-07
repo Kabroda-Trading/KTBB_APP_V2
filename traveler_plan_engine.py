@@ -32,6 +32,41 @@
 #   FILLED / TERCILE_SKIPPED / DONE -> terminal, not polled (see the query
 #                        filter in run_traveler_plan_loop() below).
 #
+# R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT, TRAVELER_D1_D2_D3_SPEC.md "R1
+# RE-ARM AMENDMENT", Arm A only -- same-lock-day): a SEPARATE field,
+# TravelerPlan.rearm_status, tracks the re-arm leg's own progression --
+# never conflated with the primary's own `status` column above, which stays
+# exactly what it was at the primary fill. Set to REARM_WATCH by mgmt_e1_
+# stack.start_rearm_watch_if_eligible(), called right after a PRIMARY order
+# closes with exit_reason=="C5_EXIT" specifically (not T1/STOP/TIME/
+# BBWP_EXIT). Per-rearm_status routing, same 60s poll cycle:
+#   REARM_WATCH        -> gate_traveler.advance_rearm_watch() (5m + 1h/4h
+#                          candles) -- the window closes at the next lock
+#                          (session_manager.next_lock_utc()) with no re-
+#                          cross -> REARM_WINDOW_CLOSED (terminal); a
+#                          qualifying re-cross -> REARM_TERCILE_SKIPPED
+#                          (terminal) or REARM_WAITING_TOUCH, which ALSO
+#                          fires executor_engine.process_traveler_rearm_
+#                          cross() immediately (LIVE accounts' real re-arm
+#                          entry order, same "place at the cross, not after
+#                          a later-decided touch" reasoning as the primary's
+#                          own 2026-09-27 fix).
+#   REARM_WAITING_TOUCH -> gate_traveler.advance_rearm_waiting_touch() (5m
+#                          candles since rearm_cross_time) -- bounded by
+#                          the 90-bar/7.5h cap (NOT the primary's own 7-day
+#                          journey_cap_at), opposite trigger break, or a
+#                          wick touch -> REARM_FILLED (fires process_
+#                          traveler_rearm_fill(), DRY_RUN bookkeeping only,
+#                          same split as the primary's own fill hook).
+#   REARM_TERCILE_SKIPPED / REARM_WAITING_TOUCH / REARM_FILLED /
+#   REARM_WINDOW_CLOSED -> REARM_FILLED is the only non-terminal one of
+#                          these four for THIS field (it then feeds MGMT_
+#                          E1_STACK's own D3 walk exactly like a primary
+#                          FILLED order does -- see _open_dry_run_e1_
+#                          orders() below, which needs NO changes at all
+#                          for re-arm orders, since it already selects on
+#                          ExecutorOrder fields alone, not TravelerPlan.status).
+#
 # THIS FILE ALSO drives MGMT_E1_STACK's D3 walk for GATE_TRAVELER's DRY_RUN
 # orders (mgmt_e1_stack.py) -- NOT executor_live_engine.py's own poll_open_
 # position()/run_executor_position_loop(), which are exchange-POSITION-
@@ -54,6 +89,7 @@ import executor_accounts
 import gate_traveler
 import mgmt_e1_stack
 import market_data
+import session_manager
 
 # E1 has no partial T1 leg (full exit at whichever trigger fires first) --
 # same f"CLOSED_{exit_reason}" naming convention executor_live_engine.py's
@@ -179,6 +215,83 @@ async def _apply(db, row: TravelerPlan, updates, symbol: str) -> None:
         _notify_traveler_transition(prev_status, row, symbol)
 
 
+async def _advance_rearm_one(db, row: TravelerPlan, now_utc: datetime) -> None:
+    """R1 re-arm (2026-10-06) -- the rearm_status counterpart to
+    _advance_one() above. See this file's own header for the full state
+    table; dispatches on rearm_status exactly like _advance_one() dispatches
+    on status, reusing the SAME Bitunix fetch calls (this function lives
+    inside the same asyncio.wait_for() row-timeout protection as every
+    other row in run_traveler_plan_loop() below, so it gets the 2026-09-30
+    hang fix automatically, not as a separate change)."""
+    symbol = row.symbol
+    candles_5m = market_data.confirmed_5m_closes(await market_data.fetch_bitunix_5m(symbol, target_bars=310))
+    if not candles_5m:
+        return
+
+    if row.rearm_status == "REARM_WATCH":
+        # Exhaustion-cleared check -- the SAME mgmt_e1_stack.check_c5_or_
+        # bbwp() condition that fired the primary's own C5_EXIT, now
+        # evaluated fresh each poll; gate_traveler.advance_rearm_watch()
+        # takes the boolean result, not raw candles, so it never needs to
+        # import mgmt_e1_stack itself (this file's own header: D1/D2 stays
+        # decoupled from D3). 2026-09-27 (Andy ruling 14:55 CT): Bitunix,
+        # not Kraken, same migration every other traveler fetch already
+        # has -- C5's own 4H leg and BBWP read the SAME fetch.
+        candles_1h = await market_data.fetch_bitunix_1h(symbol, target_bars=200)
+        candles_4h = await market_data.fetch_bitunix_4h(symbol, target_bars=200)
+        if not candles_1h or not candles_4h:
+            return  # can't check exhaustion-cleared this poll -- try again next cycle, never guess
+        c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(
+            candles_1h, candles_4h, now_ts=now_utc.timestamp(), candles_4h_bbwp=candles_4h)
+        exhaustion_cleared = not (c5_hit or bbwp_hit)
+
+        plan_dict = {
+            "direction": row.direction,
+            "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
+        }
+        rearm_watch_deadline = session_manager.next_lock_utc(now_utc)
+        updates = gate_traveler.advance_rearm_watch(
+            plan_dict, candles_5m, candles_4h, now_utc,
+            exhaustion_cleared=exhaustion_cleared, rearm_watch_deadline=rearm_watch_deadline,
+        )
+        await _apply_rearm(db, row, updates, symbol)
+        # 2026-10-06: same "place the real order AT the confirmed re-cross,
+        # not after a later-decided touch" reasoning as the primary's own
+        # 2026-09-27 fix (_notify_executor_cross() below) -- only fires on
+        # a genuine REARM_WATCH -> REARM_WAITING_TOUCH transition (gate
+        # passed); REARM_TERCILE_SKIPPED takes no trade, nothing to arm.
+        if updates and updates.get("rearm_status") == "REARM_WAITING_TOUCH":
+            await _notify_executor_rearm_cross(db, row, symbol)
+
+    elif row.rearm_status == "REARM_WAITING_TOUCH":
+        candles_wide = market_data.confirmed_5m_closes(await market_data.fetch_bitunix_5m(symbol, target_bars=2016))
+        plan_dict = {
+            "direction": row.direction,
+            "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
+            "opposite_trigger": row.opposite_trigger,
+            "rearm_cross_time": _as_utc(row.rearm_cross_time),
+            "rearm_entry_expires_at": _as_utc(row.rearm_entry_expires_at),
+        }
+        updates = gate_traveler.advance_rearm_waiting_touch(plan_dict, candles_wide, now_utc)
+        if updates and updates.get("rearm_status") == "REARM_FILLED":
+            await _apply_rearm(db, row, updates, symbol)
+            await _notify_executor_rearm_fill(db, row, symbol)
+            return
+        await _apply_rearm(db, row, updates, symbol)
+
+
+async def _apply_rearm(db, row: TravelerPlan, updates, symbol: str) -> None:
+    if not updates:
+        return
+    prev_rearm_status = row.rearm_status
+    for k, v in updates.items():
+        setattr(row, k, v)
+    if row.rearm_status != prev_rearm_status:
+        print(f"|| TRAVELER PLAN (RE-ARM) || {symbol} {row.session_id} {row.date_key}: "
+              f"{prev_rearm_status} -> {row.rearm_status} -- {updates.get('rearm_last_transition_reason')}")
+        _notify_traveler_rearm_transition(prev_rearm_status, row, symbol)
+
+
 def _notify_traveler_transition(prev_status: str, row: TravelerPlan, symbol: str) -> None:
     """Ruling C (DeepSeek, relayed by Andy 2026-09-15): ARMED/DONE emails
     for GATE_TRAVELER -- same non-blocking, own-try/except pattern as
@@ -195,6 +308,26 @@ def _notify_traveler_transition(prev_status: str, row: TravelerPlan, symbol: str
             notify.send_admin_email(subject, body)
     except Exception as e:
         print(f"|| TRAVELER PLAN || Notification failed for {symbol}: {e}")
+
+
+def _notify_traveler_rearm_transition(prev_rearm_status, row: TravelerPlan, symbol: str) -> None:
+    """R1 re-arm (2026-10-06) -- the rearm_status counterpart to
+    _notify_traveler_transition() above. Plan-level (REARM_WATCH-entered/
+    REARM_WINDOW_CLOSED/REARM_TERCILE_SKIPPED), radar-class, same
+    send_admin_email() merged-list routing as the primary's own ARMED/DONE
+    emails -- not account-specific, so NOT the L4 per-account rule (that
+    applies to fills/opens/closes, handled separately by _notify_traveler_
+    management_event() below, unchanged for re-arm orders)."""
+    try:
+        import notify
+        import traveler_plan_notify
+
+        mail = traveler_plan_notify.notification_for_traveler_rearm_transition(prev_rearm_status, row.__dict__)
+        if mail:
+            subject, body = mail
+            notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| TRAVELER PLAN (RE-ARM) || Notification failed for {symbol}: {e}")
 
 
 def _notify_traveler_management_event(order: ExecutorOrder) -> None:
@@ -220,6 +353,7 @@ def _notify_traveler_management_event(order: ExecutorOrder) -> None:
             "realized_pnl_r": order.realized_pnl_r, "traveler_plan_id": order.traveler_plan_id,
             "account_id": order.account_id,   # 2026-09-27 item 4 -- which account this closure applies to
             "approximated": False,  # DRY_RUN never approximates -- candle-sourced, deterministic (mgmt_e1_stack.py)
+            "is_rearm": order.is_rearm,  # 2026-10-06 -- subject-line clarity only, see build_traveler_management_event_email()
         }
         subject, body = traveler_plan_notify.build_traveler_management_event_email(order_dict, is_live=False)
         # 2026-09-28 (Andy L4 ruling): a DRY_RUN close is still THIS
@@ -258,6 +392,34 @@ async def _notify_executor_cross(db, row: TravelerPlan, symbol: str) -> None:
         await executor_engine.process_traveler_cross(db, row)
     except Exception as e:
         print(f"|| EXECUTOR || Traveler cross hook failed for {symbol}: {e}")
+
+
+async def _notify_executor_rearm_fill(db, row: TravelerPlan, symbol: str) -> None:
+    """R1 re-arm (2026-10-06) -- the rearm_status counterpart to
+    _notify_executor() above: fires once, on the candle-simulated
+    REARM_WAITING_TOUCH -> REARM_FILLED transition, DRY_RUN accounts only
+    (LIVE accounts are armed earlier, at the re-cross -- see _notify_
+    executor_rearm_cross() below). Same swallow-every-exception contract."""
+    try:
+        import executor_engine
+        await executor_engine.process_traveler_rearm_fill(db, row)
+    except Exception as e:
+        print(f"|| EXECUTOR || Traveler re-arm fill hook failed for {symbol}: {e}")
+
+
+async def _notify_executor_rearm_cross(db, row: TravelerPlan, symbol: str) -> None:
+    """R1 re-arm (2026-10-06) -- the rearm_status counterpart to
+    _notify_executor_cross() above: fires once, on the confirmed REARM_
+    WATCH -> REARM_WAITING_TOUCH transition (re-cross + tercile-gate
+    pass) -- this is where a LIVE account's real re-arm resting entry
+    order actually gets placed on the exchange, at the (same) trigger,
+    same "place at the cross, not after a later-decided touch" reasoning
+    as the primary's own 2026-09-27 fix."""
+    try:
+        import executor_engine
+        await executor_engine.process_traveler_rearm_cross(db, row)
+    except Exception as e:
+        print(f"|| EXECUTOR || Traveler re-arm cross hook failed for {symbol}: {e}")
 
 
 def _open_dry_run_e1_orders(db) -> list:
@@ -349,6 +511,17 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
         executor_order_id=order.id, actor="system")
     _notify_traveler_management_event(order)
 
+    # R1 re-arm (2026-10-06, Andy ruling 15:24 CT) -- mgmt_e1_stack.start_
+    # rearm_watch_if_eligible() is the ONE shared guard (its own docstring
+    # has the full "why"): only a PRIMARY order (is_rearm=False) closing
+    # via C5_EXIT specifically starts the watch, and only once per plan.
+    # traveler_plan is already fetched above, for journey_cap_at -- reused
+    # here, not re-queried.
+    if mgmt_e1_stack.start_rearm_watch_if_eligible(traveler_plan, order):
+        print(f"|| TRAVELER PLAN (RE-ARM) || {symbol} {order.account_id}: "
+              f"primary closed via C5_EXIT -- REARM_WATCH entered")
+        _notify_traveler_rearm_transition(None, traveler_plan, symbol)
+
     # Ruling D (DeepSeek, relayed by Andy 2026-09-15): feed the SAME
     # ledger-compounding path a real closed LIVE trade uses (executor_
     # live_engine.py's own poll_open_position() call), symmetrically with
@@ -398,6 +571,23 @@ async def run_traveler_plan_loop():
                 except Exception as _row_err:
                     db.rollback()
                     print(f"|| TRAVELER PLAN || Row error {row.symbol} {row.session_id} {row.date_key}: {_row_err}")
+
+            # R1 re-arm (2026-10-06) -- a SEPARATE query on rearm_status, not
+            # status (see this file's own header for the full field split).
+            # A plan that enters REARM_WATCH THIS tick (via the D3 loop
+            # below, same cycle) is picked up on the NEXT poll, not this one
+            # -- same one-cycle tolerance every other transition in this
+            # loop already accepts.
+            rearm_rows = db.query(TravelerPlan).filter(
+                TravelerPlan.rearm_status.in_(["REARM_WATCH", "REARM_WAITING_TOUCH"])
+            ).all()
+            for row in rearm_rows:
+                try:
+                    await asyncio.wait_for(_advance_rearm_one(db, row, now_utc), timeout=_ROW_TIMEOUT_SECONDS)
+                    db.commit()
+                except Exception as _rearm_err:
+                    db.rollback()
+                    print(f"|| TRAVELER PLAN (RE-ARM) || Row error {row.symbol} {row.session_id} {row.date_key}: {_rearm_err}")
 
             # MGMT_E1_STACK's own D3 walk, same 60s cycle -- see this file's
             # own header for why it lives here, not executor_live_engine.py.

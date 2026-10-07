@@ -57,6 +57,46 @@ C5_LOOKBACK_BARS = 6
 MGMT_E1_TERMINAL_STATES = ("CLOSED_STOP", "CLOSED_C5_EXIT", "CLOSED_BBWP_EXIT", "CLOSED_T1", "CLOSED_TIME", "CLOSED_ERROR")
 
 
+def start_rearm_watch_if_eligible(traveler_plan, order) -> bool:
+    """2026-10-06 (R1 re-arm, Andy ruling 15:24 CT) -- the ONE shared
+    REARM_WATCH-trigger guard, called right after EITHER poll site
+    (traveler_plan_engine.py's DRY_RUN walk, executor_live_e1_engine.py's
+    LIVE poll) closes an order, same "one shared implementation so DRY_RUN
+    and LIVE can never drift" reasoning as MGMT_E1_TERMINAL_STATES above.
+    `traveler_plan`/`order` are the real ORM rows (not plain dicts -- this
+    function mutates traveler_plan directly, unlike gate_traveler.py's own
+    pure functions, since its whole job IS the state transition + its own
+    idempotency guard, not a value computation the caller applies later).
+
+    Three guards, all required:
+    1. order.is_rearm must be False -- a re-arm order closing via C5_EXIT
+       does NOT trigger a SECOND re-arm ("ONE re-arm max per lock day",
+       TRAVELER_D1_D2_D3_SPEC.md).
+    2. order.exit_reason must be exactly "C5_EXIT" -- not STOP/T1/TIME/
+       BBWP_EXIT (the study's own re-arm population was C5_EXIT journeys
+       only; BBWP-only exits were explicitly excluded, see lab_rearm_
+       after_c5_results.md's own disclosed-deviations section).
+    3. traveler_plan.rearm_status must still be None -- idempotent against
+       multiple accounts' orders for the SAME plan closing via C5_EXIT in
+       the same poll tick (deterministic market data means they normally
+       all agree anyway, but this guard makes the SECOND call a safe no-op
+       regardless of ordering).
+
+    Returns True if REARM_WATCH was just entered (the caller can use this
+    to decide whether to fire the REARM_WATCH-entered notification)."""
+    if order.is_rearm:
+        return False
+    if order.exit_reason != "C5_EXIT":
+        return False
+    if traveler_plan is None or traveler_plan.rearm_status is not None:
+        return False
+    traveler_plan.rearm_status = "REARM_WATCH"
+    traveler_plan.rearm_last_transition_reason = (
+        "primary journey closed via C5_EXIT -- watching for a re-arm until the next lock"
+    )
+    return True
+
+
 def advance(
     order: Dict[str, Any],
     candles_5m: List[Dict[str, Any]],

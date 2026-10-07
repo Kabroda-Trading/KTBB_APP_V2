@@ -332,3 +332,175 @@ def test_rsi_at_cross_none_inputs():
     assert gt.rsi_at_cross(None, 1000) is None
     assert gt.rsi_at_cross([{"close": 1.0, "time": 0}] * 20, None) is None
     assert gt.rsi_at_cross([], 1000) is None
+
+
+# ==============================================================================
+# R1 RE-ARM (2026-10-06, Andy ruling 15:24 CT) -- advance_rearm_watch() /
+# advance_rearm_waiting_touch(). Reuses CROSS_EPOCH/LONG_IN_ZONE_H4/
+# LONG_SKIP_H4/SHORT_IN_ZONE_H4 from the advance_waiting_cross() section
+# above -- same RSI zones, same tercile_skip()/FULL_D1_CUTS, unchanged.
+# ==============================================================================
+
+DEADLINE = NOW + datetime.timedelta(hours=6)   # "next 13:00 UTC lock" stand-in
+
+
+def _rearm_watch_plan(**extra):
+    d = {"direction": "LONG", "breakout_trigger": 100.0, "breakdown_trigger": 90.0}
+    d.update(extra)
+    return d
+
+
+def test_advance_rearm_watch_stays_watching_when_exhaustion_still_active():
+    # Even with a qualifying re-cross candle, exhaustion_cleared=False must
+    # keep the plan in REARM_WATCH -- the condition is "exhaustion family
+    # FALSE on a confirmed bar", not "price re-crossed."
+    plan = _rearm_watch_plan()
+    candles = [{"close": 105.0, "time": CROSS_EPOCH}]
+    result = gt.advance_rearm_watch(plan, candles, LONG_IN_ZONE_H4, NOW, exhaustion_cleared=False, rearm_watch_deadline=DEADLINE)
+    assert result is None
+
+
+def test_advance_rearm_watch_stays_watching_when_no_re_cross_yet():
+    plan = _rearm_watch_plan()
+    candles = [{"close": 95.0, "time": CROSS_EPOCH}]  # inside the box
+    result = gt.advance_rearm_watch(plan, candles, LONG_IN_ZONE_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE)
+    assert result is None
+
+
+def test_advance_rearm_watch_window_closed_at_deadline_with_no_recross():
+    plan = _rearm_watch_plan()
+    candles = [{"close": 95.0, "time": CROSS_EPOCH}]
+    past_deadline = DEADLINE + datetime.timedelta(minutes=1)
+    result = gt.advance_rearm_watch(plan, candles, LONG_IN_ZONE_H4, past_deadline, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE)
+    assert result["rearm_status"] == "REARM_WINDOW_CLOSED"
+    assert "no re-cross" in result["rearm_last_transition_reason"]
+
+
+def test_advance_rearm_watch_long_not_skipped_goes_to_waiting_touch():
+    plan = _rearm_watch_plan()
+    candles = [{"close": 95.0, "time": CROSS_EPOCH - 300}, {"close": 105.0, "time": CROSS_EPOCH}]
+    result = gt.advance_rearm_watch(plan, candles, LONG_IN_ZONE_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE)
+    assert result["rearm_status"] == "REARM_WAITING_TOUCH"
+    assert result["rearm_cross_price"] == 105.0
+    assert result["rearm_tercile_skipped"] is False
+    assert result["rearm_rsi_4h_at_cross"] == pytest.approx(gt.rsi_at_cross(LONG_IN_ZONE_H4, CROSS_EPOCH))
+    expected_cross_time = datetime.datetime.fromtimestamp(CROSS_EPOCH, tz=datetime.timezone.utc)
+    assert result["rearm_cross_time"] == expected_cross_time
+    # the load-bearing 90-bar (7.5h) cap -- NOT the primary's own 7-day journey_cap_at
+    assert result["rearm_entry_expires_at"] == expected_cross_time + datetime.timedelta(seconds=gt.REARM_TOUCH_CAP_SECONDS)
+    assert result["rearm_entry_expires_at"] == expected_cross_time + datetime.timedelta(hours=7.5)
+
+
+def test_advance_rearm_watch_tercile_skipped():
+    plan = _rearm_watch_plan()
+    candles = [{"close": 95.0, "time": CROSS_EPOCH - 300}, {"close": 105.0, "time": CROSS_EPOCH}]
+    result = gt.advance_rearm_watch(plan, candles, LONG_SKIP_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE)
+    assert result["rearm_status"] == "REARM_TERCILE_SKIPPED"
+    assert result["rearm_tercile_skipped"] is True
+    assert "not taken" in result["rearm_last_transition_reason"]
+
+
+def test_advance_rearm_watch_short_side():
+    plan = _rearm_watch_plan(direction="SHORT")
+    candles = [{"close": 105.0, "time": CROSS_EPOCH - 300}, {"close": 85.0, "time": CROSS_EPOCH}]
+    result = gt.advance_rearm_watch(plan, candles, SHORT_IN_ZONE_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE)
+    assert result["rearm_status"] == "REARM_WAITING_TOUCH"
+    assert result["rearm_cross_price"] == 85.0
+
+
+def test_advance_rearm_watch_requires_same_side_as_primary_direction():
+    # direction=LONG -- a close BELOW bd must NOT count as a re-cross (re-
+    # arm only ever watches the SAME trigger the primary already took,
+    # never the opposite one).
+    plan = _rearm_watch_plan(direction="LONG")
+    candles = [{"close": 85.0, "time": CROSS_EPOCH}]  # below bd=90, not above bo=100
+    result = gt.advance_rearm_watch(plan, candles, LONG_IN_ZONE_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE)
+    assert result is None
+
+
+def test_advance_rearm_watch_bad_direction_returns_none():
+    plan = _rearm_watch_plan(direction=None)
+    candles = [{"close": 105.0, "time": CROSS_EPOCH}]
+    assert gt.advance_rearm_watch(plan, candles, LONG_IN_ZONE_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE) is None
+
+
+def test_advance_rearm_watch_no_candles_returns_none():
+    plan = _rearm_watch_plan()
+    assert gt.advance_rearm_watch(plan, [], LONG_IN_ZONE_H4, NOW, exhaustion_cleared=True, rearm_watch_deadline=DEADLINE) is None
+
+
+# ------------------------------------------------------------------ advance_rearm_waiting_touch
+
+def _rearm_touch_plan(**extra):
+    rearm_cross_time = NOW - datetime.timedelta(hours=2)
+    d = {
+        "direction": "LONG", "breakout_trigger": 100.0, "breakdown_trigger": 90.0,
+        "opposite_trigger": 90.0,
+        "rearm_cross_time": rearm_cross_time,
+        "rearm_entry_expires_at": rearm_cross_time + datetime.timedelta(seconds=gt.REARM_TOUCH_CAP_SECONDS),
+    }
+    d.update(extra)
+    return d
+
+
+def test_advance_rearm_waiting_touch_no_bars_after_recross_returns_none():
+    plan = _rearm_touch_plan()
+    ct = plan["rearm_cross_time"].timestamp()
+    candles = [_c(105.0, ct)]  # the re-cross bar itself, not after it
+    assert gt.advance_rearm_waiting_touch(plan, candles, NOW) is None
+
+
+def test_advance_rearm_waiting_touch_fills_on_first_wick_touch_of_trigger():
+    plan = _rearm_touch_plan()
+    ct = plan["rearm_cross_time"].timestamp()
+    candles = [
+        _c(105.0, ct),
+        _c(103.0, ct + 300),
+        _c(102.0, ct + 600, low=99.5, high=103.0),   # close stays above trigger; the WICK touches -- FILL
+    ]
+    result = gt.advance_rearm_waiting_touch(plan, candles, NOW)
+    assert result["rearm_status"] == "REARM_FILLED"
+    assert result["rearm_fill_price"] == 100.0
+    assert result["rearm_fill_time"] == datetime.datetime.fromtimestamp(ct + 600, tz=datetime.timezone.utc)
+
+
+def test_advance_rearm_waiting_touch_short_side_fills_on_wick_touch_of_trigger():
+    plan = _rearm_touch_plan(direction="SHORT", opposite_trigger=100.0)
+    ct = plan["rearm_cross_time"].timestamp()
+    candles = [
+        _c(85.0, ct),
+        _c(89.0, ct + 300, low=88.0, high=90.5),   # close stays below trigger; the WICK (high) touches -- FILL
+    ]
+    result = gt.advance_rearm_waiting_touch(plan, candles, NOW)
+    assert result["rearm_status"] == "REARM_FILLED"
+    assert result["rearm_fill_price"] == 90.0
+
+
+def test_advance_rearm_waiting_touch_opposite_trigger_break_closes_window():
+    plan = _rearm_touch_plan()
+    ct = plan["rearm_cross_time"].timestamp()
+    candles = [_c(85.0, ct + 300)]   # a confirmed close through bd=90 -- opposite break, before any touch
+    result = gt.advance_rearm_waiting_touch(plan, candles, NOW)
+    assert result["rearm_status"] == "REARM_WINDOW_CLOSED"
+    assert "opposite trigger" in result["rearm_last_transition_reason"]
+
+
+def test_advance_rearm_waiting_touch_90_bar_cap_expires_with_no_touch():
+    # The load-bearing distinction from the primary's own advance_waiting_
+    # touch(): this must expire on the 90-bar/7.5h cap, NOT the primary's
+    # 7-day journey_cap_at -- there is no journey_cap_at field read here at
+    # all, only rearm_entry_expires_at.
+    plan = _rearm_touch_plan()
+    ct = plan["rearm_cross_time"].timestamp()
+    candles = [_c(105.0, ct + 300), _c(106.0, ct + 600)]   # never touches, no opposite break either
+    past_rearm_cap = plan["rearm_entry_expires_at"] + datetime.timedelta(minutes=1)
+    result = gt.advance_rearm_waiting_touch(plan, candles, past_rearm_cap)
+    assert result["rearm_status"] == "REARM_WINDOW_CLOSED"
+    assert "90-bar" in result["rearm_last_transition_reason"]
+
+
+def test_advance_rearm_waiting_touch_no_fill_yet_returns_none():
+    plan = _rearm_touch_plan()
+    ct = plan["rearm_cross_time"].timestamp()
+    candles = [_c(105.0, ct + 300), _c(106.0, ct + 600)]
+    assert gt.advance_rearm_waiting_touch(plan, candles, NOW) is None   # NOW is well before rearm_entry_expires_at

@@ -82,3 +82,20 @@ def resolve_anchor_time(session_id: str) -> dict:
         "lock_end_ts": pkt["anchor_time"] + 1800,
         "status": "ACTIVE"
     }
+
+
+def next_lock_utc(now_utc: datetime, session_id: str = "us_ny_futures") -> datetime:
+    """2026-10-06 (R1 re-arm, Andy ruling 15:24 CT): the next session lock
+    (anchor + 30min calibration window) -- the boundary TRAVELER_D1_D2_D3_
+    SPEC.md's own "REARM_WATCH... ends at next 13:00 UTC lock" wording
+    describes. Deliberately NOT a hardcoded `datetime(..., 13, 0)` literal
+    -- "13:00 UTC" is only true during EDT (America/New_York daylight
+    saving); during EST it's 14:00 UTC, the exact class of DST bug this
+    project already hit once this session (the "7:00->8:00 AM CT" slip,
+    2026-09-29 AGENT_LOG.md both repos). Reuses anchor_ts_for_utc_date()'s
+    own pytz-based, already-DST-correct math, called with now_utc shifted
+    forward one day so it resolves to the NEXT day's own open -- the same
+    function resolve_current_session() already uses for TODAY's anchor."""
+    config = get_session_config(session_id)
+    tomorrow_anchor_ts = anchor_ts_for_utc_date(config, now_utc + timedelta(days=1))
+    return datetime.fromtimestamp(tomorrow_anchor_ts + 1800, timezone.utc)

@@ -1202,52 +1202,61 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
         d = dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
         return round((now_utc - d).total_seconds(), 1)
 
-    out = []
-    if row is not None:
-        # 2026-09-23 -- the D3 management detail this route now also
-        # surfaces (see this route's own docstring for the full "why").
-        # Prefer a LIVE-mode order for this journey; only fall back to the
-        # most recent DRY_RUN order if no LIVE one exists. Never a blind
-        # order_by(id.desc()).first() across both modes -- see docstring.
+    def _select_mgmt_fields(plan_id: int, is_rearm: bool) -> dict:
+        """2026-09-23 -- the D3 management detail this route also surfaces.
+        Prefer a LIVE-mode order for this journey; only fall back to the
+        most recent DRY_RUN order if no LIVE one exists. Never a blind
+        order_by(id.desc()).first() across both modes.
+
+        is_rearm (2026-10-06, R1 re-arm): REAL bug fix -- without this
+        filter, a re-arm order's always-higher id would silently win the
+        selection the moment one existed, making the PRIMARY order's own
+        final state vanish from this route. Called twice below (is_rearm
+        False then True), one real field set each, never conflated."""
+        prefix = "rearm_mgmt" if is_rearm else "mgmt"
         mgmt_order = (
             db.query(_ExecutorOrder)
-            .filter(_ExecutorOrder.traveler_plan_id == row.id, _ExecutorOrder.mode == "LIVE")
+            .filter(_ExecutorOrder.traveler_plan_id == plan_id, _ExecutorOrder.mode == "LIVE", _ExecutorOrder.is_rearm == is_rearm)
             .order_by(_ExecutorOrder.id.desc()).first()
             or db.query(_ExecutorOrder)
-            .filter(_ExecutorOrder.traveler_plan_id == row.id, _ExecutorOrder.mode == "DRY_RUN")
+            .filter(_ExecutorOrder.traveler_plan_id == plan_id, _ExecutorOrder.mode == "DRY_RUN", _ExecutorOrder.is_rearm == is_rearm)
             .order_by(_ExecutorOrder.id.desc()).first()
         )
-        if mgmt_order is not None:
-            mgmt_fields = {
-                "mgmt_mode": mgmt_order.mode,
-                "mgmt_state": mgmt_order.management_state,
-                "mgmt_entry_fill_price": mgmt_order.entry_fill_price,
-                "mgmt_entry_fill_time": mgmt_order.entry_fill_time.isoformat() if mgmt_order.entry_fill_time else None,
-                "mgmt_exit_reason": mgmt_order.exit_reason,
-                "mgmt_exit_price": mgmt_order.exit_price,
-                "mgmt_exit_time": mgmt_order.exit_time.isoformat() if mgmt_order.exit_time else None,
-                "mgmt_realized_pnl_r": mgmt_order.realized_pnl_r,
-                "mgmt_c5_fired": mgmt_order.c5_fired,
-                "mgmt_bbwp_fired": mgmt_order.bbwp_fired,
-                # Computed here, not a stored column -- exit_reason alone
-                # fully and permanently determines this (the fixed 5-value
-                # MGMT_E1_STACK mapping: STOP/T1 are always real fills on
-                # both lineages; C5_EXIT/BBWP_EXIT/TIME are only ever
-                # approximated on LIVE, via _market_close_traveler_order()'s
-                # own approximated=True -- DRY_RUN's own exit price is
-                # always candle-sourced and deterministic, never approximated).
-                "mgmt_exit_approximated": (
-                    mgmt_order.mode == "LIVE" and mgmt_order.exit_reason in ("C5_EXIT", "BBWP_EXIT", "TIME")
-                ),
+        if mgmt_order is None:
+            return {
+                f"{prefix}_mode": None, f"{prefix}_state": None,
+                f"{prefix}_entry_fill_price": None, f"{prefix}_entry_fill_time": None,
+                f"{prefix}_exit_reason": None, f"{prefix}_exit_price": None, f"{prefix}_exit_time": None,
+                f"{prefix}_realized_pnl_r": None, f"{prefix}_c5_fired": None, f"{prefix}_bbwp_fired": None,
+                f"{prefix}_exit_approximated": False,
             }
-        else:
-            mgmt_fields = {
-                "mgmt_mode": None, "mgmt_state": None,
-                "mgmt_entry_fill_price": None, "mgmt_entry_fill_time": None,
-                "mgmt_exit_reason": None, "mgmt_exit_price": None, "mgmt_exit_time": None,
-                "mgmt_realized_pnl_r": None, "mgmt_c5_fired": None, "mgmt_bbwp_fired": None,
-                "mgmt_exit_approximated": False,
-            }
+        return {
+            f"{prefix}_mode": mgmt_order.mode,
+            f"{prefix}_state": mgmt_order.management_state,
+            f"{prefix}_entry_fill_price": mgmt_order.entry_fill_price,
+            f"{prefix}_entry_fill_time": mgmt_order.entry_fill_time.isoformat() if mgmt_order.entry_fill_time else None,
+            f"{prefix}_exit_reason": mgmt_order.exit_reason,
+            f"{prefix}_exit_price": mgmt_order.exit_price,
+            f"{prefix}_exit_time": mgmt_order.exit_time.isoformat() if mgmt_order.exit_time else None,
+            f"{prefix}_realized_pnl_r": mgmt_order.realized_pnl_r,
+            f"{prefix}_c5_fired": mgmt_order.c5_fired,
+            f"{prefix}_bbwp_fired": mgmt_order.bbwp_fired,
+            # Computed here, not a stored column -- exit_reason alone
+            # fully and permanently determines this (the fixed 5-value
+            # MGMT_E1_STACK mapping: STOP/T1 are always real fills on
+            # both lineages; C5_EXIT/BBWP_EXIT/TIME are only ever
+            # approximated on LIVE, via _market_close_traveler_order()'s
+            # own approximated=True -- DRY_RUN's own exit price is
+            # always candle-sourced and deterministic, never approximated).
+            f"{prefix}_exit_approximated": (
+                mgmt_order.mode == "LIVE" and mgmt_order.exit_reason in ("C5_EXIT", "BBWP_EXIT", "TIME")
+            ),
+        }
+
+    out = []
+    if row is not None:
+        mgmt_fields = _select_mgmt_fields(row.id, is_rearm=False)
+        rearm_mgmt_fields = _select_mgmt_fields(row.id, is_rearm=True)
 
         out.append({
             "id": row.id, "symbol": row.symbol, "session_id": row.session_id, "date_key": row.date_key,
@@ -1267,6 +1276,18 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
             "seconds_since_update": _seconds_stale(row.updated_at),
             "any_account_live": any_account_live,
             **mgmt_fields,
+            # R1 re-arm (2026-10-06) -- a SEPARATE field set, never
+            # conflated with the primary's own fields above.
+            "rearm_status": row.rearm_status,
+            "rearm_cross_time": row.rearm_cross_time.isoformat() if row.rearm_cross_time else None,
+            "rearm_cross_price": row.rearm_cross_price,
+            "rearm_rsi_4h_at_cross": row.rearm_rsi_4h_at_cross,
+            "rearm_tercile_skipped": row.rearm_tercile_skipped,
+            "rearm_fill_time": row.rearm_fill_time.isoformat() if row.rearm_fill_time else None,
+            "rearm_fill_price": row.rearm_fill_price,
+            "rearm_entry_expires_at": row.rearm_entry_expires_at.isoformat() if row.rearm_entry_expires_at else None,
+            "rearm_last_transition_reason": row.rearm_last_transition_reason,
+            **rearm_mgmt_fields,
         })
 
     return JSONResponse({"ok": True, "server_time": now_utc.isoformat(), "rows": out})
@@ -2254,32 +2275,46 @@ async def export_traveler_log_csv(request: Request, since: Optional[str] = None,
     plans = query.order_by(_TravelerPlanExport.date_key.asc(), _TravelerPlanExport.id.asc()).all()
 
     plan_ids = [p.id for p in plans]
+    # 2026-10-06 (R1 re-arm): keyed by (plan_id, is_rearm) now, not plan_id
+    # alone -- REAL bug fix, not just an extension. Before this, a re-arm
+    # order's always-higher id would win the LIVE-preference tie-break the
+    # moment one existed (both "LIVE", neither check looked at is_rearm),
+    # silently replacing the PRIMARY order's own row in this export with
+    # the re-arm's -- exactly the gap LIVE_BEHAVIOR_BASELINE.md's own "30/
+    # 90-day monitoring... separates re-arm stream outcomes from primary"
+    # requirement cannot tolerate.
     order_by_plan = {}
     for o in db.query(_ExecutorOrder).filter(
         _ExecutorOrder.traveler_plan_id.in_(plan_ids)
     ).order_by(_ExecutorOrder.id.desc()).all():
-        existing = order_by_plan.get(o.traveler_plan_id)
+        key = (o.traveler_plan_id, o.is_rearm)
+        existing = order_by_plan.get(key)
         if existing is None or (o.mode == "LIVE" and existing.mode != "LIVE"):
-            order_by_plan[o.traveler_plan_id] = o
+            order_by_plan[key] = o
 
     plan_columns = [c.name for c in _TravelerPlanExport.__table__.columns]
     mgmt_columns = ["mgmt_mode", "mgmt_management_state", "mgmt_entry_fill_price",
                      "mgmt_entry_fill_time", "mgmt_exit_reason", "mgmt_exit_price",
                      "mgmt_exit_time", "mgmt_realized_pnl_r", "mgmt_c5_fired", "mgmt_bbwp_fired"]
-    columns = plan_columns + mgmt_columns
+    rearm_mgmt_columns = ["rearm_mgmt_mode", "rearm_mgmt_management_state", "rearm_mgmt_entry_fill_price",
+                           "rearm_mgmt_entry_fill_time", "rearm_mgmt_exit_reason", "rearm_mgmt_exit_price",
+                           "rearm_mgmt_exit_time", "rearm_mgmt_realized_pnl_r", "rearm_mgmt_c5_fired", "rearm_mgmt_bbwp_fired"]
+    columns = plan_columns + mgmt_columns + rearm_mgmt_columns
+
+    def _order_fields(order):
+        if order is None:
+            return [None] * 10
+        return [order.mode, order.management_state, order.entry_fill_price,
+                order.entry_fill_time, order.exit_reason, order.exit_price,
+                order.exit_time, order.realized_pnl_r, order.c5_fired, order.bbwp_fired]
 
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(columns)
     for plan in plans:
         row = [getattr(plan, col) for col in plan_columns]
-        order = order_by_plan.get(plan.id)
-        if order is not None:
-            row += [order.mode, order.management_state, order.entry_fill_price,
-                    order.entry_fill_time, order.exit_reason, order.exit_price,
-                    order.exit_time, order.realized_pnl_r, order.c5_fired, order.bbwp_fired]
-        else:
-            row += [None] * len(mgmt_columns)
+        row += _order_fields(order_by_plan.get((plan.id, False)))
+        row += _order_fields(order_by_plan.get((plan.id, True)))
         writer.writerow(row)
 
     return Response(
