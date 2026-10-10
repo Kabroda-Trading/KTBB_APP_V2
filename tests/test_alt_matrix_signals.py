@@ -96,6 +96,36 @@ def test_atr14_wilder_series_seeds_then_smooths():
     assert result[19] == pytest.approx(1.0)    # constant input -> stays at 1.0
 
 
+def _gapping_candles(n=60, seed=42):
+    import random
+    rng = random.Random(seed)
+    candles, price = [], 100.0
+    for i in range(n):
+        open_p = price + rng.choice([-3.0, 0.0, 3.0])   # gaps vs prior close -> true range != high-low
+        close = open_p + rng.uniform(-0.5, 0.5)
+        candles.append({"time": i * 14400, "open": open_p, "high": open_p + 1.0, "low": open_p - 1.0, "close": close})
+        price = close
+    return candles
+
+
+def test_evaluate_d1_uses_wilder_atr_not_range_mean_as_its_live_default():
+    # The RULED default (Andy, 2026-10-09) -- proves the actual wiring in
+    # evaluate_d1(), not just that both standalone functions exist.
+    candles_4h = _gapping_candles()
+    daily = [{"time": i * 86400, "open": 100.0 - i * 0.1, "high": 150.0, "low": 50.0, "close": 100.0 + i * 0.1} for i in range(230)]
+    # Shift the 4H series onto real calendar days so evaluate_d1()'s own
+    # macro-gate lookup has real daily history behind it (see the day-
+    # alignment reasoning in the evaluate_d1 tests above).
+    shifted = [{**c, "time": 215 * 86400 + c["time"]} for c in candles_4h]
+
+    result = ams.evaluate_d1(shifted, daily, funding_rate=0.0)
+    expected_wilder = ams.atr14_wilder_series(shifted)[-1]
+    expected_range_mean = ams.atr14_range_mean_series(shifted)[-1]
+    assert abs(expected_wilder - expected_range_mean) > 0.01   # confirms this fixture actually distinguishes the two formulas
+    assert result["atr14"] == pytest.approx(expected_wilder)
+    assert result["atr14"] != pytest.approx(expected_range_mean)
+
+
 # ------------------------------------------------------------------ macro gate timing (the Part 0 finding)
 
 def test_macro_gate_spec_mode_uses_prior_day_not_same_day():

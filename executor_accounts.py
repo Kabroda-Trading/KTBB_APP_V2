@@ -286,10 +286,12 @@ def get_decrypted_credentials(account: ExecutorAccount) -> Tuple[Optional[str], 
     """THE ONLY decrypt entry point in this codebase. Permitted callers:
     executor_engine.py's PAPER/LIVE branch (Stage 2/3), executor_plan_
     builder.py's real-leverage/real-mmr query helpers, executor_
-    mechanism_test.py's real order-placing orchestration, and main.py's
-    read-only test-connection route -- each a deliberate, reviewed
-    exception, never anything that renders the decrypted value itself
-    back to a browser."""
+    mechanism_test.py's real order-placing orchestration, main.py's
+    read-only test-connection route, and (2026-10-09, Andy's Alt Matrix
+    ruling) alt_matrix_portfolio.py's exchange_account_state() /
+    alt_matrix_executor.py's own order-placement -- each a deliberate,
+    reviewed exception, never anything that renders the decrypted value
+    itself back to a browser."""
     if not account.api_key_encrypted or not account.api_secret_encrypted:
         return None, None
     return (

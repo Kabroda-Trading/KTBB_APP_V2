@@ -7,37 +7,39 @@
 # everything fresh from a passed-in candle window each call, no carried
 # state between calls.
 #
-# PARITY, NOT INVENTION: this module's indicator formulas are written to
-# reproduce brain/audit_evidence/altcoin_study_{sol,eth}/walkforward_htf_
-# {sol,eth}.py bar-for-bar (see tests/test_alt_matrix_signals.py's parity
-# tests against the real committed CSVs) -- NOT to "correct" that script's
-# math unilaterally. Two real discrepancies between that script and
-# ALT_MATRIX_D1_D2_D3_SPEC.md's own wording were found by audit (2026-10-09,
-# independently confirmed by reading the script directly) and are exposed
-# here as EXPLICIT, labeled choices rather than silently picked:
+# PARITY FOR AUDIT, RULED DEFAULTS FOR PRODUCTION: this module's formulas
+# were originally written to reproduce brain/audit_evidence/altcoin_
+# study_{sol,eth}/walkforward_htf_{sol,eth}.py bar-for-bar (see tests/
+# test_alt_matrix_signals.py's parity tests against the real committed
+# CSVs), which surfaced two real discrepancies between that script and
+# ALT_MATRIX_D1_D2_D3_SPEC.md's own wording (2026-10-09 audit). Andy ruled
+# on both (CC_INTERFACE.md SS5 / AGENT_LOG.md, both repos, 2026-10-09
+# 23:25 CT, independently read in full before acting on it):
 #
-#   1. ATR14: the backtest uses atr14_range_mean() -- a plain (high-low)
-#      rolling mean, NOT Wilder's true-range ATR. atr14_wilder() is
-#      provided alongside it so a future ruling to switch is a one-line
-#      default change, not a rewrite -- but nothing has measured Wilder
-#      ATR's behavior yet, so it must not become the default without a
-#      fresh walk-forward run.
+#   1. ATR14: the backtest used atr14_range_mean() -- a plain (high-low)
+#      rolling mean, NOT Wilder's true-range ATR. Andy ruled Wilder's ATR
+#      (atr14_wilder_series()) is the PRODUCTION DEFAULT "for production
+#      consistency." Flagging plainly: this is a deliberate, ruled
+#      divergence from what the backtest actually measured (the
+#      +27.93R/+14.35R numbers used the range-mean formula) -- the live
+#      stop distance (1.5x this ATR) will differ from what was backtested.
+#      atr14_range_mean_series() is KEPT, unchanged, purely so the parity
+#      tests against the real ledgers keep proving this module's math
+#      against what was actually measured -- it is no longer what
+#      evaluate_d1() uses live.
 #   2. Macro gate timing: the backtest's own df4["day_epoch"] bucketing
 #      reads EACH 4H bar's own day's daily SMA200 -- which for a bar
 #      earlier in the day uses that day's own close before the day has
-#      actually finished (a real, if unintentional, look-ahead). The
-#      spec's own wording is "the daily bar fully closed as of 00:00 UTC"
-#      -- i.e. the PRIOR day's close. macro_gate_mode="spec" (the only
-#      mode evaluate_d1() uses by default) implements the spec literally;
-#      macro_gate_mode="backtest_lookahead" reproduces the script's actual
-#      behavior and exists ONLY so a parity test can measure the size of
-#      the discrepancy -- it must never be the live default.
+#      actually finished (a real, if unintentional, look-ahead). Andy
+#      ruled macro_gate_mode="spec" (prior fully-closed day, zero
+#      look-ahead) -- already evaluate_d1()'s own default; no change
+#      needed for this one. macro_gate_mode="backtest_lookahead" remains,
+#      used ONLY by the parity tests to measure the size of that gap
+#      (2 of SOL's 34 trades, 0 of ETH's 39) -- never the live default.
 #
-# Both discrepancies, plus the funding veto (untested in the backtest at
-# all) and the entry-bar stop-hit gap, are the Part 0 findings in the
-# approved plan -- DeepSeek/Andy need to re-run the walk-forward with the
-# real D3 management logic before this module's output is wired to real
-# money. D1's own gate math (this module) is on much firmer ground.
+# The funding veto's own empirical status is unchanged by this ruling:
+# still required by the spec, still never backtested by the walk-forward
+# script at all. Kept required here regardless.
 # ==============================================================================
 
 from typing import Any, Dict, List, Optional
@@ -81,18 +83,20 @@ def sma_series(values: List[float], window: int) -> List[Optional[float]]:
 
 def atr14_range_mean_series(candles: List[Dict[str, Any]]) -> List[Optional[float]]:
     """The backtest's OWN formula: (high-low).rolling(14).mean() -- a
-    plain range mean, not Wilder's true-range ATR. See this module's own
-    header for why this is the default despite not being the textbook
-    ATR: it's the only formula actually measured so far."""
+    plain range mean, not Wilder's true-range ATR. NOT the production
+    default (Andy ruled Wilder ATR instead, 2026-10-09 -- see this
+    module's own header) -- kept only so the parity tests can keep
+    proving this module's math against what the walk-forward actually
+    measured."""
     ranges = [float(c["high"]) - float(c["low"]) for c in candles]
     return sma_series(ranges, 14)
 
 
 def atr14_wilder_series(candles: List[Dict[str, Any]]) -> List[Optional[float]]:
-    """Standard Wilder true-range ATR -- NOT the backtest's formula, NOT
-    the current default anywhere in this module. Provided only so a
-    future ruling to switch has somewhere to switch to. Do not wire this
-    into evaluate_d1() without a fresh walk-forward measurement first."""
+    """Standard Wilder true-range ATR -- the RULED PRODUCTION DEFAULT
+    (Andy, 2026-10-09, "for production consistency"; see this module's
+    own header for the explicit flag that this is a deliberate
+    divergence from what the backtest actually measured)."""
     if not candles:
         return []
     trs: List[float] = []
@@ -180,7 +184,7 @@ def evaluate_d1(
     closes_4h = _closes(candles_4h_confirmed)
     ema21 = ema_series(closes_4h, 21)
     ema55 = ema_series(closes_4h, 55)
-    atr14 = atr14_range_mean_series(candles_4h_confirmed)
+    atr14 = atr14_wilder_series(candles_4h_confirmed)   # Andy ruling 2026-10-09 -- see module header
 
     last = len(candles_4h_confirmed) - 1
     ema21_now, ema21_prev = ema21[last], ema21[last - 1]
