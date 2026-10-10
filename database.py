@@ -2855,3 +2855,189 @@ class EmailSendLog(Base):
     outcome = Column(String, nullable=False)      # "SENT" | "SKIPPED" | "FAILED"
     detail = Column(String, nullable=True)        # skip reason or exception text, when applicable
 
+
+# ---------------------------------------------------------
+# ALT MATRIX (SOL & ETH 4H swing momentum) -- 2026-10-09, Andy directive,
+# binding spec ALT_MATRIX_D1_D2_D3_SPEC.md (Kabroda AI Brain repo, commit
+# 83942b0). A SECOND, FULLY ISOLATED trading lineage alongside GATE_
+# TRAVELER -- the spec's own acceptance criterion 5 ("BTC Iron Wall"):
+# "No code in the Alt Matrix layer imports or alters gate_traveler.py,
+# traveler_plan_engine.py, or BTC session state." These four tables are
+# therefore a brand-new, structurally separate set -- NOT a retrofit of
+# TravelerPlan/ExecutorOrder (ExecutorOrder.trade_plan_id is NOT NULL,
+# pointing at the legacy trade_plans table every real Traveler row still
+# populates -- Alt Matrix has no such row to point to, and loosening that
+# NOT NULL would be schema surgery on a column Traveler's own live poll
+# loop and unique constraint depend on). This continues an already-
+# established pattern, not a new one: TradePlan (v1/v2) and TravelerPlan
+# already coexist as two independent plan tables with their own state
+# machines, loosely joined only by (symbol, session_id, date_key) for
+# audit. No ForeignKey() objects here either, matching this file's own
+# convention (plain Integer *_id columns with a comment, see the
+# EXECUTOR BOT section's own header above).
+# ---------------------------------------------------------
+class AltMatrixPlan(Base):
+    """One row per confirmed D1 signal (Daily > SMA200 AND a 4H 21/55 EMA
+    Silver Cross), keyed by (symbol, signal_bar_time) so a restart-
+    recovery re-evaluation of the same already-processed 4H close is
+    naturally idempotent (same unique-constraint-as-dedup convention
+    TravelerPlan/SessionLock already use). WAITING_SETUP is deliberately
+    NOT a status value here -- unlike TravelerPlan (one row created at
+    every session lock, win or lose), a row only gets created once a real
+    D1 signal actually fires; the "no signal yet" state is simply "no row
+    for this 4H close," read live off candles by alt_matrix_radar.py, the
+    same way gate_traveler.py's own pre-cross state is never a DB row
+    either."""
+    __tablename__ = "alt_matrix_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)   # "SOL/USDT" | "ETH/USDT"
+    signal_bar_time = Column(DateTime, nullable=False)     # the confirmed 4H bar close that produced this signal
+    date_key = Column(String, index=True, nullable=False)  # the daily bar's own date, for audit/display grouping only
+
+    daily_close = Column(Float, nullable=True)
+    sma200 = Column(Float, nullable=True)
+    ema21 = Column(Float, nullable=True)
+    ema21_prev = Column(Float, nullable=True)
+    ema55 = Column(Float, nullable=True)
+    ema55_prev = Column(Float, nullable=True)
+    atr14 = Column(Float, nullable=True)
+    funding_rate = Column(Float, nullable=True)
+
+    # ARMED | SKIPPED_MACRO | SKIPPED_FUNDING | SKIPPED_IN_TRADE |
+    # CONCURRENCY_SKIPPED | MISSED | DONE -- see alt_matrix_signals.py's
+    # own docstring for exactly when each fires.
+    status = Column(String, nullable=False, default="ARMED")
+    status_reason = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "signal_bar_time", name="uq_alt_matrix_plan_symbol_signal"),
+    )
+
+
+class AltMatrixOrder(Base):
+    """One row per (plan, account) -- the Alt Matrix equivalent of
+    ExecutorOrder, but with its own vocabulary and its own fields for the
+    things Traveler's MGMT_E1_STACK structurally never needed: a live
+    stop-amendment (breakeven ratchet at +2R MFE -- Traveler's own stop
+    NEVER moves, measured harmful, see CLAUDE.md's "What Must Never Be
+    Changed") and ongoing MFE tracking for the EMA-trail exit decision.
+    Unique on (alt_matrix_plan_id, account_id) -- same one-leg-per-account
+    idempotency guarantee ExecutorOrder's own constraints provide for
+    Traveler, scoped to this table alone."""
+    __tablename__ = "alt_matrix_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alt_matrix_plan_id = Column(Integer, nullable=False, index=True)
+    account_id = Column(Integer, nullable=False, index=True)
+    mode = Column(String, nullable=False)   # "DRY_RUN" | "LIVE"
+    symbol = Column(String, nullable=False)
+    direction = Column(String, nullable=False, default="LONG")
+
+    # Sizing/identity -- frozen at the signal, same "never recomputed
+    # later" convention as gate_traveler.py's own box/stop/t1 fields.
+    atr14_at_signal = Column(Float, nullable=True)
+    r_distance = Column(Float, nullable=True)
+    reference_price = Column(Float, nullable=True)   # the signal bar's own close, audit only
+    qty = Column(Float, nullable=True)
+    risk_dollars_used = Column(Float, nullable=True)
+    leverage_used = Column(Float, nullable=True)
+    margin_required_usd = Column(Float, nullable=True)
+    liquidation_price_estimate = Column(Float, nullable=True)
+    liquidation_check_passed = Column(Boolean, nullable=True)
+    liquidation_check_detail = Column(String, nullable=True)
+
+    decision = Column(String, nullable=True)   # "WOULD_PLACE" | "REJECTED" | "CONCURRENCY_SKIPPED"
+    decision_reason = Column(String, nullable=True)
+    admission_snapshot_json = Column(String, nullable=True)   # alt_matrix_portfolio.py's own check_admission() snapshot, for audit
+
+    # Entry
+    entry_exchange_order_id = Column(String, nullable=True)
+    entry_status = Column(String, nullable=True)
+    entry_fill_price = Column(Float, nullable=True)
+    entry_fill_time = Column(DateTime, nullable=True)
+
+    # Stop (the real exchange-side protection, and its one live amendment)
+    position_id = Column(String, nullable=True)
+    sl_exchange_order_id = Column(String, nullable=True)
+    sl_price_initial = Column(Float, nullable=True)   # entry - 1.5*ATR14, frozen at fill
+    sl_price_current = Column(Float, nullable=True)   # mirrors sl_price_initial until the one BE amendment, if any
+    sl_set_at = Column(DateTime, nullable=True)
+    be_amended = Column(Boolean, nullable=False, default=False)
+    be_amended_at = Column(DateTime, nullable=True)
+    be_price = Column(Float, nullable=True)           # entry + 0.1R
+
+    # Excursion tracking (drives the EMA21-vs-EMA55 trail-exit branch)
+    mfe_r = Column(Float, nullable=True)
+    mfe_price = Column(Float, nullable=True)
+    mfe_updated_at = Column(DateTime, nullable=True)
+
+    # PENDING_ENTRY | ENTRY_FILLED_UNPROTECTED | FILLED | TRAILING |
+    # CLOSED_STOP | CLOSED_BE_STOP | CLOSED_EMA21_TRAIL | CLOSED_EMA55_CLOSE
+    # | CLOSED_TIME_EXPIRY | CLOSED_ERROR
+    management_state = Column(String, nullable=False, default="PENDING_ENTRY")
+    exit_reason = Column(String, nullable=True)
+    exit_price = Column(Float, nullable=True)
+    exit_time = Column(DateTime, nullable=True)
+    entry_fee_usd = Column(Float, nullable=True)
+    exit_fee_usd = Column(Float, nullable=True)
+    realized_pnl_r = Column(Float, nullable=True)
+    realized_pnl_usd = Column(Float, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("alt_matrix_plan_id", "account_id", name="uq_alt_matrix_order_plan_account"),
+    )
+
+
+class AltMatrixTransition(Base):
+    """Append-only transition log -- satisfies the spec's own acceptance
+    criterion 6 ("every transition logged with exact fill price, fee, and
+    realized R"). Deliberately a separate append-only table rather than
+    overwriting fields in place, so the full history survives even though
+    AltMatrixOrder's own columns only ever hold the CURRENT state."""
+    __tablename__ = "alt_matrix_transitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alt_matrix_plan_id = Column(Integer, nullable=True, index=True)
+    alt_matrix_order_id = Column(Integer, nullable=True, index=True)
+    from_state = Column(String, nullable=True)
+    to_state = Column(String, nullable=False)
+    price = Column(Float, nullable=True)
+    fee = Column(Float, nullable=True)
+    realized_pnl_r = Column(Float, nullable=True)
+    detail_json = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class AltMatrixConfig(Base):
+    """One row per Alt-Matrix-enabled ExecutorAccount -- enable flags and
+    the portfolio-concurrency settings alt_matrix_portfolio.py's
+    check_admission() reads (see that module's own header for the full
+    "why" on paired_traveler_account_id and btc_margin_reserve_usd being
+    named assumptions, not guesses presented as certain)."""
+    __tablename__ = "alt_matrix_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, nullable=False, unique=True, index=True)
+    sol_enabled = Column(Boolean, nullable=False, default=True)
+    eth_enabled = Column(Boolean, nullable=False, default=True)
+    # Named assumption (no existing field records "which ExecutorAccount
+    # rows share one physical Bitunix balance" -- see alt_matrix_
+    # portfolio.py): the one BTC Traveler account this Alt account's
+    # margin/risk checks should pair against, when known. Left NULL means
+    # "assume all LIVE GATE_TRAVELER accounts," the pragmatic default.
+    paired_traveler_account_id = Column(Integer, nullable=True)
+    btc_margin_reserve_usd = Column(Float, nullable=True)
+    symbol_priority = Column(String, nullable=False, default="SOL,ETH")
+    catchup_window_seconds = Column(Integer, nullable=False, default=900)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
