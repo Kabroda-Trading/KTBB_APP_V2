@@ -158,3 +158,67 @@ To qualify any future altcoin for admission into the Alt Matrix, the asset must 
    - Add `ADAUSDT` and `LINKUSDT` columns/toggles to `AltMatrixConfig`.
    - Update `alt_matrix_portfolio.py` concurrency cap from 3 to 5 positions.
    - Retain all other D1/D2/D3 execution primitives unchanged.
+
+
+---
+
+## 7. The $5,000 Risk Scaling Model: Large-Scale Returns on Low-Frequency Swings
+
+### 7.1 Empirical Dollar Returns at $5,000 Fixed Risk Per Trade (4.5 Years)
+
+Simulating the exact 4.5-year walk-forward ledger under a fixed **$5,000 risk allocation per trade**:
+
+| Metric | 2-Coin Basket (SOL + ETH) | 4-Coin Basket (SOL + ETH + ADA + LINK) |
+| :--- | :---: | :---: |
+| **Total Trades (4.5 Years)** | 73 trades (~16.2 trades/year) | 116 trades (~25.8 trades/year) |
+| **Win Rate** | 38.4% (28 wins, 45 losses) | 33.6% (39 wins, 77 losses) |
+| **Total Net R** | **+42.29R** | **+70.69R** |
+| **Total Dollar Profit** | **+$211,425.60** | **+$353,440.86** |
+| **Max Dollar Drawdown** | -$39,010.83 (7.80R) | -$62,354.69 (12.47R) |
+| **Profit / Drawdown Ratio** | **5.42x** | **5.67x** |
+| **Average Winning Trade** | **+$14,412.93 (+2.88R)** | **+$17,714.06 (+3.54R)** |
+| **Average Losing Trade** | -$4,269.70 (-0.85R)* | -$4,381.91 (-0.88R)* |
+| **Largest Single Trade Win** | **+$66,427.81 (+13.29R on SOL)** | **+$118,253.61 (+23.65R on ADA)** |
+| **Average Notional Size** | $184,173.56 (3.1% avg stop) | $171,239.63 (3.3% avg stop) |
+| **Margin Required (10x)** | **$18,417.36 per trade** | **$17,123.96 per trade** |
+
+*\*Note: Average loss is less than -$5,000 (-1.0R) because the breakeven ratchet and trailing EMA exit frequently close retracing trades at small profits or scratch prices.*
+
+### 7.2 Yearly Cash Flow Breakdown at $5,000 Risk Per Trade
+
+The swing momentum architecture delivers consistent, asymmetric cash flow across all market regimes:
+
+```
++-------------------------------------------------------------------------------+
+|                      YEARLY CASH FLOW AT $5,000 RISK / TRADE                  |
++--------+------------------------------+---------------------------------------+
+| Year   | 2-Coin (SOL + ETH)           | 4-Coin (SOL + ETH + ADA + LINK)       |
++--------+------------------------------+---------------------------------------+
+| 2023   | 24 trades | +$ 33,917.33     | 31 trades | +$221,325.16 (ADA explosion)|
+| 2024   | 29 trades | +$124,545.79     | 41 trades | +$ 78,817.42              |
+| 2025   | 18 trades | +$ 43,217.95     | 38 trades | +$ 36,939.32              |
+| 2026   |  2 trades | +$  9,744.53     |  6 trades | +$ 16,358.96              |
++--------+------------------------------+---------------------------------------+
+| TOTAL  | 73 trades | +$211,425.60     | 116 trades| +$353,440.86              |
++-------------------------------------------------------------------------------+
+```
+
+### 7.3 Margin & Account Sizing Feasibility at Scale
+
+Trading with $\$5,000$ risk units on 4H swings is highly efficient in capital utilization:
+1. **Low Margin Footprint:** Because average stop distances are $3.1\% \to 3.3\%$ from entry, $\$5,000$ of risk corresponds to an average position size of $\sim \$175,000$ notional.
+2. **Margin at 10x:** Bitunix requires only **$\sim \$17,500$ of initial margin** per position.
+3. **Account Safety:**
+   * On a **$\$100,000$ account**, $\$17,500$ margin represents only **$17.5\%$ margin utilization**, leaving $> 80\%$ free margin.
+   * On a **$\$250,000$ account**, $\$17,500$ margin represents only **$7.0\%$ margin utilization**.
+   * On a **$\$500,000$ account**, $\$5,000$ risk is **$1.0\%$ account risk**, and holding 3 concurrent positions consumes less than $11\%$ of account margin.
+
+### 7.4 The Complete Scaling Spectrum
+
+| Fixed Risk / Trade | 2-Coin Net Profit (SOL + ETH) | 4-Coin Net Profit (SOL + ETH + ADA + LINK) |
+| :--- | :---: | :---: |
+| **$500 / trade** | +$21,142.56 | +$35,344.09 |
+| **$1,000 / trade** | +$42,285.12 | +$70,688.17 |
+| **$2,500 / trade** | +$105,712.80 | +$176,720.43 |
+| **$5,000 / trade** | **+$211,425.60** | **+$353,440.86** |
+| **$10,000 / trade** | **+$422,851.20** | **+$706,881.72** |
