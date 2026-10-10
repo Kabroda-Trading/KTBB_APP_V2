@@ -459,3 +459,75 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: AltMatr
                      detail={"approximated": True})
     _audit(db, "POSITION_CLOSED", f"Alt Matrix order {order_row.id} closed: {exit_reason} at {exit_price} (approximated at last known live price -- close_position() carries no reliable fill price)", account.id, order_row)
     _notify_account(db, account, "build_alt_matrix_exit_email", order_row, is_live=True)
+
+
+async def check_for_manual_closure(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> bool:
+    """For a LIVE FILLED/TRAILING order, checks whether the exchange
+    position has disappeared OUTSIDE the normal D3 flow -- hand-closed
+    on the exchange, an exchange-side liquidation, or any other cause
+    this codebase never itself initiated. Called from the signal loop's
+    own D3 step (alt_matrix_engine.py), BEFORE alt_matrix_management.
+    advance() runs each tick -- never from the watch loop, which by
+    design never touches a FILLED/TRAILING row (see alt_matrix_
+    engine.py's own header on why the two loops never share write-
+    ownership of the same rows; this function preserves that same
+    invariant, it doesn't bypass it).
+
+    Deliberately does NOT assume "position gone" means "manual" --
+    the exchange's OWN resting stop firing is the expected, designed
+    outcome of a normal trade, not an anomaly, and must never be
+    mislabeled. Checks the registered stop order's own status first
+    (get_order_detail on sl_exchange_order_id); only falls back to
+    exit_reason="MANUAL" if that order is NOT what closed it (or the
+    check itself fails -- fails toward MANUAL, never silently assumes
+    the stop fired without confirming it).
+
+    Returns True if a closure was detected and finalized (of either
+    kind), False if the position is confirmed still open -- the
+    caller's own signal to proceed with its normal D3 check instead."""
+    client = _client_for(account)
+    symbol = order_row.symbol.replace("/", "")
+    pos_resp = await client.get_position(symbol)
+    still_open = _find_open_position(pos_resp, symbol)
+    if still_open is not None:
+        return False   # confirmed still open -- nothing to do, proceed with the normal D3 check
+
+    exit_reason = "MANUAL"
+    exit_price = None
+    if order_row.sl_exchange_order_id:
+        try:
+            sl_detail = await client.get_order_detail(order_id=order_row.sl_exchange_order_id)
+            if (sl_detail.get("data") or {}).get("status") == "FILLED":
+                exit_reason = "BE_STOP" if order_row.be_amended else "STOP"
+                exit_price = order_row.sl_price_current   # exchange-side stop fills at its own trigger price, same convention used everywhere else in this file
+        except Exception:
+            pass   # fails toward MANUAL below -- never guess the stop fired if this check itself failed
+
+    if exit_price is None:
+        exit_price = await _current_live_price(symbol)
+        if exit_price is None:
+            exit_price = order_row.entry_fill_price
+
+    from_state = order_row.management_state
+    order_row.exit_reason = exit_reason
+    order_row.exit_price = exit_price
+    order_row.exit_time = datetime.datetime.utcnow()
+    order_row.closed_at = order_row.exit_time
+    order_row.management_state = f"CLOSED_{exit_reason}"
+    if order_row.r_distance:
+        order_row.realized_pnl_r = (exit_price - order_row.entry_fill_price) / order_row.r_distance
+    # "approximated" only for the genuine MANUAL case (exit_price came
+    # from a live-ticker guess there) -- the STOP/BE_STOP branch above
+    # uses the KNOWN stop level, same "a registered stop fills at its
+    # own trigger price" convention every other STOP exit in this
+    # codebase already treats as a real, non-approximated fill.
+    _log_transition(db, order_row, from_state, order_row.management_state, price=exit_price,
+                     realized_pnl_r=order_row.realized_pnl_r, detail={"approximated": exit_reason == "MANUAL"})
+    label = "the exchange's own registered stop" if exit_reason != "MANUAL" else "manual intervention or an unexplained exchange-side closure"
+    _audit(
+        db, "POSITION_CLOSED",
+        f"Alt Matrix order {order_row.id} found closed on the exchange outside the normal D3 flow -- "
+        f"attributed to {label}. Exit approximated at {exit_price}.",
+        account.id, order_row)
+    _notify_account(db, account, "build_alt_matrix_exit_email", order_row, is_live=True)
+    return True

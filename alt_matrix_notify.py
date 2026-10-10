@@ -144,6 +144,7 @@ _EXIT_REASON_LABELS = {
     "EMA55_CLOSE": "4H EMA55 close exit",
     "TIME_EXPIRY": "time-cap exit",
     "ERROR": "execution error",
+    "MANUAL": "manual intervention or unexplained exchange-side closure",
 }
 
 

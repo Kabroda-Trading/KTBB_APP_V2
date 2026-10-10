@@ -81,20 +81,6 @@ def _enabled_accounts_for_symbol(db: Session, symbol: str) -> List[ExecutorAccou
     return accounts
 
 
-def _any_credentialed_account(db: Session) -> Optional[ExecutorAccount]:
-    """Picks any one Alt-Matrix-configured account to use for the shared,
-    account-agnostic funding-rate read -- every Bitunix call in this
-    codebase is signed (no unauthenticated path exists in BitunixClient
-    at all), so this is still needed even though funding rate itself
-    doesn't depend on which account asks. See alt_matrix_market.
-    fetch_funding_rate()'s own docstring."""
-    for cfg in db.query(AltMatrixConfig).all():
-        account = db.query(ExecutorAccount).filter_by(id=cfg.account_id).first()
-        if account is not None and account.api_key_encrypted:
-            return account
-    return None
-
-
 def _order_dict_for_notify(order_row: AltMatrixOrder, account: ExecutorAccount, plan: Optional[AltMatrixPlan] = None, **extra) -> Dict[str, Any]:
     d = {
         "id": order_row.id, "alt_matrix_plan_id": order_row.alt_matrix_plan_id,
@@ -193,6 +179,19 @@ async def _advance_one_order_management(
     db: Session, account: ExecutorAccount, order_row: AltMatrixOrder,
     candles_4h_confirmed: List[Dict[str, Any]], now_utc: datetime.datetime,
 ) -> None:
+    # LIVE only -- a real exchange position can be closed by hand, by
+    # liquidation, or by anything else outside this codebase's own D3
+    # flow at any time, not just on a 4H boundary. Checked first, every
+    # tick, before the normal bar-based D3 logic runs at all -- correctly
+    # attributes a real stop fill vs. a genuinely unexplained closure
+    # (see check_for_manual_closure()'s own docstring). DRY_RUN has no
+    # real exchange position to desync from, so this never applies there.
+    if account.mode == "LIVE":
+        closed = await alt_matrix_executor.check_for_manual_closure(db, account, order_row)
+        if closed:
+            _close_any_plan_fully_resolved(db, order_row.alt_matrix_plan_id)
+            return
+
     order_dict = {
         "entry_price": order_row.entry_fill_price,
         "stop_price": order_row.sl_price_current,
@@ -393,8 +392,7 @@ async def _process_symbol_signal(db: Session, symbol: str, eval_instant: datetim
     if existing is not None:
         return   # already processed this boundary -- idempotent restart-safety
 
-    funding_account = _any_credentialed_account(db)
-    funding_rate = await alt_matrix_market.fetch_funding_rate(symbol, funding_account)
+    funding_rate = await alt_matrix_market.fetch_funding_rate(symbol)
 
     verdict = alt_matrix_signals.evaluate_d1(candles_4h, candles_1d, funding_rate)
     if not verdict.get("cross_pass"):

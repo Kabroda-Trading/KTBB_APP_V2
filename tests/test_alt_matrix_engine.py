@@ -138,7 +138,7 @@ def _bar(close, high=None, low=None, offset=1, base_epoch=None):
     return {"time": base + offset * amc.BAR_SECONDS, "close": close, "high": high, "low": low}
 
 
-# ------------------------------------------------------------------ _enabled_accounts_for_symbol / _any_credentialed_account
+# ------------------------------------------------------------------ _enabled_accounts_for_symbol
 
 def test_enabled_accounts_filters_by_symbol_flag_and_sorts_by_id(db):
     a1 = _account(db, "a1")
@@ -152,17 +152,6 @@ def test_enabled_accounts_filters_by_symbol_flag_and_sorts_by_id(db):
     eth_accounts = ame._enabled_accounts_for_symbol(db, "ETH/USDT")
     assert [a.id for a in sol_accounts] == sorted([a1.id, a2.id])
     assert [a.id for a in eth_accounts] == sorted([a1.id, a3.id])
-
-
-def test_any_credentialed_account_skips_accounts_without_credentials(db):
-    a1 = _account(db, "nocreds")
-    _config(db, a1)
-    assert ame._any_credentialed_account(db) is None
-
-    a2 = _account(db, "withcreds", mode="LIVE")
-    _config(db, a2)
-    found = ame._any_credentialed_account(db)
-    assert found is not None and found.id == a2.id
 
 
 # ------------------------------------------------------------------ _close_any_plan_fully_resolved
@@ -234,6 +223,9 @@ def test_live_amend_delegates_to_executor_not_simulated(db, monkeypatch):
         called["be_price"] = be_price
         return True
     monkeypatch.setattr(ame.alt_matrix_executor, "amend_to_breakeven", _fake_amend)
+    async def _no_manual_closure(db_, account_, order_):
+        return False
+    monkeypatch.setattr(ame.alt_matrix_executor, "check_for_manual_closure", _no_manual_closure)
 
     _run(ame._advance_one_order_management(db, account, order, candles, datetime.datetime.utcnow()))
     assert called["be_price"] == pytest.approx(101.0)
@@ -252,6 +244,9 @@ def test_live_exit_delegates_to_executor_not_simulated(db, monkeypatch):
     async def _fake_close(db_, account_, order_, exit_reason):
         called["exit_reason"] = exit_reason
     monkeypatch.setattr(ame.alt_matrix_executor, "market_close", _fake_close)
+    async def _no_manual_closure(db_, account_, order_):
+        return False
+    monkeypatch.setattr(ame.alt_matrix_executor, "check_for_manual_closure", _no_manual_closure)
 
     _run(ame._advance_one_order_management(db, account, order, candles, datetime.datetime.utcnow()))
     assert called["exit_reason"] == "STOP"
@@ -409,7 +404,7 @@ def _patch_market(monkeypatch, candles_4h, candles_1d, funding=0.0):
         return candles_4h
     async def _fake_daily(symbol, target_bars=300):
         return candles_1d
-    async def _fake_funding(symbol, account):
+    async def _fake_funding(symbol):
         return funding
     monkeypatch.setattr(amm, "fetch_confirmed_4h", _fake_4h)
     monkeypatch.setattr(amm, "fetch_confirmed_daily", _fake_daily)

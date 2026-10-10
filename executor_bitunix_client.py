@@ -91,6 +91,32 @@ def _get_session() -> aiohttp.ClientSession:
     return session
 
 
+async def fetch_public_funding_rate(symbol: str) -> Dict[str, Any]:
+    """GET /api/v1/futures/market/funding_rate -- the ONE Bitunix
+    endpoint in this codebase that is genuinely PUBLIC and
+    UNAUTHENTICATED (DeepSeek's live smoke test, 2026-10-10 10:28 CT,
+    CC_INTERFACE.md section 6 -- zero API key/secret/signature needed,
+    confirmed against a real response). Deliberately a MODULE-LEVEL
+    function, not a BitunixClient instance method -- every other call in
+    this file genuinely needs an account's real credentials
+    (BitunixClient's own docstring: "constructed per-account"),
+    so requiring one here too (as an earlier, doc-sourced-only draft of
+    this function did, before the live check) would be architecturally
+    misleading, not just unnecessary -- it would gate a public market-
+    data read behind "does some account happen to have credentials set"
+    for no real reason. No signing, no nonce/timestamp/sign headers.
+
+    Verified real response shape (2026-10-10): `data` is a SINGLE
+    OBJECT (not the array the docs' own worked example showed) with
+    `symbol`, `markPrice`, `lastPrice`, `indexPrice`, `fundingRate`
+    (decimal string, e.g. "0.003502" = 0.35%), `fundingInterval` (hours),
+    `nextFundingTime`, `maxFundingRate`, `minFundingRate`."""
+    session = _get_session()
+    async with session.request("GET", BASE_URL + "/api/v1/futures/market/funding_rate",
+                                params={"symbol": symbol}) as resp:
+        return await resp.json()
+
+
 def _nonce() -> str:
     """"Random string, 32bits" per the docs -- interpreted as a
     32-character random alphanumeric string (the doc's own worked
@@ -351,27 +377,6 @@ class BitunixClient:
         the liquidation safety check."""
         return await self._request("GET", "/api/v1/futures/position/get_position_tiers",
                                     query={"symbol": symbol})
-
-    async def get_funding_rate(self, symbol: str) -> Dict[str, Any]:
-        """GET /api/v1/futures/market/funding_rate -- read from
-        www.bitunix.com/api-docs/futures/market/get_funding_rate.html,
-        2026-10-10 (Alt Matrix build), LIVE-VERIFIED against a real
-        account by Andy as part of Step 6 (2026-10-10) -- confirmed
-        working for the funding-veto decision, closing out the one real
-        gap the independent audit flagged (this was the sole Alt Matrix
-        endpoint with no Traveler-side live history to lean on; every
-        other mechanic -- entry sequencing, the TP/SL clears-omitted-
-        fields quirk, the approximated-exit-price convention -- was
-        already proven by the BTC side's own live track record on this
-        same account before Alt Matrix ever copied the pattern).
-        alt_matrix_market.fetch_funding_rate() still defensively handles
-        BOTH response shapes the docs themselves are inconsistent about
-        (`data` as a single object per the field table, or as a single-
-        element array per the worked example) -- kept as-is since it's
-        harmless either way and no specific shape was recorded from the
-        live check. Response `data` carries `fundingRate` (decimal, e.g.
-        0.0005 = 0.05%)."""
-        return await self._request("GET", "/api/v1/futures/market/funding_rate", query={"symbol": symbol})
 
     async def cancel_orders(self, symbol: str, order_ids: List[str]) -> Dict[str, Any]:
         """POST /api/v1/futures/trade/cancel_orders -- verified against

@@ -17,7 +17,6 @@
 from typing import Any, Dict, List, Optional
 
 import market_data
-from database import ExecutorAccount
 
 
 async def fetch_confirmed_4h(symbol: str, target_bars: int = 400) -> List[Dict[str, Any]]:
@@ -32,32 +31,31 @@ async def fetch_confirmed_daily(symbol: str, target_bars: int = 300) -> List[Dic
     return market_data.confirmed_closes(candles, 86400, now_ts=time.time())
 
 
-async def fetch_funding_rate(symbol: str, account: Optional[ExecutorAccount]) -> Optional[float]:
+async def fetch_funding_rate(symbol: str) -> Optional[float]:
     """Returns the current funding rate as a decimal (e.g. 0.0005 = 0.05%),
-    or None on ANY failure -- no credentials, network error, unexpected
-    API error code, or a response shape that doesn't match what
-    executor_bitunix_client.get_funding_rate() documents (see that
-    method's own docstring -- LIVE-VERIFIED by Andy against a real
-    account, Step 6, 2026-10-10). Both response shapes the docs
-    themselves are inconsistent about are still handled defensively
-    below, since no specific shape was recorded from the live check.
-    Every Bitunix call in this codebase is signed (no unauthenticated
-    code path exists in BitunixClient at all, confirmed by reading
-    _request()), so this still needs AN account's real credentials even
-    though funding rate itself is account-agnostic market data --
-    callers pass any one enabled Alt Matrix LIVE account, never
-    fabricate a dummy key."""
-    if account is None:
-        return None
-    import executor_accounts
+    or None on ANY failure -- network error, unexpected API error code,
+    or an unexpected response shape -- never silently guessed as 0%/safe
+    (evaluate_d1()'s own fail-closed contract).
+
+    No account/credentials parameter -- DeepSeek's live smoke test
+    (2026-10-10 10:28 CT, CC_INTERFACE.md section 6) confirmed this
+    specific Bitunix endpoint is genuinely PUBLIC and UNAUTHENTICATED,
+    unlike every other call in this codebase. An earlier, doc-sourced-
+    only draft of this function required an account's real credentials
+    purely because every OTHER BitunixClient method does -- that
+    requirement is gone now that the real behavior is known, via
+    executor_bitunix_client.fetch_public_funding_rate() (a module-level
+    function, not a BitunixClient instance method, for the same reason).
+
+    Verified real response shape (2026-10-10): `data` is a single
+    object (not the array the docs' own worked example showed) --
+    handled as such below; an array is no longer expected, but still
+    tolerated defensively since it costs nothing and the docs'
+    inconsistency was never fully explained."""
     import executor_bitunix_client
 
-    api_key, api_secret = executor_accounts.get_decrypted_credentials(account)
-    if not api_key or not api_secret:
-        return None
-    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
     try:
-        resp = await client.get_funding_rate(symbol.replace("/", ""))
+        resp = await executor_bitunix_client.fetch_public_funding_rate(symbol.replace("/", ""))
     except Exception:
         return None
     if resp.get("code") not in (0, None):

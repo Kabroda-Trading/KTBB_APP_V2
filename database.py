@@ -2977,7 +2977,10 @@ class AltMatrixOrder(Base):
 
     # PENDING_ENTRY | ENTRY_FILLED_UNPROTECTED | FILLED | TRAILING |
     # CLOSED_STOP | CLOSED_BE_STOP | CLOSED_EMA21_TRAIL | CLOSED_EMA55_CLOSE
-    # | CLOSED_TIME_EXPIRY | CLOSED_ERROR
+    # | CLOSED_TIME_EXPIRY | CLOSED_ERROR | CLOSED_MANUAL (2026-10-10 --
+    # alt_matrix_executor.check_for_manual_closure(), a real exchange
+    # closure found outside the normal D3 flow, not caused by this
+    # codebase's own stop/trail logic)
     management_state = Column(String, nullable=False, default="PENDING_ENTRY")
     exit_reason = Column(String, nullable=True)
     exit_price = Column(Float, nullable=True)

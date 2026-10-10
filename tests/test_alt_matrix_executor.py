@@ -598,3 +598,126 @@ def test_notify_failure_never_breaks_real_order_placement(db, monkeypatch):
     _run(ax.place_entry_and_protect(db, account, order))
 
     assert order.management_state == "FILLED"   # real execution unaffected by the notify crash
+
+
+# ------------------------------------------------------------------ check_for_manual_closure()
+
+def test_manual_closure_position_still_open_returns_false_no_change(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0, r_distance=10.0, position_id="pos1")
+    _patch(monkeypatch, get_position=_async(_position_resp(position_id="pos1")))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+
+    assert result is False
+    assert order.management_state == "FILLED"
+    assert order.exit_reason is None
+
+
+def test_manual_closure_attributes_to_stop_when_registered_stop_was_filled(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id="sl1", be_amended=False)
+    _patch(monkeypatch,
+           get_position=_async(_empty_position_resp()),
+           get_order_detail=_async(_order_detail_resp("FILLED")))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+    db.flush()
+
+    assert result is True
+    assert order.management_state == "CLOSED_STOP"
+    assert order.exit_reason == "STOP"
+    assert order.exit_price == 90.0   # the KNOWN stop level, not a live-ticker guess
+    assert order.realized_pnl_r == pytest.approx((90.0 - 100.0) / 10.0)
+    transitions = db.query(AltMatrixTransition).filter_by(alt_matrix_order_id=order.id).all()
+    assert len(transitions) == 1
+    assert transitions[0].to_state == "CLOSED_STOP"
+
+
+def test_manual_closure_attributes_to_be_stop_when_already_amended(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="TRAILING", entry_fill_price=100.0, sl_price_current=100.1,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id="sl1", be_amended=True)
+    _patch(monkeypatch,
+           get_position=_async(_empty_position_resp()),
+           get_order_detail=_async(_order_detail_resp("FILLED")))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+
+    assert result is True
+    assert order.management_state == "CLOSED_BE_STOP"
+    assert order.exit_reason == "BE_STOP"
+    assert order.exit_price == 100.1
+
+
+def test_manual_closure_falls_back_to_manual_when_stop_order_not_filled(db, monkeypatch):
+    # The position is gone but OUR OWN stop shows status != FILLED (still
+    # NEW, or canceled) -- the stop did NOT close this, so it must be
+    # genuinely unexplained (hand-closed, liquidated, etc).
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id="sl1")
+    _patch(monkeypatch,
+           get_position=_async(_empty_position_resp()),
+           get_order_detail=_async(_order_detail_resp("NEW")))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "95.0"}]))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+    db.flush()
+
+    assert result is True
+    assert order.management_state == "CLOSED_MANUAL"
+    assert order.exit_reason == "MANUAL"
+    assert order.exit_price == 95.0   # approximated via live ticker, not the stop level
+    transitions = db.query(AltMatrixTransition).filter_by(alt_matrix_order_id=order.id).all()
+    assert transitions[0].detail_json and "true" in transitions[0].detail_json.lower()   # approximated=True recorded
+
+
+def test_manual_closure_falls_back_to_manual_when_no_stop_order_id_recorded(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id=None)
+    _patch(monkeypatch, get_position=_async(_empty_position_resp()))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "92.0"}]))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+
+    assert result is True
+    assert order.exit_reason == "MANUAL"
+    assert order.exit_price == 92.0
+
+
+def test_manual_closure_falls_back_to_manual_when_stop_detail_check_itself_fails(db, monkeypatch):
+    # Never guess the stop fired if confirming it raises -- fails toward
+    # the more conservative MANUAL attribution instead.
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id="sl1")
+    _patch(monkeypatch,
+           get_position=_async(_empty_position_resp()),
+           get_order_detail=_async(exc=ConnectionError("blip")))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "91.0"}]))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+
+    assert result is True
+    assert order.exit_reason == "MANUAL"
+
+
+def test_manual_closure_sends_account_email(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                   r_distance=10.0, position_id="pos1", sl_exchange_order_id=None)
+    calls = _capture_account_email(monkeypatch)
+    _patch(monkeypatch, get_position=_async(_empty_position_resp()))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "92.0"}]))
+
+    _run(ax.check_for_manual_closure(db, account, order))
+
+    assert len(calls) == 1
+    assert "manual intervention" in calls[0]["body"].lower()
