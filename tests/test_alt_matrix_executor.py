@@ -236,6 +236,30 @@ def test_place_entry_and_protect_entry_call_failure_closes_as_error(db, monkeypa
     assert transitions[0].to_state == "CLOSED_ERROR"
 
 
+def test_place_entry_and_protect_resumes_without_replacing_an_already_placed_entry(db, monkeypatch):
+    # The watch loop calls this repeatedly for a PENDING_ENTRY row. On a
+    # resumed call (entry_exchange_order_id already set from a prior
+    # tick), it must NOT call place_order() again -- only confirm/protect.
+    account = _ready_account(db)
+    order = _order(db, account, entry_exchange_order_id="entry1")
+
+    def _fail_if_called(self, *a, **kw):
+        raise AssertionError("place_order must not be called on a resumed entry")
+
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           place_order=_fail_if_called,
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_position=_async(_position_resp(position_id="pos1", avg_open_price=102.0)),
+           set_position_tpsl=_async(_tpsl_set_resp("sl1")))
+
+    _run(ax.place_entry_and_protect(db, account, order))
+
+    assert order.management_state == "FILLED"
+    assert order.entry_fill_price == 102.0
+    assert order.entry_exchange_order_id == "entry1"   # unchanged
+
+
 def test_place_entry_and_protect_not_yet_filled_stays_pending_no_transition(db, monkeypatch):
     account = _ready_account(db)
     order = _order(db, account)

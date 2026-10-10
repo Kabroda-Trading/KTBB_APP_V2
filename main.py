@@ -39,6 +39,7 @@ import kabroda_mas_flow
 # themselves are untouched, kept for tests until Step 3f's file deletion.
 import traveler_plan_engine
 import executor_live_e1_engine
+import alt_matrix_engine
 # mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
 # actually called in this file; the "mtf_confluence_scanner" string at the
 # dependency-graph metadata route below is a plain literal, not a reference
@@ -717,6 +718,15 @@ async def lifespan(app: FastAPI):
     app.state.traveler_plan_task    = asyncio.create_task(traveler_plan_engine.run_traveler_plan_loop())
     app.state.executor_live_e1_task = asyncio.create_task(executor_live_e1_engine.run_executor_live_e1_loop())
     app.state.session_lock_task     = asyncio.create_task(run_session_lock_scheduler())
+    # Alt Matrix (SOL/ETH 4H swing, 2026-10-10) -- fully isolated from the
+    # two loops above (BTC Iron Wall, see alt_matrix_engine.py's own
+    # header). Safe to boot now with zero AltMatrixConfig rows configured
+    # yet: both loops simply find nothing enabled and do nothing each
+    # tick. DRY_RUN only until Andy's Step 6 live-API checks are done --
+    # no AltMatrixConfig row has been created for any account, so neither
+    # loop can place a real order regardless.
+    app.state.alt_matrix_signal_task = asyncio.create_task(alt_matrix_engine.run_alt_matrix_signal_loop())
+    app.state.alt_matrix_watch_task  = asyncio.create_task(alt_matrix_engine.run_alt_matrix_watch_loop())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
     # weekly_task (run_weekly_scheduler) removed 2026-09-24 -- see that
@@ -743,6 +753,8 @@ async def lifespan(app: FastAPI):
     app.state.traveler_plan_task.cancel()
     app.state.executor_live_e1_task.cancel()
     app.state.session_lock_task.cancel()
+    app.state.alt_matrix_signal_task.cancel()
+    app.state.alt_matrix_watch_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 

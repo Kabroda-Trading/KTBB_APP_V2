@@ -221,19 +221,24 @@ async def place_entry_and_protect(db: Session, account: ExecutorAccount, order_r
     client = _client_for(account)
     symbol = order_row.symbol.replace("/", "")
     pair = await _get_pair_precision(client, symbol)
-    qty_str = executor_sizing.round_qty_to_precision(order_row.qty, pair["base_precision"])
 
-    entry_resp = await client.place_order(symbol=symbol, qty=qty_str, side="BUY", trade_side="OPEN", order_type="MARKET")
-    entry_order_id = (entry_resp.get("data") or {}).get("orderId")
-    if entry_resp.get("code") not in (0, None) or not entry_order_id:
-        order_row.decision_reason = f"entry order placement failed: code={entry_resp.get('code')} msg={entry_resp.get('msg')!r}"
-        _log_transition(db, order_row, order_row.management_state, "CLOSED_ERROR", detail=entry_resp)
-        order_row.management_state = "CLOSED_ERROR"
-        _audit(db, "ERROR", order_row.decision_reason, account.id, order_row, detail=entry_resp)
-        return
-    order_row.entry_exchange_order_id = entry_order_id
+    if order_row.entry_exchange_order_id is None:
+        qty_str = executor_sizing.round_qty_to_precision(order_row.qty, pair["base_precision"])
+        entry_resp = await client.place_order(symbol=symbol, qty=qty_str, side="BUY", trade_side="OPEN", order_type="MARKET")
+        entry_order_id = (entry_resp.get("data") or {}).get("orderId")
+        if entry_resp.get("code") not in (0, None) or not entry_order_id:
+            order_row.decision_reason = f"entry order placement failed: code={entry_resp.get('code')} msg={entry_resp.get('msg')!r}"
+            _log_transition(db, order_row, order_row.management_state, "CLOSED_ERROR", detail=entry_resp)
+            order_row.management_state = "CLOSED_ERROR"
+            _audit(db, "ERROR", order_row.decision_reason, account.id, order_row, detail=entry_resp)
+            return
+        order_row.entry_exchange_order_id = entry_order_id
+    # else: entry already placed on a prior call (this function is safely
+    # resumable -- the watch loop calls it repeatedly for a PENDING_ENTRY
+    # row until it reaches FILLED/ENTRY_FILLED_UNPROTECTED, never
+    # re-placing a second real order).
 
-    detail_resp = await client.get_order_detail(order_id=entry_order_id)
+    detail_resp = await client.get_order_detail(order_id=order_row.entry_exchange_order_id)
     if detail_resp.get("code") not in (0, None):
         raise ValueError(f"get_order_detail returned a real API error: code={detail_resp.get('code')} msg={detail_resp.get('msg')!r}")
     data = detail_resp.get("data") or {}
@@ -252,7 +257,7 @@ async def place_entry_and_protect(db: Session, account: ExecutorAccount, order_r
     if len(positions) != 1:
         _log_transition(db, order_row, order_row.management_state, "CLOSED_ERROR", detail=pos_resp)
         order_row.management_state = "CLOSED_ERROR"
-        _audit(db, "ERROR", f"entry order {entry_order_id} confirmed FILLED but found {len(positions)} matching open positions, expected 1 -- CHECK THE EXCHANGE DIRECTLY", account.id, order_row, detail=pos_resp)
+        _audit(db, "ERROR", f"entry order {order_row.entry_exchange_order_id} confirmed FILLED but found {len(positions)} matching open positions, expected 1 -- CHECK THE EXCHANGE DIRECTLY", account.id, order_row, detail=pos_resp)
         return
     position = positions[0]
     order_row.position_id = position["positionId"]

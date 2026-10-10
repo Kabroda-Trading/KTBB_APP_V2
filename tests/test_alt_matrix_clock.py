@@ -111,3 +111,35 @@ def test_within_catchup_window_false_once_past_it():
 def test_within_catchup_window_true_at_exactly_zero_lag():
     eval_instant = datetime.datetime(2026, 10, 9, 4, 0, 5, tzinfo=UTC)
     assert amc.is_within_catchup_window(eval_instant, eval_instant, window_seconds=900) is True
+
+
+# ------------------------------------------------------------------ most_recent_eval_utc
+
+def test_most_recent_eval_mid_bar():
+    now = datetime.datetime(2026, 10, 9, 5, 30, 0, tzinfo=UTC)
+    assert amc.most_recent_eval_utc(now) == datetime.datetime(2026, 10, 9, 4, 0, 5, tzinfo=UTC)
+
+
+def test_most_recent_eval_before_this_boundarys_settle_delay_elapsed():
+    # now is 04:00:02 -- the bar just closed but the 5s settle delay
+    # hasn't passed yet, so the most recent REAL eval instant is still
+    # the PRIOR boundary's (00:00:05), not this one.
+    now = datetime.datetime(2026, 10, 9, 4, 0, 2, tzinfo=UTC)
+    assert amc.most_recent_eval_utc(now) == datetime.datetime(2026, 10, 9, 0, 0, 5, tzinfo=UTC)
+
+
+def test_most_recent_eval_exactly_at_the_eval_instant_itself():
+    now = datetime.datetime(2026, 10, 9, 4, 0, 5, tzinfo=UTC)
+    assert amc.most_recent_eval_utc(now) == now
+
+
+def test_most_recent_eval_is_the_complement_of_next_eval():
+    # For any instant strictly between two eval instants, most_recent and
+    # next must be exactly one BAR_SECONDS apart, and now must sit
+    # between them.
+    for h in range(24):
+        now = datetime.datetime(2026, 10, 9, h, 17, 0, tzinfo=UTC)
+        prev = amc.most_recent_eval_utc(now)
+        nxt = amc.next_eval_utc(now)
+        assert prev <= now < nxt
+        assert (nxt - prev).total_seconds() == amc.BAR_SECONDS

@@ -54,6 +54,19 @@ def seconds_until_next_eval(now_utc: datetime.datetime) -> float:
     return (next_eval_utc(now_utc) - now_utc).total_seconds()
 
 
+def most_recent_eval_utc(now_utc: datetime.datetime) -> datetime.datetime:
+    """The most recent HH:00:05 UTC evaluation instant AT OR BEFORE
+    now_utc -- exact mirror of next_eval_utc()'s own logic, flipped.
+    Used by the engine's signal loop on every wake (including right after
+    a restart) to find the boundary it should check against
+    is_within_catchup_window() for a possible catch-up evaluation."""
+    last_boundary = _floor_to_4h(now_utc)
+    candidate = last_boundary + datetime.timedelta(seconds=EVAL_DELAY_SECONDS)
+    if candidate > now_utc:
+        candidate -= datetime.timedelta(seconds=BAR_SECONDS)
+    return candidate
+
+
 def expected_closed_bar_open(eval_instant: datetime.datetime) -> datetime.datetime:
     """Given an eval instant (HH:00:05 UTC), the OPEN time of the 4H bar
     that instant is evaluating -- i.e. eval_instant minus the bar length
