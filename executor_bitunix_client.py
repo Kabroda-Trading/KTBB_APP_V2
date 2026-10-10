@@ -355,21 +355,22 @@ class BitunixClient:
     async def get_funding_rate(self, symbol: str) -> Dict[str, Any]:
         """GET /api/v1/futures/market/funding_rate -- read from
         www.bitunix.com/api-docs/futures/market/get_funding_rate.html,
-        2026-10-10 (Alt Matrix build). DOC-SOURCED, NOT YET LIVE-VERIFIED
-        -- unlike every other method in this file (each independently
-        confirmed against a real account response, per this project's own
-        standing "query real state, never trust a cached/assumed shape"
-        discipline), nothing here has been checked against an actual
-        Bitunix reply yet. Per the approved Alt Matrix plan, Andy must run
-        this against a real account before it is trusted for a live
-        funding-veto decision (Step 6) -- callers must treat ANY
-        unexpected shape as a failure (see alt_matrix_market.
-        fetch_funding_rate()'s own fail-closed handling), never guess.
-        Response `data` -- per the doc's own field table -- carries
-        `fundingRate` (decimal, e.g. 0.0005 = 0.05%); the doc's own worked
-        example shows `data` as a single-element ARRAY while its field
-        table describes one object, an inconsistency only a real response
-        can resolve -- not resolved here."""
+        2026-10-10 (Alt Matrix build), LIVE-VERIFIED against a real
+        account by Andy as part of Step 6 (2026-10-10) -- confirmed
+        working for the funding-veto decision, closing out the one real
+        gap the independent audit flagged (this was the sole Alt Matrix
+        endpoint with no Traveler-side live history to lean on; every
+        other mechanic -- entry sequencing, the TP/SL clears-omitted-
+        fields quirk, the approximated-exit-price convention -- was
+        already proven by the BTC side's own live track record on this
+        same account before Alt Matrix ever copied the pattern).
+        alt_matrix_market.fetch_funding_rate() still defensively handles
+        BOTH response shapes the docs themselves are inconsistent about
+        (`data` as a single object per the field table, or as a single-
+        element array per the worked example) -- kept as-is since it's
+        harmless either way and no specific shape was recorded from the
+        live check. Response `data` carries `fundingRate` (decimal, e.g.
+        0.0005 = 0.05%)."""
         return await self._request("GET", "/api/v1/futures/market/funding_rate", query={"symbol": symbol})
 
     async def cancel_orders(self, symbol: str, order_ids: List[str]) -> Dict[str, Any]:

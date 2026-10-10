@@ -35,16 +35,18 @@ async def fetch_confirmed_daily(symbol: str, target_bars: int = 300) -> List[Dic
 async def fetch_funding_rate(symbol: str, account: Optional[ExecutorAccount]) -> Optional[float]:
     """Returns the current funding rate as a decimal (e.g. 0.0005 = 0.05%),
     or None on ANY failure -- no credentials, network error, unexpected
-    API error code, or a response shape that doesn't match the DOC-
-    SOURCED-NOT-LIVE-VERIFIED shape executor_bitunix_client.
-    get_funding_rate() documents (see that method's own docstring -- Andy
-    must confirm this against a real account before it's trusted for a
-    real veto decision, per the approved plan's Step 6). Every Bitunix
-    call in this codebase is signed (no unauthenticated code path exists
-    in BitunixClient at all, confirmed by reading _request()), so this
-    still needs AN account's real credentials even though funding rate
-    itself is account-agnostic market data -- callers pass any one
-    enabled Alt Matrix LIVE account, never fabricate a dummy key."""
+    API error code, or a response shape that doesn't match what
+    executor_bitunix_client.get_funding_rate() documents (see that
+    method's own docstring -- LIVE-VERIFIED by Andy against a real
+    account, Step 6, 2026-10-10). Both response shapes the docs
+    themselves are inconsistent about are still handled defensively
+    below, since no specific shape was recorded from the live check.
+    Every Bitunix call in this codebase is signed (no unauthenticated
+    code path exists in BitunixClient at all, confirmed by reading
+    _request()), so this still needs AN account's real credentials even
+    though funding rate itself is account-agnostic market data --
+    callers pass any one enabled Alt Matrix LIVE account, never
+    fabricate a dummy key."""
     if account is None:
         return None
     import executor_accounts
