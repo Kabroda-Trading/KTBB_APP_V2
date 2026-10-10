@@ -8396,3 +8396,108 @@ Conducted the independent source re-verification of CC's build in KTBB_app_v2 (s
 VERDICT:
 All acceptance criteria met. Working tree clean. 100% GO for git push to origin/main and refresh Render.
 
+
+## 2026-10-09 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open (Step 1 of the Alt Matrix build complete and tested; requesting a ruling on Part 0 before Step 3 -- the portfolio concurrency check and any executor/live-order code)
+
+ALT MATRIX (SOL/ETH 4H SWING) -- STEP 1 COMPLETE (site commit 5cba8a6).
+Schema, clock, and D1 signal math only -- zero live-money risk, zero
+executor/live-order code written yet.
+
+Per your work order (CC_INTERFACE.md commit 4a65e4c) and the binding spec
+(ALT_MATRIX_D1_D2_D3_SPEC.md, commit 83942b0). Before writing any code I
+re-verified the empirical foundation myself, independently -- recomputed
+trade count/avgR/win-rate directly from the raw committed ledgers
+(brain/audit_evidence/altcoin_study_{sol,eth}/walkforward_{sol,eth}_
+ledger.csv), not taken on the spec's word: SOL n=34 +27.93R 47.1% win,
+ETH n=39 +14.35R 30.8% win -- both exact matches. That part is real.
+
+THREE PARALLEL EXPLORE AGENTS + ONE PLAN AGENT AUDITED THE SITE CODEBASE
+before any implementation -- every thread independently converged on
+"build a fully parallel system, not an extension of Traveler," matching
+your own spec's Iron Wall requirement.
+
+**IMPORTANT FINDING, NOT IN YOUR ORIGINAL REPORT -- NEEDS A RULING BEFORE
+I BUILD D3 (THE BREAKEVEN RATCHET / TRAILING EXIT / EXECUTOR CODE):**
+
+The Plan agent read `brain/audit_evidence/altcoin_study_sol/
+walkforward_htf_sol.py` directly (and I independently re-confirmed by
+reading the same lines myself, not taking the agent's word for it) and
+found the backtest that produced the +27.93R/+14.35R numbers does NOT
+actually test what the spec describes as the live D3 management logic:
+
+1. `stop_p` is set ONCE (line 56: `entry_p - 1.5*atr`) and never
+   reassigned anywhere in the script. **The +2R-to-breakeven stop move
+   (spec SS4.1) never executes in the backtest.** The script's OWN
+   generated report (line 146) claims "stop moves to Breakeven" --
+   that claim does not match what the code actually does. I confirmed
+   this myself by reading the loop, not relaying the agent's claim.
+2. ATR14 is `(high-low).rolling(14).mean()` (line 30) -- a plain range
+   mean, not Wilder's true-range ATR. If the live system should match
+   what was actually measured, it needs this exact (non-standard)
+   formula, not the textbook one.
+3. The funding-rate veto (spec SS2.3) has no backtest behind it at all --
+   no funding data is read anywhere in the script.
+4. The exit-check loop starts at `entry_idx + 1` (line 66) -- the entry
+   bar itself is never checked for a stop hit, so the backtest is
+   optimistic versus what a real exchange stop would do.
+5. The macro-trend comparator has a real, measured look-ahead: a 4H bar
+   is compared against ITS OWN day's daily SMA200 before that day has
+   actually finished. I built this as an explicit, named choice in
+   alt_matrix_signals.py (macro_gate_mode="spec" vs
+   "backtest_lookahead") rather than silently picking one, and MEASURED
+   the actual size of the discrepancy rather than assuming it: 2 of
+   SOL's 34 trades and 0 of ETH's 39 pass only under the look-ahead
+   timing, not under the spec's own literal wording ("daily bar fully
+   closed as of 00:00 UTC").
+
+This means: the +27.93R/+14.35R numbers are real validation of the D1
+entry signal (macro trend + Silver Cross), but say nothing reliable
+about the D3 exit/management logic as specified. I don't think this
+should block Step 1 (which is why I built and committed it already --
+D1's own gate math is on firm ground), but I don't want to build D3's
+breakeven-ratchet/trailing-exit logic or the live executor against a
+backtest that was reported as having tested it when it demonstrably
+didn't. Requesting a re-run with the breakeven move actually
+implemented, the funding veto actually implemented, a ruling on which
+ATR formula ships, and the entry-bar stop-hit check added -- before I
+build Step 4 (the executor).
+
+Also needs rulings, same reason (found while designing, not invented):
+- `TIME_EXPIRY` at 359 bars (~60 days) exists in the backtest but not in
+  the spec -- is this real or should a live position just run until the
+  trail/stop actually fires?
+- MFE timing: "price prints MFE >= 2.0R" (spec SS4.1) suggests intra-bar
+  wicks; the backtest only ever uses confirmed bar highs. Which does the
+  live system use?
+- Entry order shape: should the market entry carry its stop attached
+  atomically (no unprotected gap) or be placed sequentially (matching
+  how BTC Traveler's own executor_live_e1_engine.py does it)? Either way
+  needs a live Bitunix API check before it's trusted.
+
+ALSO FOUND, SEPARATE FROM THE ABOVE (flagging for completeness, not
+blocking): the portfolio-wide 3-position/20%-risk concurrency cap (spec
+SS5.2/5.3) is correct by code-level isolation (Alt Matrix reads BTC's own
+ExecutorOrder/exchange state read-only to decide ITS OWN stand-down,
+Traveler never reads or waits on Alt Matrix) but NOT correct at the
+exchange level: both systems share one physical account's MARGIN pool,
+so Alt Matrix opening first can get BTC's later order REJECTED BY THE
+EXCHANGE for insufficient margin -- a real way "BTC never blocked" can
+break with zero code coupling at all. This needs Andy's ruling (a
+margin-reserve floor, higher alt leverage, or a separate sub-account)
+before Step 3, not a silent assumption. Full detail in the approved plan
+file; will build Step 3 (the concurrency check) once this is resolved.
+
+TESTING: every new check mutation-tested (broken, confirmed caught,
+reverted). The parity claim is backed by real data, not asserted: fed
+the actual 4.5-year SOL/ETH Bitunix OHLC series through this module and
+reproduced the real committed ledgers exactly, bar for bar (entry price,
+exit price, stop price, net R, exit reason, every single trade). Full
+suite: 650 passed (615 baseline + 35 new). Real TestClient-lifespan boot
+check passed against the new schema.
+
+REQUESTING: a ruling on the Part 0 findings above before I build Step 3
+onward. No site action beyond what's already committed -- not deployed,
+no executor/live-order code exists yet.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
