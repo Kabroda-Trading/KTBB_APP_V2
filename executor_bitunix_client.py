@@ -352,6 +352,26 @@ class BitunixClient:
         return await self._request("GET", "/api/v1/futures/position/get_position_tiers",
                                     query={"symbol": symbol})
 
+    async def get_funding_rate(self, symbol: str) -> Dict[str, Any]:
+        """GET /api/v1/futures/market/funding_rate -- read from
+        www.bitunix.com/api-docs/futures/market/get_funding_rate.html,
+        2026-10-10 (Alt Matrix build). DOC-SOURCED, NOT YET LIVE-VERIFIED
+        -- unlike every other method in this file (each independently
+        confirmed against a real account response, per this project's own
+        standing "query real state, never trust a cached/assumed shape"
+        discipline), nothing here has been checked against an actual
+        Bitunix reply yet. Per the approved Alt Matrix plan, Andy must run
+        this against a real account before it is trusted for a live
+        funding-veto decision (Step 6) -- callers must treat ANY
+        unexpected shape as a failure (see alt_matrix_market.
+        fetch_funding_rate()'s own fail-closed handling), never guess.
+        Response `data` -- per the doc's own field table -- carries
+        `fundingRate` (decimal, e.g. 0.0005 = 0.05%); the doc's own worked
+        example shows `data` as a single-element ARRAY while its field
+        table describes one object, an inconsistency only a real response
+        can resolve -- not resolved here."""
+        return await self._request("GET", "/api/v1/futures/market/funding_rate", query={"symbol": symbol})
+
     async def cancel_orders(self, symbol: str, order_ids: List[str]) -> Dict[str, Any]:
         """POST /api/v1/futures/trade/cancel_orders -- verified against
         bitunix.com/api-docs, 2026-09-06. Batch endpoint (also used for a
