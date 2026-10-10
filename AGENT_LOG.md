@@ -8668,3 +8668,36 @@ back to `CLOSED_MANUAL` if the stop didn't fire. Mutation-tested.
 Full suite: 793 passed. Boot check passed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-10 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+ALT MATRIX IS LIVE. Andy's explicit call -- no staged DRY_RUN rollout,
+straight to live on Andy_Bitunix (confirmed directly, not assumed).
+
+Confirmed via the real admin UI on the live site (Andy walked through
+each screen with me):
+- Step 6 (Alt Matrix): SOL/USDT and ETH/USDT both enabled and saved.
+- Step 3 (Sizing Policy): preset F (Stair-Step Bands), real values
+  (step $10,000 / $1,000 per step / 10% below-first-step / $10,000
+  max) -- this was already Traveler's own live sizing policy on this
+  account before today, re-saved with no actual change to Traveler's
+  behavior (sizing policy is one shared row per account, not per
+  system -- this account's Traveler trades and Alt Matrix trades now
+  size off the exact same rule).
+- Credentials + LIVE mode: already in place, shared with Traveler.
+
+Real balance at enablement: $711.86 -- below the $10,000 first step, so
+the current real position size is ~10% of balance (~$71/trade) until
+the balance crosses $10k.
+
+No code changes in this entry -- purely confirming the operational
+state. The system now waits on its own 4H-boundary signal loop; the
+first real Alt Matrix order will place automatically the next time SOL
+or ETH clears D1 (macro + Silver Cross + funding) and portfolio
+admission together. I flagged to Andy that this first real fill is
+also the first time the full entry-and-protect sequence has ever run
+for Alt Matrix specifically (even though it's copied from Traveler's
+own proven pattern) -- worth a real look when it happens, not assumed
+to just work because the code path is similar.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
