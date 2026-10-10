@@ -531,3 +531,87 @@ def test_exits_run_before_entries_in_the_same_tick(db, monkeypatch):
     new_plan = db.query(AltMatrixPlan).filter_by(symbol="SOL/USDT", signal_bar_time=SIGNAL_BAR_TIME).first()
     new_order = db.query(AltMatrixOrder).filter_by(alt_matrix_plan_id=new_plan.id, account_id=account.id).first()
     assert new_order is not None and new_order.decision == "WOULD_PLACE"
+
+
+# ------------------------------------------------------------------ notify wiring (DRY_RUN paths)
+
+def _capture_emails(monkeypatch):
+    import notify
+    admin_calls, account_calls = [], []
+    monkeypatch.setattr(notify, "send_admin_email", lambda subject, body: admin_calls.append({"subject": subject, "body": body}) or True)
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id: account_calls.append({"subject": subject, "body": body, "account_id": account_id}) or True)
+    return admin_calls, account_calls
+
+
+def test_dry_run_entry_sends_account_email(db, monkeypatch):
+    account = _account(db, mode="DRY_RUN")
+    plan = _plan(db)
+    admin_calls, account_calls = _capture_emails(monkeypatch)
+    _common_entry_mocks(monkeypatch)
+
+    decision = _run(ame._try_enter_for_account(db, account, plan, "SOL/USDT", 100.0, 97.0, 2.0))
+
+    assert decision == "WOULD_PLACE"
+    assert len(account_calls) == 1
+    assert account_calls[0]["account_id"] == account.id
+    assert "Position Opened" in account_calls[0]["subject"]
+
+
+def test_dry_run_breakeven_sends_account_email(db, monkeypatch):
+    account = _account(db, mode="DRY_RUN")
+    plan = _plan(db)
+    order = _mgmt_order(db, account, plan, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0, r_distance=10.0)
+    candles = [_bar(125.0, high=130.0, low=120.0, offset=1)]
+    _, account_calls = _capture_emails(monkeypatch)
+
+    _run(ame._advance_one_order_management(db, account, order, candles, datetime.datetime.utcnow()))
+
+    assert len(account_calls) == 1
+    assert "Breakeven" in account_calls[0]["subject"]
+
+
+def test_dry_run_exit_sends_account_email_no_approximation_note(db, monkeypatch):
+    account = _account(db, mode="DRY_RUN")
+    plan = _plan(db)
+    order = _mgmt_order(db, account, plan, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0, r_distance=10.0)
+    candles = [_bar(85.0, high=92.0, low=88.0, offset=1)]
+    _, account_calls = _capture_emails(monkeypatch)
+
+    _run(ame._advance_one_order_management(db, account, order, candles, datetime.datetime.utcnow()))
+
+    assert len(account_calls) == 1
+    assert "Simulated close" in account_calls[0]["body"]
+    assert "Note:" not in account_calls[0]["body"]   # DRY_RUN never approximates
+
+
+def test_armed_plan_sends_admin_signal_email(db, monkeypatch):
+    candles_4h = _confirmed_candles(60, LAST_BAR_OPEN, close=100.0)
+    daily = _confirmed_candles(210, LAST_BAR_OPEN)
+    _patch_market(monkeypatch, candles_4h, daily)
+    verdict = {"signal": True, "reason": None, "cross_pass": True, "macro_pass": True, "funding_pass": True,
+               "atr14": 2.0, "daily_close": 110.0, "sma200": 100.0,
+               "ema21": 1.0, "ema21_prev": 0.9, "ema55": 1.0, "ema55_prev": 1.1, "funding_rate": 0.0}
+    monkeypatch.setattr(ams, "evaluate_d1", lambda *a, **kw: verdict)
+    admin_calls, _ = _capture_emails(monkeypatch)
+
+    _run(ame._process_symbol_signal(db, "SOL/USDT", EVAL_INSTANT))
+
+    assert len(admin_calls) == 1
+    assert "Silver Cross Confirmed" in admin_calls[0]["subject"]
+
+
+def test_skipped_macro_plan_sends_admin_signal_email_not_account_email(db, monkeypatch):
+    candles_4h = _confirmed_candles(60, LAST_BAR_OPEN)
+    daily = _confirmed_candles(210, LAST_BAR_OPEN)
+    _patch_market(monkeypatch, candles_4h, daily)
+    verdict = {"signal": False, "reason": "SKIPPED_MACRO", "cross_pass": True, "macro_pass": False,
+               "funding_pass": True, "atr14": 2.0, "daily_close": 90.0, "sma200": 100.0,
+               "ema21": 1.0, "ema21_prev": 0.9, "ema55": 1.0, "ema55_prev": 1.1, "funding_rate": 0.0}
+    monkeypatch.setattr(ams, "evaluate_d1", lambda *a, **kw: verdict)
+    admin_calls, account_calls = _capture_emails(monkeypatch)
+
+    _run(ame._process_symbol_signal(db, "SOL/USDT", EVAL_INSTANT))
+
+    assert len(admin_calls) == 1
+    assert "Cross Filtered" in admin_calls[0]["subject"]
+    assert len(account_calls) == 0   # no order was ever attempted for a non-ARMED plan

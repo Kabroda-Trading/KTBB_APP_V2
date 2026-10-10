@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session
 import executor_accounts
 import executor_sizing
 import market_data
-from database import ExecutorAccount, AltMatrixOrder, AltMatrixTransition
+from database import ExecutorAccount, AltMatrixOrder, AltMatrixPlan, AltMatrixTransition
 
 _FALLBACK_MMR_UNVERIFIED = 0.01   # same conservative fallback value executor_plan_builder.py uses
 _CLOSE_CONFIRM_INTERVAL_SEC = 1.0   # duplicated from executor_live_e1_engine.py's own proven confirm loop
@@ -93,6 +93,61 @@ def _audit(db: Session, event_type: str, message: str, account_id: int, order_ro
     merged_detail = dict(detail or {})
     merged_detail["alt_matrix_order_id"] = order_row.id
     executor_accounts.write_audit(db, event_type, message, account_id=account_id, actor="system", detail=merged_detail)
+
+
+def _order_dict_for_notify(db: Session, order_row: AltMatrixOrder, account: ExecutorAccount) -> Dict[str, Any]:
+    plan = db.query(AltMatrixPlan).filter_by(id=order_row.alt_matrix_plan_id).first()
+    return {
+        "id": order_row.id, "alt_matrix_plan_id": order_row.alt_matrix_plan_id,
+        "symbol": order_row.symbol, "account_id": account.id, "account_label": account.label,
+        "entry_fill_price": order_row.entry_fill_price, "sl_price_initial": order_row.sl_price_initial,
+        "risk_dollars_used": order_row.risk_dollars_used, "be_price": order_row.be_price,
+        "exit_reason": order_row.exit_reason, "exit_price": order_row.exit_price,
+        "realized_pnl_r": order_row.realized_pnl_r,
+        "date_key": plan.date_key if plan is not None else None,
+        # True unconditionally -- this module is LIVE-only, and market_close()
+        # is the sole caller of build_alt_matrix_exit_email() here, which
+        # ALWAYS approximates (close_position() carries no reliable fill
+        # price, see that function's own header). Harmless for the other
+        # two builders, which don't read this key at all.
+        "approximated": True,
+    }
+
+
+def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_row: AltMatrixOrder, **extra) -> None:
+    """send_account_email() wrapper, same never-let-a-notification-failure-
+    interrupt-real-execution convention as every notify call site in
+    executor_live_e1_engine.py -- `builder` names the alt_matrix_notify.py
+    function to call (imported lazily, matching this file's own existing
+    lazy-import convention for executor_bitunix_client)."""
+    try:
+        import notify
+        import alt_matrix_notify
+        fn = getattr(alt_matrix_notify, builder)
+        order_dict = _order_dict_for_notify(db, order_row, account)
+        subject, body = fn(order_dict, **extra) if extra else fn(order_dict)
+        notify.send_account_email(subject, body, account.id)
+    except Exception as e:
+        print(f"|| ALT MATRIX EXECUTOR || {builder} notification failed for order {order_row.id}: {e}")
+
+
+def _notify_unprotected(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder, detail: str) -> None:
+    """A real open position with no stop is the single most urgent alert
+    this module can raise -- same per-account L4 routing as every other
+    trade-execution email, matching executor_live_e1_engine.py's own
+    'unprotected open traveler position' alert."""
+    try:
+        import notify
+        notify.send_account_email(
+            f"KABRODA EXECUTOR ALERT -- unprotected open Alt Matrix position ({order_row.symbol})",
+            f"alt_matrix_order_id={order_row.id}, account={account.id} ({account.label}), "
+            f"positionId={order_row.position_id}\n\n"
+            f"{detail}\n\nCHECK THE EXCHANGE DIRECTLY NOW and manually place whatever's missing "
+            f"(stop at {order_row.sl_price_initial}).",
+            account.id,
+        )
+    except Exception as e:
+        print(f"|| ALT MATRIX EXECUTOR || unprotected-position notification failed for order {order_row.id}: {e}")
 
 
 def _client_for(account: ExecutorAccount) -> "executor_bitunix_client.BitunixClient":
@@ -275,6 +330,7 @@ async def place_entry_and_protect(db: Session, account: ExecutorAccount, order_r
                 db, "ERROR", f"REAL OPEN ALT MATRIX POSITION (positionId={order_row.position_id}) with NO STOP PLACED -- "
                 f"code={sl_resp.get('code')} msg={sl_resp.get('msg')!r}. Manual intervention required.",
                 account.id, order_row, detail=sl_resp)
+            _notify_unprotected(db, account, order_row, f"code={sl_resp.get('code')} msg={sl_resp.get('msg')!r}")
             return
         order_row.sl_exchange_order_id = sl_order_id
         order_row.sl_price_current = float(sl_str)
@@ -283,11 +339,13 @@ async def place_entry_and_protect(db: Session, account: ExecutorAccount, order_r
         _log_transition(db, order_row, "PENDING_ENTRY", "ENTRY_FILLED_UNPROTECTED", price=order_row.entry_fill_price)
         order_row.management_state = "ENTRY_FILLED_UNPROTECTED"
         _audit(db, "ERROR", f"REAL OPEN ALT MATRIX POSITION (positionId={order_row.position_id}) with NO STOP PLACED -- exception: {e}. Manual intervention required.", account.id, order_row)
+        _notify_unprotected(db, account, order_row, f"exception: {e}")
         return
 
     _log_transition(db, order_row, "PENDING_ENTRY", "FILLED", price=order_row.entry_fill_price)
     order_row.management_state = "FILLED"
     _audit(db, "ORDER_PLACED", f"Alt Matrix entry filled at {order_row.entry_fill_price} (positionId={order_row.position_id}), stop {sl_str} placed", account.id, order_row)
+    _notify_account(db, account, "build_alt_matrix_entry_email", order_row)
 
 
 async def amend_to_breakeven(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder, be_price: float) -> bool:
@@ -339,6 +397,7 @@ async def amend_to_breakeven(db: Session, account: ExecutorAccount, order_row: A
     _log_transition(db, order_row, "FILLED", "TRAILING", price=float(be_str))
     order_row.management_state = "TRAILING"
     _audit(db, "STOP_AMENDED", f"Alt Matrix order {order_row.id} stop amended to breakeven ({be_str})", account.id, order_row)
+    _notify_account(db, account, "build_alt_matrix_breakeven_email", order_row)
     return True
 
 
@@ -399,3 +458,4 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: AltMatr
     _log_transition(db, order_row, from_state, order_row.management_state, price=exit_price, realized_pnl_r=order_row.realized_pnl_r,
                      detail={"approximated": True})
     _audit(db, "POSITION_CLOSED", f"Alt Matrix order {order_row.id} closed: {exit_reason} at {exit_price} (approximated at last known live price -- close_position() carries no reliable fill price)", account.id, order_row)
+    _notify_account(db, account, "build_alt_matrix_exit_email", order_row, is_live=True)

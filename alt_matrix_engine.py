@@ -95,6 +95,65 @@ def _any_credentialed_account(db: Session) -> Optional[ExecutorAccount]:
     return None
 
 
+def _order_dict_for_notify(order_row: AltMatrixOrder, account: ExecutorAccount, plan: Optional[AltMatrixPlan] = None, **extra) -> Dict[str, Any]:
+    d = {
+        "id": order_row.id, "alt_matrix_plan_id": order_row.alt_matrix_plan_id,
+        "symbol": order_row.symbol, "account_id": account.id, "account_label": account.label,
+        "entry_fill_price": order_row.entry_fill_price, "sl_price_initial": order_row.sl_price_initial,
+        "risk_dollars_used": order_row.risk_dollars_used, "be_price": order_row.be_price,
+        "exit_reason": order_row.exit_reason, "exit_price": order_row.exit_price,
+        "realized_pnl_r": order_row.realized_pnl_r,
+        "date_key": plan.date_key if plan is not None else None,
+    }
+    d.update(extra)
+    return d
+
+
+def _notify_dry_run_entry(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> None:
+    try:
+        import notify
+        import alt_matrix_notify
+        plan = db.query(AltMatrixPlan).filter_by(id=order_row.alt_matrix_plan_id).first()
+        subject, body = alt_matrix_notify.build_alt_matrix_entry_email(_order_dict_for_notify(order_row, account, plan))
+        notify.send_account_email(subject, body, account.id)
+    except Exception as e:
+        print(f"|| ALT MATRIX ENGINE || entry notification failed for order {order_row.id}: {e}")
+
+
+def _notify_dry_run_breakeven(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> None:
+    try:
+        import notify
+        import alt_matrix_notify
+        plan = db.query(AltMatrixPlan).filter_by(id=order_row.alt_matrix_plan_id).first()
+        subject, body = alt_matrix_notify.build_alt_matrix_breakeven_email(_order_dict_for_notify(order_row, account, plan))
+        notify.send_account_email(subject, body, account.id)
+    except Exception as e:
+        print(f"|| ALT MATRIX ENGINE || breakeven notification failed for order {order_row.id}: {e}")
+
+
+def _notify_dry_run_exit(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> None:
+    try:
+        import notify
+        import alt_matrix_notify
+        plan = db.query(AltMatrixPlan).filter_by(id=order_row.alt_matrix_plan_id).first()
+        subject, body = alt_matrix_notify.build_alt_matrix_exit_email(_order_dict_for_notify(order_row, account, plan), is_live=False)
+        notify.send_account_email(subject, body, account.id)
+    except Exception as e:
+        print(f"|| ALT MATRIX ENGINE || exit notification failed for order {order_row.id}: {e}")
+
+
+def _notify_plan_signal(plan: AltMatrixPlan) -> None:
+    try:
+        import notify
+        import alt_matrix_notify
+        mail = alt_matrix_notify.notification_for_alt_matrix_plan(plan.__dict__)
+        if mail:
+            subject, body = mail
+            notify.send_admin_email(subject, body)
+    except Exception as e:
+        print(f"|| ALT MATRIX ENGINE || plan-signal notification failed for plan {plan.id}: {e}")
+
+
 def _record_transition(
     db: Session, order_row: AltMatrixOrder, from_state: Optional[str], to_state: str,
     price: Optional[float] = None, realized_pnl_r: Optional[float] = None,
@@ -155,6 +214,7 @@ async def _advance_one_order_management(
             order_row.sl_price_current = result["be_price"]
             _record_transition(db, order_row, "FILLED", "TRAILING", price=result["be_price"])
             order_row.management_state = "TRAILING"
+            _notify_dry_run_breakeven(db, account, order_row)
         return
 
     if result["action"] == "EXIT":
@@ -172,6 +232,7 @@ async def _advance_one_order_management(
             if order_row.r_distance:
                 order_row.realized_pnl_r = (exit_price - order_row.entry_fill_price) / order_row.r_distance
             _record_transition(db, order_row, from_state, order_row.management_state, price=exit_price, realized_pnl_r=order_row.realized_pnl_r)
+            _notify_dry_run_exit(db, account, order_row)
         _close_any_plan_fully_resolved(db, order_row.alt_matrix_plan_id)
 
 
@@ -288,6 +349,7 @@ async def _try_enter_for_account(
         order_row.entry_fill_time = datetime.datetime.utcnow()
         order_row.management_state = "FILLED"
         _record_transition(db, order_row, "PENDING_ENTRY", "FILLED", price=reference_price)
+        _notify_dry_run_entry(db, account, order_row)
     return "WOULD_PLACE"
 
 
@@ -338,6 +400,7 @@ async def _process_symbol_signal(db: Session, symbol: str, eval_instant: datetim
     )
     db.add(plan)
     db.flush()
+    _notify_plan_signal(plan)
 
     if status != "ARMED":
         return

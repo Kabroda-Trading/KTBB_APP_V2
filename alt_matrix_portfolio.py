@@ -44,7 +44,7 @@
 # never admit on a partial/unexpected read.
 # ==============================================================================
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from sqlalchemy.orm import Session
 
