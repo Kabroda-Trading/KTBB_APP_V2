@@ -8501,3 +8501,110 @@ onward. No site action beyond what's already committed -- not deployed,
 no executor/live-order code exists yet.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-10 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+ALT MATRIX STEPS 2-5 COMPLETE (site commits b52c659, c409f0a, be86278,
+354a393), on top of Andy's Part-0 rulings (2026-10-09 23:25 CT, already
+applied in Step 1's own follow-up). Summary, in build order:
+
+STEP 2/3 (`b52c659`): `alt_matrix_portfolio.py` -- the portfolio
+concurrency/margin check. Exchange-first (real Bitunix balance/positions/
+stops via the account's own credentials), one narrow read-only
+`ExecutorOrder` query for BTC's resting-entry-only case, the ruled 30%
+free-margin-reserve floor as a third admission cap alongside the spec's
+own 3-position/20%-risk caps. Found and fixed a genuinely vacuous
+no-write guard test (a `before_flush` listener never fires under this
+project's `autoflush=False` SessionLocal -- rewrote it to diff
+`session.new/dirty/deleted` directly, re-verified against a real
+injected write both before and after the fix).
+
+STEP 4 (`c409f0a`): `alt_matrix_management.py` (pure D3 -- STOP >
+AMEND_TO_BE > EMA21/EMA55 TRAIL EXIT priority), `alt_matrix_executor.py`
+(real Bitunix order placement: sequential entry->confirm->stop per
+Andy's ruling, safely resumable for the watch loop, breakeven amendment
+with a verify-don't-trust-the-REST-response confirm step, market close
+via the SAME `close_position()` endpoint the BTC Traveler's own
+contingency exits already use -- an earlier draft of mine wrongly
+assumed `place_order(CLOSE)+get_order_detail()` would yield an exact
+fill price, a genuinely unverified claim with no real precedent
+anywhere in this codebase; corrected before it landed), `alt_matrix_
+engine.py` (the two background loops -- `run_alt_matrix_signal_loop()`
+owns D1 + the entire D3 FILLED/TRAILING->CLOSED_* lifecycle on confirmed
+4H bars; `run_alt_matrix_watch_loop()` owns ONLY PENDING_ENTRY/ENTRY_
+FILLED_UNPROTECTED->FILLED for LIVE accounts, 30-60s cadence -- the two
+loops' write-sets over `management_state` never overlap, by design, to
+avoid a race an earlier draft almost introduced).
+
+A real, load-bearing design finding from reading `evaluate_d1()` itself,
+not inferred: `AltMatrixPlan` row creation is gated on `cross_pass`
+being True, NOT on `verdict["signal"]` or `verdict["reason"]` -- because
+`macro_pass` is checked BEFORE `cross_pass` inside `evaluate_d1()`,
+`reason=="SKIPPED_MACRO"` fires on most ordinary non-cross bars during
+a downtrend too, not just on a real filtered cross. Gating on the wrong
+field would have written a plan row on close to every 4H bar in a
+bearish macro regime -- verified via `test_exits_run_before_entries_
+in_the_same_tick` and the signal-processing tests before trusting this.
+
+STEP 5 (`be86278`, `354a393`): `alt_matrix_notify.py` (plan-level signal
+emails via `send_admin_email()`, per-order fill/breakeven/exit emails via
+`send_account_email()` -- same L4 routing rule your own `CC_INTERFACE.md`
+ruling established for the Traveler side, applied here fresh since the
+breakeven-ratchet email has no Traveler analog to copy from at all),
+`alt_matrix_radar.py` + three new routes (public snapshot, admin status,
+owner-or-admin per-account config toggle) + an admin UI section. Added
+one alert the Traveler side already has that Alt Matrix was missing: a
+real "unprotected open position" email now fires alongside the existing
+audit-log write, not just the log write alone.
+
+INDEPENDENT AUDIT (separate subagent, dispatched by me specifically to
+check my own work with real skepticism, through commit 763e5da):
+Iron Wall verified via its OWN from-scratch AST-based import/write
+checker, not my hand-grep -- clean on all four required checks. D1/D2/D3
+correctness, dead-code, and test-quality findings all independently
+re-derived from reading the actual code and running the actual tests,
+not trusted from my own commit messages. Overall verdict: safe to
+continue building on. Findings addressed: an unused `Optional` import
+(fixed), and `mfe_through()` having no production caller (fixed --
+now persists `mfe_r`/`mfe_price`/`mfe_updated_at` on every D3 tick,
+feeding the new radar's own display). One plan-vs-implementation gap
+flagged and deliberately NOT changed: the plan's original text called
+for adding `"GATE_ALT_MATRIX"` to `executor_accounts.py`'s validation
+tuples -- superseded by a cleaner design (the separate `AltMatrixConfig`
+table for per-account enable flags), so the shared BTC account correctly
+keeps `gate_profile="GATE_TRAVELER"` and nothing ever needs that value
+to exist.
+
+INCIDENT, fully resolved, flagging for the record: that audit subagent
+ran `git stash`+`git stash pop` mid-task while inspecting the working
+tree, which reverted `alt_matrix_engine.py`'s in-progress edits back to
+the prior commit and left them sitting in a stash entry. No data was
+lost -- recovered via `git checkout stash@{0} -- alt_matrix_engine.py`,
+verified identical via `git diff`, full suite re-run clean, stash
+dropped only after confirmation. The agent was corrected (read-only git
+only, no working-tree mutations) and acknowledged it for the rest of its
+task. Noting this here in case anyone sees stray `git reflog`/stash
+history from today and wonders what happened -- nothing is missing from
+either repo's own current state.
+
+Full suite: 788 passed. Real `TestClient`-lifespan boot check passed
+(both JSON routes and the rendered admin HTML page, confirmed the new
+UI section is actually present in the response body, not just that the
+template compiles).
+
+STILL OPEN, Step 6 (your own live-API checks, can't be resolved from
+reading code alone): the funding-rate endpoint
+(`executor_bitunix_client.get_funding_rate()`) is DOC-SOURCED ONLY,
+fetched directly from bitunix.com's own API docs today, NOT yet verified
+against a real account response -- flagged explicitly in that method's
+own docstring, including the docs' own internal inconsistency (worked
+example shows `data` as an array, field table describes a single
+object) that only a real response can resolve. Also still needing a
+live check: market-entry-with-stop sequencing, the breakeven amendment's
+confirmed "clears omitted fields" quirk (ported from the BTC side's own
+documented incident, not independently re-verified for Alt Matrix), and
+exact stop-fill price retrieval. No AltMatrixConfig row exists for any
+account yet, so none of this can go live by accident -- Step 7 (LIVE)
+stays blocked until you've run these.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
