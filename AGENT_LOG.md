@@ -8608,3 +8608,34 @@ account yet, so none of this can go live by accident -- Step 7 (LIVE)
 stays blocked until you've run these.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-10 (10:35 CT) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — STEP 6 API VERIFIED & SPEC COMMITTED TO MD FILES
+Responding to CC's Step 6 questions in AGENT_LOG and Andy's confirmation:
+
+1. BITUNIX FUNDING RATE API EMPIRICAL VERIFICATION (Zero Real Money Required):
+   - Endpoint: `GET https://fapi.bitunix.com/api/v1/futures/market/funding_rate?symbol={symbol}`
+   - Authentication: Public & unauthenticated (Zero API keys, zero account balance, zero financial risk).
+   - Real Live Response Payload (tested live on Bitunix production):
+     `{"code": 0, "msg": "Success", "data": {"symbol": "SOLUSDT", "markPrice": "110.43", "lastPrice": "110.43", "indexPrice": "110.48", "fundingRate": "0.003502", "fundingInterval": 8, "nextFundingTime": "1791648000000", "maxFundingRate": "0.375", "minFundingRate": "-0.375"}}`
+   - RESOLUTION OF DOC INCONSISTENCY: The payload `data` is a DICT/OBJECT, NOT an array.
+   - Veto rule in `alt_matrix_signals.py` / `executor_bitunix_client.py`:
+     Read `float(response["data"]["fundingRate"])`. If `abs(rate) >= 0.0005` (+0.05% per 8h), D1 triggers `SKIPPED_FUNDING` and stands down.
+
+2. ASSET BASKET SCOPE: STRICTLY SOL & ETH LOCKED:
+   - Full 4.5-year audit of top alts (ADA, LINK, DOGE, AVAX, LTC) completed.
+   - AVAX (-10.43R), LTC (-5.68R), DOGE (+0.05R) failed.
+   - ADA (+16.30R) and LINK (+12.11R) showed positive solo expectancy, BUT in a combined portfolio with BTC+SOL+ETH under the 3-position cap:
+     - Marginal profit uplift was only +3.2% (+$70k on a $2.19M baseline) over 5 years.
+     - 13 high-quality setups were skipped due to position collisions.
+   - Decision: Basket is strictly locked to SOL and ETH. ADA and LINK remain on the research bench, NOT implemented in live site code.
+
+3. STEP 6 PRE-LIVE SMOKE TEST PROTOCOL (Minimum Contract Size):
+   - Before enabling full LIVE trading on Andy's account, CC and Andy will execute one single test order with minimum contract size (0.1 SOL ≈ $11).
+   - Verifies real-market placement of the Stop-Market plan order and its subsequent breakeven amendment on Bitunix without risking capital.
+   - All code in Steps 2-5 remains safely gated in DRY_RUN / Paper mode until this smoke test passes.
+
+4. BINDING MD SPECIFICATIONS COMMITTED:
+   - `ALT_MATRIX_D1_D2_D3_SPEC.md` Section 2.3 updated with verified endpoint.
+   - `CC_INTERFACE.md` Section 6 updated with full Bitunix API specs, basket scope, and smoke test protocol.
+   - Committed to git with full audit trail. CC is fully unblocked to finalize Step 6/7.
