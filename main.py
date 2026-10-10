@@ -40,6 +40,7 @@ import kabroda_mas_flow
 import traveler_plan_engine
 import executor_live_e1_engine
 import alt_matrix_engine
+import alt_matrix_radar
 # mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
 # actually called in this file; the "mtf_confluence_scanner" string at the
 # dependency-graph metadata route below is a plain literal, not a reference
@@ -1044,6 +1045,22 @@ async def api_radar_traveler_snapshot(db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e), "locked": False, "symbol": "BTCUSDT"})
 
 
+@app.get("/api/radar/alt-matrix-snapshot")
+async def api_radar_alt_matrix_snapshot(db: Session = Depends(get_db)):
+    """Alt Matrix's own public radar feed -- Step 5. Public, no login,
+    same openness precedent as /api/radar/traveler-snapshot and
+    /api/gravity/scan above. Pure DB reads via alt_matrix_radar.py, zero
+    import of/call into any Traveler module or table (BTC Iron Wall
+    applies to display code too). Same graceful-degradation wrapping as
+    the traveler route above -- a DB hiccup here must never surface as a
+    raw, unparseable 500 to the frontend."""
+    try:
+        return JSONResponse(alt_matrix_radar.get_public_alt_matrix_snapshot(db))
+    except Exception as e:
+        print(f"[RADAR] alt-matrix-snapshot failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "symbols": {}})
+
+
 @app.get("/api/live-price")
 async def api_live_price():
     """Lightweight BTC price tick — single candle fetch, no macro math."""
@@ -1322,7 +1339,7 @@ async def api_admin_traveler_plan_status(request: Request, db: Session = Depends
 from database import (
     ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder,
     ExecutorAuditLog as _ExecutorAuditLog, ExecutorGlobalConfig as _ExecutorGlobalConfig,
-    ExecutorSizingPolicy as _ExecutorSizingPolicy,
+    ExecutorSizingPolicy as _ExecutorSizingPolicy, AltMatrixConfig as _AltMatrixConfig,
 )
 import executor_accounts as _executor_accounts
 import executor_control as _executor_control
@@ -1370,6 +1387,16 @@ class ExecutorSetCredentialsRequest(BaseModel):
 
 class ExecutorKillSwitchRequest(BaseModel):
     reason: Optional[str] = None
+
+
+class AltMatrixConfigRequest(BaseModel):
+    """Either field omitted leaves it unchanged, same independent-field
+    convention as ExecutorProfileChangeRequest below. On first touch for
+    an account with no AltMatrixConfig row yet, the row is created with
+    the schema's own defaults (both True) before any provided override
+    is applied."""
+    sol_enabled: Optional[bool] = None
+    eth_enabled: Optional[bool] = None
 
 
 class ExecutorModeChangeRequest(BaseModel):
@@ -1468,6 +1495,29 @@ def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, An
         "mgmt_profile": _executor_accounts.mgmt_profile_of(account),
         "sizing_confirmed": policy.preset_name not in (None, "steady_grow", "conservative"),
     }
+
+
+@app.get("/api/admin/alt-matrix-status")
+async def api_admin_alt_matrix_status(request: Request, db: Session = Depends(get_db)):
+    """Alt Matrix's own admin status surface -- Step 5, the counterpart to
+    /api/admin/traveler-plan-status above. Admin-only (same ctx["is_admin"]
+    check that route uses, not mere login) -- unlike /api/executor/
+    accounts/* below, this is a cross-account visibility page by design
+    (mirrors the Traveler admin route's own scope, not the mutual-
+    isolation rule executor_owner_or_admin() enforces for account
+    mutations) -- a reasonable simplification given Andy's Option A
+    ruling means there's realistically one Alt Matrix account in
+    production, not a multi-tenant concern today. Pure DB reads via
+    alt_matrix_radar.py, zero decision logic, same graceful-degradation
+    wrapping as every other radar/admin route in this file."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    try:
+        return JSONResponse(alt_matrix_radar.get_admin_alt_matrix_status(db))
+    except Exception as e:
+        print(f"[ADMIN] alt-matrix-status failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e)})
 
 
 @app.get("/api/executor/accounts")
@@ -1625,6 +1675,59 @@ async def api_executor_set_account_profile(account_id: int, request: Request, bo
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     db.commit()
     return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
+
+
+@app.get("/api/executor/accounts/{account_id}/alt-matrix-config")
+async def api_executor_get_alt_matrix_config(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """Read counterpart to the POST route below -- same ownership check.
+    Deliberately does NOT create a row on a plain read (unlike the POST
+    route's own lazy-init-on-write idiom) -- a page load should never
+    have a side effect; reports the schema's own defaults (both True)
+    for an account with no row yet, matching what a real row would
+    contain the moment it's first created."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    cfg = db.query(_AltMatrixConfig).filter_by(account_id=account_id).first()
+    return JSONResponse({"ok": True, "config": {
+        "account_id": account_id,
+        "sol_enabled": cfg.sol_enabled if cfg is not None else True,
+        "eth_enabled": cfg.eth_enabled if cfg is not None else True,
+    }})
+
+
+@app.post("/api/executor/accounts/{account_id}/alt-matrix-config")
+async def api_executor_set_alt_matrix_config(account_id: int, request: Request, body: AltMatrixConfigRequest, db: Session = Depends(get_db)):
+    """Alt Matrix's own per-account enable toggle -- Step 5. Same
+    ownership-based auth as every other account mutation route above
+    (_executor_owner_or_admin -- full mutual isolation between users on
+    the executor domain, not an admin-everywhere check). Lazily creates
+    the AltMatrixConfig row on first touch, matching executor_accounts.
+    get_or_init_sizing_policy()'s own established lazy-init idiom for a
+    brand-new per-account config table."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    cfg = db.query(_AltMatrixConfig).filter_by(account_id=account_id).first()
+    if cfg is None:
+        cfg = _AltMatrixConfig(account_id=account_id)
+        db.add(cfg)
+        db.flush()
+    if body.sol_enabled is not None:
+        cfg.sol_enabled = body.sol_enabled
+    if body.eth_enabled is not None:
+        cfg.eth_enabled = body.eth_enabled
+    db.commit()
+    return JSONResponse({"ok": True, "config": {
+        "account_id": cfg.account_id, "sol_enabled": cfg.sol_enabled, "eth_enabled": cfg.eth_enabled,
+    }})
 
 
 @app.post("/api/executor/accounts/{account_id}/assumed-balance")

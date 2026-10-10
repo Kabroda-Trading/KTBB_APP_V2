@@ -496,6 +496,17 @@ async function loadAccounts() {
                 <div id="goLiveBody-${a.id}"><p class="empty">Loading...</p></div>
             </div>
 
+            <div class="setup-step" id="altMatrix-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
+                <div class="setup-step-title" style="color:#93c5fd;"><span class="setup-step-num">6</span> Alt Matrix (SOL/ETH 4H swing)</div>
+                <p class="empty" style="padding:0 0 8px;">A fully separate system from this account's own BTC Traveler trading above -- own schema, own loops, own risk sizing. This account's gate_profile/mgmt_profile (step 4) are unaffected either way; this only controls whether the Alt Matrix engine will ever place an order for THIS account on the symbol(s) checked below.</p>
+                <div class="risk-form">
+                    <label style="flex-direction:row; align-items:center; gap:6px;"><input type="checkbox" id="altMatrixSol-${a.id}"> SOL/USDT</label>
+                    <label style="flex-direction:row; align-items:center; gap:6px;"><input type="checkbox" id="altMatrixEth-${a.id}"> ETH/USDT</label>
+                    <button class="btn btn-ok" onclick="saveAltMatrixConfig(${a.id})" style="align-self:flex-end;">SAVE</button>
+                </div>
+                <p class="empty" id="altMatrixSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
+            </div>
+
             <details style="margin-top:10px;">
                 <summary>Advanced / Legacy Risk State</summary>
                 <div class="risk-form" id="riskForm-${a.id}">
@@ -527,7 +538,34 @@ async function loadAccounts() {
         loadSizingPolicy(a.id);
         renderStrategyProfileSection(a.id, a);
         renderGoLiveSection(a.id, a);
+        loadAltMatrixConfig(a.id);
     }
+}
+
+// ------------------------------------------------------------------ Alt Matrix per-account config (Step 5)
+
+async function loadAltMatrixConfig(accountId) {
+    const resp = await api(`/api/executor/accounts/${accountId}/alt-matrix-config`);
+    if (!resp.ok) return;
+    document.getElementById(`altMatrixSol-${accountId}`).checked = !!resp.config.sol_enabled;
+    document.getElementById(`altMatrixEth-${accountId}`).checked = !!resp.config.eth_enabled;
+}
+
+async function saveAltMatrixConfig(accountId) {
+    const sol_enabled = document.getElementById(`altMatrixSol-${accountId}`).checked;
+    const eth_enabled = document.getElementById(`altMatrixEth-${accountId}`).checked;
+    const resp = await api(`/api/executor/accounts/${accountId}/alt-matrix-config`, {
+        method: "POST", body: JSON.stringify({ sol_enabled, eth_enabled }),
+    });
+    const resultEl = document.getElementById(`altMatrixSaveResult-${accountId}`);
+    resultEl.style.display = "block";
+    if (!resp.ok) {
+        resultEl.textContent = resp.error || "failed to save Alt Matrix config";
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.textContent = `Saved: SOL ${resp.config.sol_enabled ? "enabled" : "disabled"}, ETH ${resp.config.eth_enabled ? "enabled" : "disabled"}.`;
+    resultEl.style.color = "#6ee7b7";
 }
 
 // ------------------------------------------------------------------ Strategy Profile (Phase 2 Ruling A, 2026-09-15 22:10 CT)

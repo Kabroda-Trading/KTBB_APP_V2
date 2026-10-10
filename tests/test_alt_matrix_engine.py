@@ -269,6 +269,20 @@ def test_advance_management_returns_none_action_leaves_order_untouched(db):
     assert db.query(AltMatrixTransition).count() == 0
 
 
+def test_mfe_is_persisted_every_tick_even_with_no_action(db):
+    account = _account(db)
+    plan = _plan(db)
+    order = _mgmt_order(db, account, plan, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0, r_distance=10.0)
+    candles = [_bar(108.0, high=112.0, low=106.0, offset=1)]   # MFE (112-100)/10=1.2R -- below any action threshold
+
+    _run(ame._advance_one_order_management(db, account, order, candles, datetime.datetime.utcnow()))
+
+    assert order.management_state == "FILLED"   # no action fired
+    assert order.mfe_r == pytest.approx(1.2)
+    assert order.mfe_price == pytest.approx(112.0)
+    assert order.mfe_updated_at is not None
+
+
 # ------------------------------------------------------------------ _try_enter_for_account
 
 def _common_entry_mocks(monkeypatch, admitted=True, sizing_ok=True):

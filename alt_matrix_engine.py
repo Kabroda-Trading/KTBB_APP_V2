@@ -200,6 +200,24 @@ async def _advance_one_order_management(
         "entry_fill_time": order_row.entry_fill_time,
         "be_amended": order_row.be_amended,
     }
+
+    # Persist MFE every tick, action or not -- gives alt_matrix_radar.py a
+    # cheap, already-fresh value to display without re-fetching candles.
+    # Real production caller for alt_matrix_management.mfe_through(),
+    # resolving the "parallel implementation" gap the independent audit
+    # flagged (advance() computes its own running MFE internally for the
+    # amend/trail decision, which must stay separate -- see that
+    # function's own docstring -- but nothing was calling THIS pure
+    # helper in production before now).
+    if order_row.entry_fill_price is not None and order_row.r_distance:
+        entry_epoch = order_row.entry_fill_time.timestamp() if order_row.entry_fill_time else None
+        since_entry = [c for c in candles_4h_confirmed if entry_epoch is not None and c.get("time") is not None and c["time"] > entry_epoch]
+        if since_entry:
+            mfe = alt_matrix_management.mfe_through(since_entry, order_row.entry_fill_price, order_row.r_distance)
+            order_row.mfe_r = mfe
+            order_row.mfe_price = order_row.entry_fill_price + mfe * order_row.r_distance
+            order_row.mfe_updated_at = now_utc
+
     result = alt_matrix_management.advance(order_dict, candles_4h_confirmed, now_utc)
     if result is None:
         return
