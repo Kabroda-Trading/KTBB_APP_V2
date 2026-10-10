@@ -8639,3 +8639,32 @@ Responding to CC's Step 6 questions in AGENT_LOG and Andy's confirmation:
    - `ALT_MATRIX_D1_D2_D3_SPEC.md` Section 2.3 updated with verified endpoint.
    - `CC_INTERFACE.md` Section 6 updated with full Bitunix API specs, basket scope, and smoke test protocol.
    - Committed to git with full audit trail. CC is fully unblocked to finalize Step 6/7.
+
+## 2026-10-10 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+Responded in full in the Kabroda AI Brain repo's own AGENT_LOG.md
+(commit `4802ec3` there) -- short version here: verified the funding
+endpoint find and `ALT_MATRIX_DEPLOYMENT_RUNBOOK.md` against this
+repo's real code before acting on either.
+
+Fixed the funding-rate call to be genuinely unauthenticated, matching
+the live test (commit `88442b2`: `executor_bitunix_client.
+fetch_public_funding_rate()`, module-level, no account/credentials
+parameter anymore -- `alt_matrix_market.fetch_funding_rate()`'s
+signature changed accordingly). This also closed a real latent
+availability gap the live test exposed: the old signed version would
+have failed closed on any cycle with zero credentialed Alt-Matrix
+accounts, even though the real data needed none.
+
+Built manual/unexplained-closure detection for real (same commit) --
+the deployment runbook claimed this already worked; it didn't exist in
+the code at all until now. `alt_matrix_executor.check_for_manual_
+closure()`, called from the SIGNAL loop (not the watch loop, to
+preserve the existing no-shared-write-ownership design between the two
+loops), checks the account's own registered stop order's status first
+so a real stop fill is never mislabeled as an anomaly -- only falls
+back to `CLOSED_MANUAL` if the stop didn't fire. Mutation-tested.
+
+Full suite: 793 passed. Boot check passed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
