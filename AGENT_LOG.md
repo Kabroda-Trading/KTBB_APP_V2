@@ -8701,3 +8701,52 @@ own proven pattern) -- worth a real look when it happens, not assumed
 to just work because the code path is similar.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-11 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+REAL PRODUCTION BUG FOUND AND FIXED -- REARM_WATCH never actually
+expired. Andy received a "No Re-arm Trade" email this morning (subject
+tagged [2026-10-07], sent 2026-10-11 ~7:05am -- a 4-day-old plan
+resolving today) and asked why. Root cause confirmed by reading the
+code directly, not guessed: both polling call sites (traveler_plan_
+engine.py's DRY_RUN walk, executor_live_e1_engine.py's LIVE poll)
+recomputed `rearm_watch_deadline = session_manager.next_lock_utc(now_utc)`
+FRESH on every single poll instead of reading a value frozen once at
+REARM_WATCH entry. Since next_lock_utc() always returns a point ~1 day
+ahead of whatever "now" it's given, the deadline was a moving target
+that could never actually be reached -- REARM_WATCH stayed open
+indefinitely instead of closing at the next lock as designed, until an
+actual re-cross eventually happened days later. Andy was explicit this
+needed a real root-cause fix, not a patch -- confirmed with him directly
+at each step before committing.
+
+Fix (site commit `577c172`), matching this project's own established
+pattern for the identical class of bug (last week's WAITING_CROSS
+session_expires_at fix): new persisted `TravelerPlan.rearm_watch_
+deadline` column, computed ONCE at REARM_WATCH entry and read back on
+every poll instead of recomputed, plus a one-time backfill for any
+already-stuck plan (gives it one real day from deploy time, never
+fabricating a historical entry time this codebase has no record of).
+
+A SECOND real bug caught during my own verification, not before
+shipping: my first LIVE-side fix anchored the deadline to a NAIVE
+datetime (`exit_time`), which `next_lock_utc()` silently misinterprets
+depending on the server's own local timezone -- proved directly (this
+dev machine is Central Time; the naive input produced a deadline a full
+day wrong vs. the same instant passed in aware). Fixed to use a fresh
+aware timestamp instead.
+
+Verification: mutation-tested both polling sites (reintroduced the
+exact original bug, confirmed it reproduces the real failure signature,
+reverted). `mgmt_e1_stack.start_rearm_watch_if_eligible()` had NO direct
+unit test anywhere in this codebase before this commit, despite a stale
+comment claiming otherwise (confirmed by grep) -- added 7 real tests.
+Added end-to-end regression tests through the REAL polling loops for
+both DRY_RUN and LIVE (the existing pure-function tests mock exactly
+the function whose input was buggy, so they could never have caught
+this). Full suite: 802 passed, 0 failed. Real boot check passed.
+Scope-verified: only the re-arm mechanism is touched -- the primary
+WAITING_CROSS/WAITING_TOUCH path, D3's own exit priority order, and Alt
+Matrix (fully separate system) are all unaffected.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
