@@ -57,7 +57,7 @@ C5_LOOKBACK_BARS = 6
 MGMT_E1_TERMINAL_STATES = ("CLOSED_STOP", "CLOSED_C5_EXIT", "CLOSED_BBWP_EXIT", "CLOSED_T1", "CLOSED_TIME", "CLOSED_ERROR")
 
 
-def start_rearm_watch_if_eligible(traveler_plan, order) -> bool:
+def start_rearm_watch_if_eligible(traveler_plan, order, rearm_watch_deadline=None) -> bool:
     """2026-10-06 (R1 re-arm, Andy ruling 15:24 CT) -- the ONE shared
     REARM_WATCH-trigger guard, called right after EITHER poll site
     (traveler_plan_engine.py's DRY_RUN walk, executor_live_e1_engine.py's
@@ -67,6 +67,22 @@ def start_rearm_watch_if_eligible(traveler_plan, order) -> bool:
     function mutates traveler_plan directly, unlike gate_traveler.py's own
     pure functions, since its whole job IS the state transition + its own
     idempotency guard, not a value computation the caller applies later).
+
+    rearm_watch_deadline (2026-10-11 fix, real production incident): the
+    caller computes this ONCE, via session_manager.next_lock_utc() at the
+    exact moment REARM_WATCH is entered, and passes it in here to be
+    PERSISTED on the plan -- this module stays decoupled from session_
+    manager.py (same "D1/D2 only" reasoning gate_traveler.py's own
+    advance_rearm_watch() already states for taking this same value as a
+    parameter rather than computing it itself). Before this fix, both
+    polling call sites recomputed next_lock_utc(now_utc) FRESH on every
+    single poll instead of reading a frozen value -- since that function
+    always returns a point ~1 day ahead of whatever "now" it's given, the
+    deadline was a moving target that could never actually be reached,
+    and REARM_WATCH stayed open indefinitely instead of closing at the
+    next lock as designed. A missing/None value here is left as None on
+    the plan (never fabricated) -- the caller is expected to always pass
+    a real one on a genuine REARM_WATCH entry.
 
     Three guards, all required:
     1. order.is_rearm must be False -- a re-arm order closing via C5_EXIT
@@ -91,6 +107,7 @@ def start_rearm_watch_if_eligible(traveler_plan, order) -> bool:
     if traveler_plan is None or traveler_plan.rearm_status is not None:
         return False
     traveler_plan.rearm_status = "REARM_WATCH"
+    traveler_plan.rearm_watch_deadline = rearm_watch_deadline
     traveler_plan.rearm_last_transition_reason = (
         "primary journey closed via C5_EXIT -- watching for a re-arm until the next lock"
     )

@@ -280,3 +280,94 @@ def test_advance_does_not_exit_on_a_forming_1h_bar_dip():
     later = datetime.datetime.fromtimestamp(h1[-1]["time"] + 3600 + 60, tz=datetime.timezone.utc)
     result = e1.advance(order, m5, h1, h4, later)
     assert result is not None and result["exit_reason"] == "C5_EXIT"
+
+
+# ------------------------------------------------------------------ start_rearm_watch_if_eligible()
+# Direct unit coverage -- a prior comment in test_executor_live_e1_engine.py
+# claimed this was already covered here; it never actually was (confirmed
+# by grep before writing these). That file's own tests cover the LIVE
+# wiring (a real C5_EXIT closure flips rearm_status via this hook); these
+# cover the function's own guard logic and the 2026-10-11 deadline-
+# persistence fix directly, with no DB/ORM involved -- the function only
+# ever does plain attribute get/set, so a simple namespace stands in fine.
+
+class _FakePlan:
+    def __init__(self, rearm_status=None):
+        self.rearm_status = rearm_status
+        self.rearm_watch_deadline = None
+        self.rearm_last_transition_reason = None
+
+
+class _FakeOrder:
+    def __init__(self, is_rearm=False, exit_reason="C5_EXIT"):
+        self.is_rearm = is_rearm
+        self.exit_reason = exit_reason
+
+
+DEADLINE = datetime.datetime(2026, 10, 12, 13, 0, 5, tzinfo=datetime.timezone.utc)
+
+
+def test_rearm_watch_entered_on_a_real_primary_c5_exit_close():
+    plan = _FakePlan()
+    order = _FakeOrder(is_rearm=False, exit_reason="C5_EXIT")
+    entered = e1.start_rearm_watch_if_eligible(plan, order, DEADLINE)
+    assert entered is True
+    assert plan.rearm_status == "REARM_WATCH"
+    assert plan.rearm_last_transition_reason is not None
+
+
+def test_rearm_watch_deadline_is_persisted_exactly_as_passed_not_recomputed():
+    # The actual 2026-10-11 fix: the caller computes this ONCE and this
+    # function must store it verbatim, never derive its own value.
+    plan = _FakePlan()
+    order = _FakeOrder()
+    e1.start_rearm_watch_if_eligible(plan, order, DEADLINE)
+    assert plan.rearm_watch_deadline == DEADLINE
+
+
+def test_rearm_watch_deadline_defaults_to_none_if_caller_omits_it():
+    # Documented behavior, not a silent guess -- a caller that forgets to
+    # pass a real deadline gets None on the plan, not a fabricated value.
+    plan = _FakePlan()
+    order = _FakeOrder()
+    e1.start_rearm_watch_if_eligible(plan, order)
+    assert plan.rearm_watch_deadline is None
+
+
+def test_rearm_watch_not_entered_for_a_rearm_orders_own_closure():
+    # Guard 1 -- "ONE re-arm max per lock day": a re-arm leg's own C5_EXIT
+    # must never trigger a SECOND watch.
+    plan = _FakePlan()
+    order = _FakeOrder(is_rearm=True, exit_reason="C5_EXIT")
+    entered = e1.start_rearm_watch_if_eligible(plan, order, DEADLINE)
+    assert entered is False
+    assert plan.rearm_status is None
+
+
+def test_rearm_watch_not_entered_for_a_non_c5_exit_reason():
+    # Guard 2 -- the re-arm study's own population was C5_EXIT journeys
+    # only; STOP/T1/TIME/BBWP_EXIT closures never start a watch.
+    for reason in ("STOP", "T1", "TIME", "BBWP_EXIT"):
+        plan = _FakePlan()
+        order = _FakeOrder(is_rearm=False, exit_reason=reason)
+        entered = e1.start_rearm_watch_if_eligible(plan, order, DEADLINE)
+        assert entered is False
+        assert plan.rearm_status is None
+
+
+def test_rearm_watch_idempotent_against_a_second_c5_exit_order_same_plan():
+    # Guard 3 -- multiple accounts' orders for the SAME plan closing via
+    # C5_EXIT in the same poll tick must not re-trigger or overwrite an
+    # already-entered watch.
+    plan = _FakePlan(rearm_status="REARM_WATCH")
+    plan.rearm_watch_deadline = DEADLINE
+    order = _FakeOrder(is_rearm=False, exit_reason="C5_EXIT")
+    different_deadline = DEADLINE + datetime.timedelta(days=1)
+    entered = e1.start_rearm_watch_if_eligible(plan, order, different_deadline)
+    assert entered is False
+    assert plan.rearm_watch_deadline == DEADLINE   # unchanged, not overwritten
+
+
+def test_rearm_watch_handles_a_missing_plan_without_crashing():
+    order = _FakeOrder(is_rearm=False, exit_reason="C5_EXIT")
+    assert e1.start_rearm_watch_if_eligible(None, order, DEADLINE) is False

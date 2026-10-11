@@ -601,7 +601,20 @@ async def _finalize_traveler_close(
     # row) that already committed for this tick, same reasoning as every
     # other post-closure side effect in this function.
     try:
-        if mgmt_e1_stack.start_rearm_watch_if_eligible(traveler_plan_row, order_row):
+        # 2026-10-11 fix: computed ONCE here, at the real moment the
+        # primary closed and REARM_WATCH is entered -- NOT recomputed on
+        # every later poll. See mgmt_e1_stack.start_rearm_watch_if_
+        # eligible()'s own docstring for the real production incident
+        # this fixes. Deliberately a FRESH datetime.now(timezone.utc),
+        # NOT exit_time -- exit_time is set via the naive datetime.utcnow()
+        # a few lines above in this same function, and next_lock_utc()
+        # genuinely needs an AWARE datetime: a naive one gets interpreted
+        # via Python's own "assume local system time" .astimezone()
+        # behavior, which on a non-UTC server silently produces a wrong
+        # (sometimes a full day off) deadline -- caught by this fix's own
+        # test suite BEFORE landing, not assumed safe.
+        _rearm_deadline = session_manager.next_lock_utc(datetime.datetime.now(datetime.timezone.utc))
+        if mgmt_e1_stack.start_rearm_watch_if_eligible(traveler_plan_row, order_row, _rearm_deadline):
             print(f"|| EXECUTOR LIVE E1 (RE-ARM) || {order_row.symbol} account {account.id}: "
                   f"primary closed via C5_EXIT -- REARM_WATCH entered")
             try:
@@ -796,7 +809,13 @@ async def _advance_live_rearm_watch(db: Session, traveler_plan_row: TravelerPlan
         "direction": traveler_plan_row.direction,
         "breakout_trigger": traveler_plan_row.breakout_trigger, "breakdown_trigger": traveler_plan_row.breakdown_trigger,
     }
-    rearm_watch_deadline = session_manager.next_lock_utc(now_utc)
+    # 2026-10-11 fix: reads the PERSISTED deadline (frozen once, at
+    # REARM_WATCH entry) -- no longer recomputes session_manager.
+    # next_lock_utc(now_utc) fresh on every poll, a real production bug
+    # (see mgmt_e1_stack.start_rearm_watch_if_eligible()'s own docstring).
+    rearm_watch_deadline = traveler_plan_row.rearm_watch_deadline
+    if rearm_watch_deadline is not None:
+        rearm_watch_deadline = rearm_watch_deadline if rearm_watch_deadline.tzinfo is not None else rearm_watch_deadline.replace(tzinfo=datetime.timezone.utc)
     updates = gate_traveler.advance_rearm_watch(
         plan_dict, candles_5m, candles_4h, now_utc,
         exhaustion_cleared=exhaustion_cleared, rearm_watch_deadline=rearm_watch_deadline,

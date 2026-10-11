@@ -816,6 +816,17 @@ def init_db():
         except Exception:
             pass
 
+    # --- REARM_WATCH DEADLINE (2026-10-11, real production incident) --
+    # see TravelerPlan.rearm_watch_deadline's own comment for the full
+    # root cause (the deadline was recomputed fresh every poll instead of
+    # once at entry, so it functionally never expired). ---
+    for _col in ["rearm_watch_deadline TIMESTAMP"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE traveler_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- ONE-TIME BACKFILL: WAITING_CROSS/WAITING_TOUCH rows that predate
     # the session_expires_at column above (2026-10-07). Unlike the id=14
     # close-out further up this function (explicitly scoped to one id,
@@ -864,6 +875,41 @@ def init_db():
             _backfill_db.commit()
         finally:
             _backfill_db.close()
+    except Exception:
+        pass
+
+    # --- ONE-TIME BACKFILL: REARM_WATCH rows that predate the
+    # rearm_watch_deadline column above (2026-10-11). Unlike the
+    # session_expires_at backfill above, there is no stored "REARM_WATCH
+    # entered at" timestamp to recompute an accurate historical deadline
+    # from (rearm_cross_time/rearm_fill_time are only ever set once the
+    # watch actually transitions OUT of REARM_WATCH) -- fabricating one
+    # would violate this project's own "never guess a historical value"
+    # discipline. Instead, any row still stuck in REARM_WATCH with no
+    # deadline gets ONE real day from the moment this fix actually runs
+    # (next_lock_utc() from right now) -- safe, honest, and lets the row
+    # self-resolve through the normal engine on its very next poll now
+    # that the field is populated and the polling call sites read it
+    # instead of recomputing. Deliberately does NOT touch rearm_status --
+    # same "only populate the new field, let the real engine resolve it"
+    # convention the session_expires_at backfill above already uses. ---
+    try:
+        import session_manager
+        _backfill_db2 = SessionLocal()
+        try:
+            _stuck_rearm_rows = _backfill_db2.query(TravelerPlan).filter(
+                TravelerPlan.rearm_status == "REARM_WATCH",
+                TravelerPlan.rearm_watch_deadline.is_(None),
+            ).all()
+            _now = datetime.datetime.now(datetime.timezone.utc)
+            for _row in _stuck_rearm_rows:
+                try:
+                    _row.rearm_watch_deadline = session_manager.next_lock_utc(_now, _row.session_id)
+                except Exception:
+                    continue
+            _backfill_db2.commit()
+        finally:
+            _backfill_db2.close()
     except Exception:
         pass
 
@@ -1381,6 +1427,19 @@ class TravelerPlan(Base):
     # convention this file already uses elsewhere (CLOSED_EXPIRED vs
     # CLOSED_ENTRY_CANCELED on ExecutorOrder, see that class's own history).
     rearm_status = Column(String, nullable=True)         # NULL until a primary C5_EXIT close fires REARM_WATCH
+    # The REARM_WATCH window's own closing boundary (2026-10-11 fix, real
+    # production incident -- see this file's own init_db() comment on the
+    # backfill below for the full root cause). MUST be computed ONCE, at
+    # the exact moment REARM_WATCH is entered (mgmt_e1_stack.start_rearm_
+    # watch_if_eligible()), and read back here on every poll -- NEVER
+    # recomputed fresh from session_manager.next_lock_utc(now_utc) on each
+    # poll, which is what both polling call sites did before this fix. That
+    # bug made the deadline a moving target (next_lock_utc() always returns
+    # a point ~1 day ahead of whatever "now" it's given), so the check
+    # inside gate_traveler.advance_rearm_watch() could never actually fire
+    # -- REARM_WATCH stayed open indefinitely until a real re-cross
+    # happened, instead of closing at the next lock as designed.
+    rearm_watch_deadline = Column(DateTime, nullable=True)
     rearm_cross_time = Column(DateTime, nullable=True)
     rearm_cross_price = Column(Float, nullable=True)
     rearm_rsi_4h_at_cross = Column(Float, nullable=True)  # RE-CROSS RSI, NOT the primary's own rsi_4h_at_cross above -- F_A and the tercile re-check both read THIS value for the re-arm leg

@@ -1442,6 +1442,35 @@ def test_rearm_watch_window_closed_transition_does_not_fire_the_cross_hook(db, m
     assert cross_calls == []
 
 
+def test_rearm_watch_live_closes_at_its_own_persisted_deadline_not_a_freshly_recomputed_one(db, monkeypatch):
+    # 2026-10-11 regression test, LIVE side -- the DRY_RUN equivalent of
+    # this test lives in test_traveler_plan_engine.py (same real
+    # production incident, same root cause, this file's own DUPLICATE
+    # recompute-every-poll bug). Deliberately does NOT monkeypatch gate_
+    # traveler.advance_rearm_watch() the way the three tests above do --
+    # those tests mock out exactly the function whose INPUT was buggy, so
+    # none of them could ever have caught this; this one lets the REAL
+    # function run against the real (now-fixed) deadline-reading logic.
+    plan = _traveler_plan(db, status="FILLED")
+    plan.rearm_status = "REARM_WATCH"
+    plan.rearm_watch_deadline = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+    db.flush()
+    _fake_rearm_candle_fetchers(monkeypatch)
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (False, False))
+    # gate_traveler.advance_rearm_watch() is the REAL function here.
+
+    cross_calls = []
+    async def _fake_rearm_cross(db_, plan_):
+        cross_calls.append(plan_.id)
+    monkeypatch.setattr(executor_engine, "process_traveler_rearm_cross", _fake_rearm_cross)
+    monkeypatch.setattr("notify.send_admin_email", lambda *a, **kw: None)
+
+    _run(e1e._advance_live_rearm_watch(db, plan, datetime.datetime.now(datetime.timezone.utc)))
+
+    assert plan.rearm_status == "REARM_WINDOW_CLOSED"
+    assert cross_calls == []
+
+
 # ------------------------------------------------------------------ 2026-10-06 (R1 re-arm): the REARM_WATCH-entry hook inside _finalize_traveler_close()
 # mgmt_e1_stack.start_rearm_watch_if_eligible() itself is already covered
 # by its own module's test (test_mgmt_e1_stack.py / this session's own
@@ -1475,6 +1504,14 @@ def test_live_c5_exit_closure_enters_rearm_watch(db, monkeypatch):
     _run(e1e.poll_traveler_position(db, account, plan, order))
     assert order.management_state == "CLOSED_C5_EXIT"
     assert plan.rearm_status == "REARM_WATCH"
+    # 2026-10-11 fix: a real deadline must be computed and persisted right
+    # here, at entry -- not left None (which would silently defeat the
+    # deadline check entirely) and not computed fresh on some later poll.
+    assert plan.rearm_watch_deadline is not None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    deadline = plan.rearm_watch_deadline
+    deadline = deadline if deadline.tzinfo is not None else deadline.replace(tzinfo=datetime.timezone.utc)
+    assert now < deadline < now + datetime.timedelta(hours=30)   # "the next lock" -- roughly a day out, never further
 
 
 def test_live_stop_closure_does_not_enter_rearm_watch(db, monkeypatch):

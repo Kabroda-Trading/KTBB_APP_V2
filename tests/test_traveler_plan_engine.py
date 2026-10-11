@@ -1164,6 +1164,52 @@ def test_rearm_full_dry_run_walk_primary_c5_exit_to_rearm_fill_and_close(poll_en
     assert primary_order.management_state == "CLOSED_C5_EXIT"
 
 
+def test_rearm_watch_closes_at_its_own_persisted_deadline_not_a_freshly_recomputed_one(poll_env, monkeypatch):
+    # 2026-10-11 regression test for a real production incident: a plan
+    # sat in REARM_WATCH for FOUR real days (should have closed out at
+    # the next lock, ~1 day) before finally resolving via an actual
+    # re-cross. Root cause: both polling call sites recomputed session_
+    # manager.next_lock_utc(now_utc) FRESH on every single poll instead
+    # of reading a value frozen once at REARM_WATCH entry -- since that
+    # function always returns a point ~1 day ahead of whatever "now" it's
+    # given, the "deadline" was a moving target that could never actually
+    # be reached through normal polling. This test proves the fix end to
+    # end through the REAL run_traveler_plan_loop(), not just gate_
+    # traveler.advance_rearm_watch()'s own already-passing unit test
+    # (which only proves the pure function's own deadline-math is
+    # correct, not that the real call site actually threads a frozen
+    # value into it) -- sets rearm_watch_deadline to a time already in
+    # the PAST (simulating "entered a while ago"), and confirms a single
+    # real poll correctly closes it out by reading that persisted value,
+    # rather than silently staying open because a freshly recomputed
+    # deadline would never be reached.
+    past_deadline = dt.datetime.now(timezone.utc) - timedelta(hours=1)
+    poll_env["make_plan"](
+        status="FILLED", direction="LONG",
+        breakout_trigger=50000.0, breakdown_trigger=49000.0,
+        rearm_status="REARM_WATCH", rearm_watch_deadline=past_deadline,
+    )
+    poll_env["make_traveler_account"]()
+
+    # check_c5_or_bbwp()'s own result doesn't matter here -- the deadline
+    # check inside advance_rearm_watch() runs BEFORE the exhaustion/candle
+    # check, so this fires regardless of exhaustion state. Monkeypatched
+    # (not fed real indicator math) for the same reason the existing
+    # comprehensive re-arm test above does this.
+    monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **kw: (False, False))
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 300
+    flat_candles = [_c5m(50100.0, ct)]
+    fake_htf = [{"close": 50000.0, "time": ct}]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": flat_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+
+    plan = poll_env["get_plan"]()
+    assert plan.rearm_status == "REARM_WINDOW_CLOSED"
+
+
 def test_rearm_watch_not_started_when_primary_closes_via_stop_not_c5(poll_env, monkeypatch):
     # The real scoping guard, proven negative: STOP (and by the same logic
     # T1/TIME/BBWP_EXIT) must NOT start a re-arm watch -- only C5_EXIT,

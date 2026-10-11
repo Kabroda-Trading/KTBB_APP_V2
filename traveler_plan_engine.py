@@ -256,10 +256,15 @@ async def _advance_rearm_one(db, row: TravelerPlan, now_utc: datetime) -> None:
             "direction": row.direction,
             "breakout_trigger": row.breakout_trigger, "breakdown_trigger": row.breakdown_trigger,
         }
-        rearm_watch_deadline = session_manager.next_lock_utc(now_utc)
+        # 2026-10-11 fix: reads the PERSISTED deadline (frozen once, at
+        # REARM_WATCH entry) -- no longer recomputes session_manager.
+        # next_lock_utc(now_utc) fresh on every poll, which was a real
+        # production bug (that recompute always returns a point ~1 day
+        # ahead of whatever "now" it's given, so the deadline could never
+        # actually be reached and REARM_WATCH never closed on its own).
         updates = gate_traveler.advance_rearm_watch(
             plan_dict, candles_5m, candles_4h, now_utc,
-            exhaustion_cleared=exhaustion_cleared, rearm_watch_deadline=rearm_watch_deadline,
+            exhaustion_cleared=exhaustion_cleared, rearm_watch_deadline=_as_utc(row.rearm_watch_deadline),
         )
         await _apply_rearm(db, row, updates, symbol)
         # 2026-10-06: same "place the real order AT the confirmed re-cross,
@@ -532,7 +537,12 @@ async def _advance_e1_order(db, order: ExecutorOrder, now_utc: datetime) -> None
     # via C5_EXIT specifically starts the watch, and only once per plan.
     # traveler_plan is already fetched above, for journey_cap_at -- reused
     # here, not re-queried.
-    if mgmt_e1_stack.start_rearm_watch_if_eligible(traveler_plan, order):
+    # 2026-10-11 fix: computed ONCE here, at the exact moment REARM_WATCH
+    # is entered -- NOT recomputed on every later poll (see mgmt_e1_
+    # stack.start_rearm_watch_if_eligible()'s own docstring for the real
+    # production incident this fixes).
+    _rearm_deadline = session_manager.next_lock_utc(now_utc)
+    if mgmt_e1_stack.start_rearm_watch_if_eligible(traveler_plan, order, _rearm_deadline):
         print(f"|| TRAVELER PLAN (RE-ARM) || {symbol} {order.account_id}: "
               f"primary closed via C5_EXIT -- REARM_WATCH entered")
         _notify_traveler_rearm_transition(None, traveler_plan, symbol)
