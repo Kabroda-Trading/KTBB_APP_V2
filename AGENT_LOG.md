@@ -8750,3 +8750,19 @@ WAITING_CROSS/WAITING_TOUCH path, D3's own exit priority order, and Alt
 Matrix (fully separate system) are all unaffected.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-10-12 (16:15 CT) — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: resolved
+
+METASIGNALS ALERT WATCHER & KABRODA.COM YES/NO TRIAGE GATE (SPECIFICATION ADDED):
+Andy directive: Document the architecture for watching incoming MetaSignals alerts, letting kabroda.com run a deterministic YES/NO triage gate, and presenting pre-calculated trade geometry for operator approval on a dedicated Bitunix sub-account.
+STATUS: ARCHITECTURE & SPECIFICATION ONLY — NO CODE TOUCHED RIGHT NOW.
+1. Created `METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md` in this repo root detailing the 3-stage pipeline (Ingest -> Triage Gate YES/NO -> Operator Take), DB schemas (`metasignals_triage_plans`, `metasignals_orders`), UI card on `/admin/metasignals`, and the 4 non-negotiable protection rules.
+2. Cross-referenced in `Kabroda AI Brain/CC_INTERFACE.md` Section 7 and `Kabroda Meta Signals AI/KABRODA_EXECUTION_INTEGRATION_SPEC.md`.
+3. Non-negotiables for future implementation:
+   - Absolute capital isolation via dedicated Bitunix sub-account (`METASIGNALS_BITUNIX_API_KEY`/`SECRET`). Never touches main account margin.
+   - Zero touch on core engines (`gate_traveler.py`, `traveler_plan_engine.py`, `alt_matrix_engine.py`).
+   - Hard orderbook stop buffered at `Alert SL - 0.25x ATR14` against flash wicks.
+   - Reuse Traveler's battle-tested 30-second polling watcher from `executor_live_engine.py` for bracket execution and auto-BE ratcheting.
+4. No site code or database migrations performed in this pass. Everything is cleanly specified and staged for Phase 2 when Andy authorizes it.
