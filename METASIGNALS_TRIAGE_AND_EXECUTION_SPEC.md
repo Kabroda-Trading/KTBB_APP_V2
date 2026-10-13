@@ -127,10 +127,12 @@ Every balance change (fee deduction, TP1 fill, stop fill, final exit) writes a r
 Add to `database.py` models and `init_db()`:
 
 ```sql
--- 1. Paper Account Singleton
+-- 1. Paper Account & Configuration Singleton
 CREATE TABLE IF NOT EXISTS metasignals_paper_account (
     id SERIAL PRIMARY KEY,
     name VARCHAR(32) DEFAULT 'DEFAULT_PAPER_DESK',
+    execution_mode VARCHAR(24) DEFAULT 'PAPER', -- 'PAPER', 'SUBACCOUNT_DRY_RUN', 'SUBACCOUNT_LIVE'
+    linked_account_id INT REFERENCES executor_accounts(id) DEFAULT NULL,
     starting_balance NUMERIC(16, 4) DEFAULT 500.00,
     cash_balance NUMERIC(16, 4) DEFAULT 500.00,
     equity NUMERIC(16, 4) DEFAULT 500.00,
@@ -237,11 +239,34 @@ GET /api/metasignals/snapshot
   - Active positions: live mark price, unrealized P&L, stop price.
   - Recent triage log (last 20 alerts with YES/NO verdicts).
 
-### C. Dedicated Web Route:
+### C. Sub-Account & Execution Mode Switch Endpoint:
+```http
+POST /api/metasignals/config
+Header: Cookie (Admin Session Auth)
+Body:
+{
+  "execution_mode": "PAPER",           // "PAPER", "SUBACCOUNT_DRY_RUN", "SUBACCOUNT_LIVE"
+  "linked_account_id": null           // null for virtual paper desk, or ExecutorAccount.id
+}
+```
+* **Behavior**:
+  - Updates `metasignals_paper_account` singleton.
+  - If `execution_mode == 'PAPER'`: All trades execute in the virtual paper ledger ($500 balance), 0 exchange calls.
+  - If `execution_mode == 'SUBACCOUNT_DRY_RUN'`: Trades are simulated against the selected `ExecutorAccount`'s real Bitunix balance, but no real orders are sent to exchange.
+  - If `execution_mode == 'SUBACCOUNT_LIVE'`: Real atomic brackets (Entry + Hard Stop + TPs) are placed directly onto the Bitunix sub-account using its decrypted API credentials! Requires the linked account to have mode == `LIVE`.
+
+### D. Dedicated Web Route:
 ```http
 GET /admin/metasignals
 ```
-* Renders `templates/metasignals_desk.html` with full visual dashboard.
+* Renders `templates/metasignals_desk.html` with full visual dashboard:
+  * **Top Selector**: A dropdown menu displaying:
+    - `[ 📝 Standalone Paper Trading Desk ($500 Virtual Balance) ]` (Default)
+    - `[ 🔌 Account #X: {label} (DRY_RUN Sim) ]`
+    - `[ 🚀 Account #X: {label} (LIVE Trading) ]`
+  * One-click save button to instantly switch modes or link/unlink sub-accounts.
+  * Live Paper / Sub-Account Balance & Equity card.
+  * Real-time triage log and open position cards.
 
 ---
 
