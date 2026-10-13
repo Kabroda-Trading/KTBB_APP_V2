@@ -8780,3 +8780,178 @@ Andy directive: Build the MetaSignals alert triage & execution subsystem directl
    - CREATE STANDALONE FILES: `metasignals_triage.py`, `metasignals_paper_engine.py`, `metasignals_watcher.py`, `metasignals_radar.py`, `templates/metasignals_desk.html`, `tests/test_metasignals_paper.py`.
    - EXISTING FILES EDITED SAFELY: `database.py` (add models + SQL tables), `main.py` (mount `/api/metasignals/*` routes and 30s watcher task in lifespan), `templates/base.html` (add nav link).
    - Full turnkey instructions in `METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md` Section 8.
+
+## 2026-10-13 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+METASIGNALS BUILT AND LIVE-WIRED -- full 5-step turnkey sequence complete,
+then substantially expanded mid-build on a second work order that arrived
+while the first pass's full test suite was running. Both passes verified
+against real code/commits before acting, not taken on description alone --
+this surfaced several real inconsistencies, flagged below rather than
+silently reconciled.
+
+PASS 1 (the original 5-step spec, Section 8):
+- `database.py`: 4 new ORM models (`MetaSignalsPaperAccount`, `MetaSignalsPlan`,
+  `MetaSignalsPaperOrder`, `MetaSignalsPaperLedger`). DEVIATION FROM THE
+  SPEC'S OWN LITERAL TEXT, flagged in-code: the spec drafted these as raw
+  Postgres `CREATE TABLE IF NOT EXISTS` DDL (SERIAL, TIMESTAMP WITH TIME
+  ZONE, NUMERIC) inside `init_db()`. That doesn't run on this project's own
+  default dev DB (sqlite) and doesn't match how the FOUR existing AltMatrix
+  tables were actually provisioned -- pure ORM models, zero raw SQL,
+  because `init_db()`'s first line is already `Base.metadata.create_all()`,
+  which creates any new table automatically. Followed the proven AltMatrix
+  precedent instead of the spec's literal (and non-portable) SQL draft.
+- `metasignals_triage.py`: the 5-pillar gate. Every pure-math helper
+  (EMA/SMA/ATR14-Wilder/RSI14-Wilder) reimplemented fresh, not imported
+  from `alt_matrix_signals.py` (Iron Wall applies to pure functions too,
+  matching that module's own "copy the pattern, never import the file"
+  precedent for gate_traveler.py). Real scope decisions made on genuine
+  spec ambiguity (long-only; TP2 = alert's own stated tp2, not an
+  unspecified EMA-trail variant; asset macro check falls back to 55 EMA
+  only when there's not enough daily history for a real 200 SMA) -- all
+  flagged in the module's own header, not silently picked.
+- `metasignals_paper_engine.py`: fee schedule, BE ratchet on TP1, full
+  stop/TP2 close, applied literally per spec section 4A/4B.
+- `metasignals_watcher.py`: ONE loop (not Alt Matrix's two) -- plans/
+  orders are created synchronously inline by the ingest route, not by a
+  polling tick, so there's no separate signal cadence to protect.
+- `metasignals_radar.py`, `templates/metasignals_desk.html`, nav link in
+  `templates/nav.html` (the spec said `templates/base.html` -- that file
+  doesn't exist in this repo; verified the real shared layout file is
+  `nav.html` before editing anything, rather than creating a new file to
+  match a name that was never actually right).
+- `main.py`: 3 routes (ingest/snapshot/admin page) + watcher task in
+  lifespan.
+- `tests/test_metasignals_paper.py`: Iron Wall enforced via a REAL AST-
+  based static check (parses every metasignals_*.py file, fails if it
+  imports anything starting with gate_traveler/traveler_/battlebox_
+  pipeline/executor_live_e1_engine/executor_plan_builder/executor_sizing/
+  alt_matrix_ -- plus the reverse direction, confirming no Traveler/Alt
+  Matrix file imports metasignals_*), not just a one-off manual grep.
+
+Real bugs caught and fixed DURING this pass, before it ever reached the
+full suite:
+- `_write_ledger()` never flushed after `db.add()` -- SessionLocal is
+  autoflush=False project-wide (same class of bug this codebase has hit
+  before); a query for the ledger row immediately after writing it found
+  nothing. Fixed with an explicit flush, matching the established
+  convention.
+- My own first ATR14 test asserted a wrong expected value (assumed a
+  constant high-low range alone determines Wilder ATR, ignoring the
+  true-range gap-vs-prior-close term) -- caught by running the test, not
+  assumed correct; fixed the test, not the (correct) implementation.
+
+PASS 2 (same day, mid-suite-run): a second work order arrived citing
+"Andy's Raspberry Pi is already running... sending to /api/metasignals/
+webhook" with a materially different payload shape (raw channel_id/
+channel_name/message_id/author/content/embeds, parsed SERVER-SIDE) and a
+different secret env var (`METASIGNALS_SECRET_KEY`). This contradicted
+the one artifact actually checkable from this repo -- the just-committed
+`scripts/raspberry_pi_alert_forwarder.py`, which still posts pre-parsed
+fields to `/alert` using `METASIGNALS_INGEST_SECRET`. Did not take the
+claim on faith OR dismiss it -- checked `git log` on the spec file
+directly and found two new commits had landed mid-build: `6d69e7a`
+("add sub-account dropdown linking") and `f770ec7` ("align webhook
+endpoint and raw alert schema with running Pi daemon") -- the second
+commit message is itself the confirmation that the real physical Pi was
+updated out-of-band (not through this repo) and the spec doc was just
+catching up to that reality. That's real corroboration, not blind trust.
+
+Built to hedge correctly regardless of which shape is truly live:
+- `database.py`: added `MetaSignalsRawAlert` (zero-data-loss audit of
+  every incoming payload, saved BEFORE any parsing is attempted) and
+  `execution_mode`/`linked_account_id` on `MetaSignalsPaperAccount`,
+  `raw_alert_id` on `MetaSignalsPlan`, and a real `exit_price` column on
+  `MetaSignalsPaperOrder` (a gap I found while wiring the Trade History
+  UI -- `last_mark_price` is just the last polled price, not reliably
+  the actual fill level, since a close can happen exactly at the stop/TP
+  level even if the polled mark price overshot it).
+- `metasignals_triage.parse_discord_alert()`: the Discord text parser,
+  moved SERVER-SIDE from the Pi script. Copied the real regex patterns
+  from the (until-now) committed Pi script, and in doing so found TWO
+  real bugs in them via this module's own new tests, both fixed here
+  (the Pi script itself no longer runs this logic at all, so there is
+  now exactly one copy, not two that could drift):
+    1. The numeric patterns (`[\d\.]+`) greedily swallow a trailing
+       sentence-ending period directly after a value, producing an
+       unparseable "105.40." Tightened to a real decimal pattern.
+    2. MUCH MORE SERIOUS: the strategy-name capture (`[0-9A-Za-z\.\s]+`)
+       is unbounded and keeps consuming straight into the NEXT field's
+       own label text once given realistic space-joined field text (how
+       the Pi's own embed-flattening actually builds it) -- e.g. "2.0 G2
+       SL Close Below" instead of "2.0 G2". A corrupted strategy string
+       can never match `WHITELISTED_STRATEGIES`, which would have
+       silently vetoed EVERY real alert as not-whitelisted. Fixed with a
+       lazy capture bounded by a lookahead for the next known field
+       label or end of string.
+- `main.py`: `POST /api/metasignals/webhook` (new primary) + `/alert`
+  kept as a TRUE alias (one shared handler, not two behaviors) -- both
+  payload shapes accepted (new raw-content shape parsed server-side;
+  the legacy pre-parsed shape still works too, in case an un-updated
+  script is ever running somewhere). Secret check: `METASIGNALS_SECRET_KEY`
+  first, `METASIGNALS_INGEST_SECRET` as an explicit fallback (the new
+  spec's own stated order). Raw payload always persisted first,
+  regardless of parse outcome. New `POST /api/metasignals/config` route
+  (admin-only) for the execution-mode dropdown.
+- Rewrote `scripts/raspberry_pi_alert_forwarder.py` to match: it now
+  forwards every message's raw content/embeds from the target channel
+  unconditionally (no more client-side regex gate deciding what's worth
+  sending), posting to `/webhook` with `KABRODA_SECRET_KEY`. This was
+  flagged as mine to own per the original spec's own "What CC Creates"
+  file list, and it was the one artifact provably stale relative to what
+  the spec now says is really running -- fixed rather than left
+  silently inconsistent with its own repo's spec doc.
+
+A DELIBERATE, EXPLICITLY-FLAGGED LIMITATION, not an oversight: the
+execution-mode dropdown (`PAPER` / `SUBACCOUNT_DRY_RUN` / `SUBACCOUNT_LIVE`)
+is REAL and PERSISTS, but `metasignals_paper_engine.py` ignores that field
+completely today -- every trade still simulates as pure paper regardless
+of what's selected. Wiring `SUBACCOUNT_LIVE` to place real Bitunix orders
+through a linked ExecutorAccount's real credentials is a separate, far
+higher-stakes build (real credential plumbing, the same Step-6-style live-
+API smoke test Alt Matrix required before going live, and a backtest of
+this 5-pillar gate against real outcomes, which does not exist yet --
+unlike Traveler and Alt Matrix, both measured against years of real data
+before a single live order was ever placed). Andy's own directive was
+"paper trading desk FIRST"; the original spec's section 1.5 calls the live
+path a "dormant switch" explicitly. Silently wiring real execution into a
+UI toggle under a terse work order would be exactly the kind of
+unauthorized scope expansion this project's own standing discipline
+exists to catch -- flagged loudly in the account model's own docstring,
+the paper engine's own header, and the config route's own response body
+(`"note": "...not yet wired to real execution..."` on any non-PAPER
+selection), not left as a silent gap someone discovers later by accident.
+
+A second real bug caught while writing the NEW tests (not before
+shipping): `_clean_db_files()` was defined in the test file but never
+actually called in the `db` fixture -- the prior pass's test runs had
+already created a SQLite file with the OLD schema, and `init_db()`'s
+`create_all()` never retroactively adds columns to a table that already
+exists. 24 tests failed with "no such column." Fixed by matching
+`test_alt_matrix_portfolio.py`'s own established fixture pattern exactly
+(clean files + dispose engine, both at setup and teardown). A third,
+separate bug in two of the NEW tests themselves: a raw `os.environ[...] =`
+assignment (not `monkeypatch.setenv`) leaked `METASIGNALS_SECRET_KEY`
+permanently into the test process, breaking three unrelated later tests
+that expected the fallback secret to still work. Fixed by using
+monkeypatch consistently.
+
+VERIFICATION: 68 MetaSignals tests, all passing (37 pure-function/triage-
+gate/parser tests with zero DB, zero network; 31 real-DB/HTTP-route tests
+against a real file-backed SQLite fixture). Full suite: 870 passed, 0
+failed -- up from 802 before this session's first entry today, net +68,
+zero regressions anywhere in Traveler or Alt Matrix. Real TestClient
+lifespan boot check passed (watcher loop starts cleanly, snapshot route
+returns real data, admin page redirects correctly with no login). Scope-
+verified via the AST-based Iron Wall test: zero imports of/into Traveler
+or Alt Matrix in either direction.
+
+NOT YET DONE, flagged rather than silently skipped: `METASIGNALS_SECRET_KEY`
+is not yet set on Render -- the real webhook will 401 in production until
+Andy (or whoever has Render access) sets it to match whatever the Pi is
+actually configured to send. This is an operational step outside what I
+can do from here, same as every other env var this project's own
+CLAUDE.md already documents as "required only if you use this feature."
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
