@@ -8766,3 +8766,17 @@ STATUS: ARCHITECTURE & SPECIFICATION ONLY — NO CODE TOUCHED RIGHT NOW.
    - Hard orderbook stop buffered at `Alert SL - 0.25x ATR14` against flash wicks.
    - Reuse Traveler's battle-tested 30-second polling watcher from `executor_live_engine.py` for bracket execution and auto-BE ratcheting.
 4. No site code or database migrations performed in this pass. Everything is cleanly specified and staged for Phase 2 when Andy authorizes it.
+
+
+## 2026-10-13 (09:40 CT) — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open
+
+METASIGNALS REALISTIC PAPER TRADING DESK & RASPBERRY PI INGESTION (EXPANDED WORK ORDER):
+Andy directive: Build the MetaSignals alert triage & execution subsystem directly in kabroda.com as a REALISTIC PAPER TRADING DESK FIRST ($500 starting bankroll, $50 fixed risk, realistic fee deduction, live Bitunix price tracking, auto-BE ratchet on TP1), without touching or risking Traveler or Alt Matrix.
+1. Updated `METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md` with the full model specs, 5-pillar triage logic, 30s paper watcher, and dashboard UI layout.
+2. Created `scripts/raspberry_pi_alert_forwarder.py` (the air-gapped Python Discord listener for Andy's Raspberry Pi).
+3. CC WORK ORDER & BOUNDARIES:
+   - FORBIDDEN TO TOUCH: `gate_traveler.py`, `traveler_plan_engine.py`, `battlebox_pipeline.py`, `executor_live_e1_engine.py`, all `alt_matrix_*.py` files, and existing `ExecutorAccount` rows.
+   - CREATE STANDALONE FILES: `metasignals_triage.py`, `metasignals_paper_engine.py`, `metasignals_watcher.py`, `metasignals_radar.py`, `templates/metasignals_desk.html`, `tests/test_metasignals_paper.py`.
+   - EXISTING FILES EDITED SAFELY: `database.py` (add models + SQL tables), `main.py` (mount `/api/metasignals/*` routes and 30s watcher task in lifespan), `templates/base.html` (add nav link).
+   - Full turnkey instructions in `METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md` Section 8.
