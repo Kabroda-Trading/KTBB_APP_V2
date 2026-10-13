@@ -8992,3 +8992,17 @@ audit route is additive and was tested locally, not yet re-checked live
 post-deploy -- worth a quick live hit once this is on Render).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-10-13 (11:45 CT) — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open
+
+WHITELIST MATRIX & $1,000 STARTING BALANCE SPECIFICATION (ALIGNED WITH STUDY 4):
+Andy directive: Eliminate friction by formalizing the full Study 4 Whitelist/Blacklist matrix directly in `METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md` so CC has complete clarity on which variants and timeframes are permitted.
+1. WHitelist EXPANDED (Section 3 Pillar 5):
+   - Permitted Pairs: `["BTCUSDT", "ETHUSDT", "SOLUSDT"]` (Majors only).
+   - Permitted Timeframes: All MTF & HTF timeframes (`1H, 2H, 3H, 4H, 6H, 8H, 12H, 1D` / `60, 120, 180, 240, 360, 480, 720, 1440` mins). Disallows LTF (<60m).
+   - Permitted Strategy Variants: All validated G2, G3, G4, and dot-release variants from Study 4 (Shortlist & Watchlist tiers, including `1.0 G2` on 3H which cleared with PF 1.89 and DD 4.8%).
+   - Explicit Trap Blacklist: Banned cells from Study 4 `DO_NOT_TOUCH` that collapse under hard stops (e.g. `2.0 G4 3H`, `3.0 G3 4H`).
+2. PAPER ACCOUNT SEED UPDATE (Section 4 & 5):
+   - Starting balance and cash balance updated from $500.00 to $1,000.00 in `metasignals_paper_account` ($50 risk = 5% risk budget).

@@ -79,7 +79,7 @@ When an alert payload is received, `metasignals_triage.evaluate_alert(db, alert_
 | **2. Energy / Exhaustion** | • 4H RSI(14) between **40.0 and 62.0** at alert time | `VETO_MOMENTUM_OVERBOUGHT` (if >62)<br>`VETO_MOMENTUM_COLLAPSED` (if <40) | Ensures trade enters from a healthy base, not at the blow-off peak of a squeeze. |
 | **3. Extension ("Don't Chase")** | • Extension $\le +0.25\text{R}$ from printed alert price | `VETO_PRICE_OVER_EXTENDED` | If extension $\le +0.10\text{R}$: Market entry.<br>If $+0.10\text{R} < \text{Ext} \le +0.25\text{R}$: Convert to resting limit order at Alert Price. |
 | **4. Funding Crowding** | • Live Bitunix 8H Funding Rate $< +0.04\%$ | `VETO_FUNDING_OVERCROWDED` | Filters out crowded retail longs prone to liquidation wick hunts. |
-| **5. Strategy Whitelist** | • Symbol in `["BTCUSDT", "ETHUSDT", "SOLUSDT"]`<br>• Timeframe in `["6H", "8H"]`<br>• Strategy in whitelisted set (e.g. `2.0.1`, `2.0 G2`) | `VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED` | Rejects noisy 15m/1h scalps and low-cap alts. |
+| **5. Strategy Whitelist & Trap Blacklist** | • **Permitted Pairs**: `["BTCUSDT", "ETHUSDT", "SOLUSDT"]` (Majors only).<br>• **Permitted Timeframes**: All MTF & HTF timeframes: `["1H", "2H", "3H", "4H", "6H", "8H", "12H", "1D"]` (or minutes: `60, 120, 180, 240, 360, 480, 720, 1440`). Disallows LTF (<60m: 15m, 30m, 45m).<br>• **Permitted Strategy Variants**: All verified G2, G3, G4, and dot-release variants from Study 4 (Shortlist & Watchlist tiers):<br>&nbsp;&nbsp;- Family 1: `1.0 G2/G3/G4`, `1.0.1`, `1.0.2`, `1.1 G2`, `1.1.1`, `1.1.2`, `1.2 G3`, `1.2.1`, `1.3 G2/G3/G4`<br>&nbsp;&nbsp;- Family 2: `2.0 G2/G3`, `2.0.1`, `2.1 G2/G4`<br>&nbsp;&nbsp;- Family 3: `3.0 G2/G3/G4`, `3.0.1`, `3.0.2`, `3.1 G2/G3`<br>&nbsp;&nbsp;- Family 4: `4.0 G2/G3/G4`, `4.0.1`, `4.1 G4`<br>• **Explicit Trap Blacklist**: Banned cells from Study 4 DO_NOT_TOUCH (e.g. `2.0 G4 3H`, `3.0 G3 4H`, `2.0.2 4H`, `1.1 G1 4H` that collapse under hard stops). | `VETO_PAIR_NOT_MAJOR`<br>`VETO_TIMEFRAME_LTF_NOISE`<br>`VETO_STRATEGY_TRAP_OR_UNPROVEN` | Enables all legitimate Major alerts from Discord MTF/HTF/Majors channels (like SOL 3H 1.0 G2) to execute seamlessly on the paper desk. |
 
 **Output**: Returns `(verdict: "YES" | "NO", reason: str, geometry: dict)`:
 * If "NO": Stored in DB with status `REJECTED`, zero action taken.
@@ -94,8 +94,8 @@ When an alert payload is received, `metasignals_triage.evaluate_alert(db, alert_
 ## 4. The Realistic Paper Trading Engine (`metasignals_paper_engine.py`)
 
 ### A. Honest Exchange Simulation Rules:
-1. **Initial Bankroll**: Seeded with `$500.00` (stored in `MetaSignalsPaperAccount`).
-2. **Risk Budget**: Strictly `$50.00` fixed risk per trade (10% of $500 bankroll).
+1. **Initial Bankroll**: Seeded with `$1,000.00` (stored in `MetaSignalsPaperAccount`).
+2. **Risk Budget**: Strictly `$50.00` fixed risk per trade (5% of $1,000 bankroll).
 3. **Execution & Fills**:
    - Entry fills at live Bitunix ask price (or limit if resting).
    - Deducts **Taker Fee (0.06% / 0.0006)** on entry notional.
@@ -144,9 +144,9 @@ CREATE TABLE IF NOT EXISTS metasignals_paper_account (
     name VARCHAR(32) DEFAULT 'DEFAULT_PAPER_DESK',
     execution_mode VARCHAR(24) DEFAULT 'PAPER', -- 'PAPER', 'SUBACCOUNT_DRY_RUN', 'SUBACCOUNT_LIVE'
     linked_account_id INT REFERENCES executor_accounts(id) DEFAULT NULL,
-    starting_balance NUMERIC(16, 4) DEFAULT 500.00,
-    cash_balance NUMERIC(16, 4) DEFAULT 500.00,
-    equity NUMERIC(16, 4) DEFAULT 500.00,
+    starting_balance NUMERIC(16, 4) DEFAULT 1000.00,
+    cash_balance NUMERIC(16, 4) DEFAULT 1000.00,
+    equity NUMERIC(16, 4) DEFAULT 1000.00,
     risk_unit_usd NUMERIC(10, 2) DEFAULT 50.00,
     total_trades INT DEFAULT 0,
     winning_trades INT DEFAULT 0,
