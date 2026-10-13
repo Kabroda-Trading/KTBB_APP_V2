@@ -106,7 +106,7 @@ def _patch_market(monkeypatch, candles_4h=None, candles_daily_asset=None, candle
     c4h = candles_4h if candles_4h is not None else _candles_4h()
     c1d_asset = candles_daily_asset if candles_daily_asset is not None else _candles_daily_up()
     c1d_btc = candles_daily_btc if candles_daily_btc is not None else _candles_daily_up(start=50000.0, step=50.0)
-    mp = mark_price if mark_price is not None else c4h[-1]["close"]
+    mp = mark_price if mark_price is not None else (c4h[-1]["close"] if c4h else 100.0)
 
     async def fake_4h(symbol, target_bars=120):
         return c4h
@@ -124,9 +124,13 @@ def _patch_market(monkeypatch, candles_4h=None, candles_daily_asset=None, candle
 
 
 def _good_alert(**overrides):
+    # strategy/timeframe must be a real PERMITTED_STRATEGY_TIMEFRAME_CELLS
+    # entry (confirmed against the Study 4 CSV directly) -- "2.0.1"/"6H"
+    # (the pre-Study-4 default) is NOT actually a permitted cell; only
+    # ("2.0.1", "1D") and ("2.0.1", "8H") are. "2.0 G2"/"4H" is.
     base = dict(
         symbol="SOLUSDT", side="BUY", entry_price=160.0, soft_stop=150.0,
-        tp1=170.0, tp2=180.0, timeframe="6H", strategy="2.0.1",
+        tp1=170.0, tp2=180.0, timeframe="4H", strategy="2.0 G2",
     )
     base.update(overrides)
     return base
@@ -310,15 +314,19 @@ def test_evaluate_alert_full_approval_yes(monkeypatch):
 
 def test_evaluate_alert_real_production_alert_strategy_1_0_g2_timeframe_3h_now_passes_whitelist(monkeypatch):
     # Regression for the real first-production-alert case (2026-10-13):
-    # symbol=SOLUSDT (already whitelisted), strategy="1.0 G2",
-    # timeframe="3H" -- vetoed VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED on
-    # BOTH the strategy AND timeframe checks before this fix (a relayed
-    # report only flagged the timeframe; verified against the real
-    # triage log before changing anything, per module header decision 4).
+    # symbol=SOLUSDT (already whitelisted even under the old scheme),
+    # strategy="1.0 G2", timeframe="3H" -- vetoed on BOTH the strategy
+    # AND timeframe checks before the same-day fixes (a relayed report
+    # only flagged the timeframe; verified against the real triage log
+    # first). Re-verified again under the FULL Study 4 cell-level
+    # rewrite that superseded that same-day fix -- ("1.0 G2", "3H") is a
+    # real PERMITTED_STRATEGY_TIMEFRAME_CELLS entry (SHORTLIST status
+    # per the actual CSV), not just "not vetoed by coincidence."
     _patch_market(monkeypatch, mark_price=107.49)
     alert = _good_alert(symbol="SOLUSDT", strategy="1.0 G2", timeframe="3H", entry_price=107.49, soft_stop=100.0)
     result = _run(triage.evaluate_alert(alert))
-    assert result["reason"] != "VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED"
+    assert result["strategy_cell_status"] == "PERMITTED"
+    assert result["reason"] not in ("VETO_TIMEFRAME_LTF_NOISE", "VETO_STRATEGY_TRAP_OR_UNPROVEN", "VETO_PAIR_NOT_ON_EXCHANGE")
 
 
 def test_evaluate_alert_limit_entry_mode_when_moderately_extended(monkeypatch):
@@ -338,25 +346,49 @@ def test_evaluate_alert_limit_entry_mode_when_moderately_extended(monkeypatch):
     assert result["entry_mode"] == "LIMIT"
 
 
-def test_evaluate_alert_vetoes_whitelist_symbol(monkeypatch):
-    _patch_market(monkeypatch)
-    alert = _good_alert(symbol="DOGEUSDT")
+def test_evaluate_alert_vetoes_pair_not_on_exchange(monkeypatch):
+    # No more hardcoded symbol whitelist -- a pair is rejected because
+    # Bitunix genuinely has no candle data for it, not because its name
+    # isn't in some fixed list. Simulated via empty candle fetches
+    # (this is exactly what a real unlisted/exotic pair would produce).
+    _patch_market(monkeypatch, candles_4h=[], candles_daily_asset=[])
+    alert = _good_alert(symbol="SOMEEXOTICUSDT")
     result = _run(triage.evaluate_alert(alert))
-    assert result == {"symbol": "DOGEUSDT", "verdict": "NO", "reason": "VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED"}
+    assert result["reason"] == "VETO_PAIR_NOT_ON_EXCHANGE"
 
 
-def test_evaluate_alert_vetoes_whitelist_timeframe(monkeypatch):
+def test_evaluate_alert_vetoes_ltf_timeframe(monkeypatch):
     _patch_market(monkeypatch)
     alert = _good_alert(timeframe="15M")
     result = _run(triage.evaluate_alert(alert))
-    assert result["reason"] == "VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED"
+    assert result["reason"] == "VETO_TIMEFRAME_LTF_NOISE"
 
 
-def test_evaluate_alert_vetoes_whitelist_strategy(monkeypatch):
+def test_evaluate_alert_vetoes_unproven_strategy_cell(monkeypatch):
     _patch_market(monkeypatch)
     alert = _good_alert(strategy="unknown-strategy")
     result = _run(triage.evaluate_alert(alert))
-    assert result["reason"] == "VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED"
+    assert result["reason"] == "VETO_STRATEGY_TRAP_OR_UNPROVEN"
+    assert result["strategy_cell_status"] == "UNPROVEN"
+
+
+def test_evaluate_alert_vetoes_known_trap_strategy_cell(monkeypatch):
+    # "2.0 G4"/"3H" is a real Study 4 DO_NOT_TOUCH cell (collapses from
+    # nonstatic PF 2.20 to static PF 0.94, 52.5% max drawdown) --
+    # distinguished from a merely-unproven cell via strategy_cell_status.
+    _patch_market(monkeypatch)
+    alert = _good_alert(strategy="2.0 G4", timeframe="3H")
+    result = _run(triage.evaluate_alert(alert))
+    assert result["reason"] == "VETO_STRATEGY_TRAP_OR_UNPROVEN"
+    assert result["strategy_cell_status"] == "TRAP"
+
+
+def test_evaluate_alert_permits_a_real_shortlisted_cell(monkeypatch):
+    _patch_market(monkeypatch, mark_price=160.0)
+    alert = _good_alert(strategy="1.0 G4", timeframe="2H", entry_price=160.0, soft_stop=150.0)
+    result = _run(triage.evaluate_alert(alert))
+    assert result["strategy_cell_status"] == "PERMITTED"
+    assert result["reason"] != "VETO_STRATEGY_TRAP_OR_UNPROVEN"
 
 
 def test_evaluate_alert_vetoes_short_side(monkeypatch):
@@ -523,13 +555,13 @@ def _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_ale
     return plan
 
 
-def test_get_or_init_paper_account_seeds_500_and_writes_initial_deposit(db):
+def test_get_or_init_paper_account_seeds_1000_and_writes_initial_deposit(db):
     account = engine.get_or_init_paper_account(db)
-    assert account.cash_balance == pytest.approx(500.0)
-    assert account.equity == pytest.approx(500.0)
+    assert account.cash_balance == pytest.approx(1000.0)
+    assert account.equity == pytest.approx(1000.0)
     rows = db.query(MetaSignalsPaperLedger).filter_by(event_type="INITIAL_DEPOSIT").all()
     assert len(rows) == 1
-    assert rows[0].amount == pytest.approx(500.0)
+    assert rows[0].amount == pytest.approx(1000.0)
 
 
 def test_get_or_init_paper_account_is_idempotent(db):
@@ -537,6 +569,38 @@ def test_get_or_init_paper_account_is_idempotent(db):
     a2 = engine.get_or_init_paper_account(db)
     assert a1.id == a2.id
     assert db.query(MetaSignalsPaperLedger).filter_by(event_type="INITIAL_DEPOSIT").count() == 1
+
+
+def test_init_db_backfill_raises_a_pristine_500_row_to_1000(db):
+    # Simulates the real production scenario directly: a row created
+    # BEFORE the $500->$1000 change (database.py's own one-time
+    # backfill, guarded on starting_balance==500/cash_balance==500/
+    # total_trades==0). Must actually fix the already-existing row, not
+    # just govern new ones -- a column default alone never would.
+    db.add(MetaSignalsPaperAccount(name="DEFAULT_PAPER_DESK", starting_balance=500.0, cash_balance=500.0, equity=500.0))
+    db.commit()
+
+    database.init_db()
+
+    account = db.query(MetaSignalsPaperAccount).filter_by(name="DEFAULT_PAPER_DESK").first()
+    assert account.starting_balance == pytest.approx(1000.0)
+    assert account.cash_balance == pytest.approx(1000.0)
+    assert account.equity == pytest.approx(1000.0)
+
+
+def test_init_db_backfill_never_touches_a_row_with_real_trading_activity(db):
+    # A row that has already moved away from the pristine $500 state
+    # (even one trade) must NOT be blindly overwritten -- that would
+    # clobber real (paper) P&L history.
+    db.add(MetaSignalsPaperAccount(name="DEFAULT_PAPER_DESK", starting_balance=500.0, cash_balance=487.32,
+                                    equity=487.32, total_trades=1, losing_trades=1))
+    db.commit()
+
+    database.init_db()
+
+    account = db.query(MetaSignalsPaperAccount).filter_by(name="DEFAULT_PAPER_DESK").first()
+    assert account.starting_balance == pytest.approx(500.0)
+    assert account.cash_balance == pytest.approx(487.32)
 
 
 def test_open_paper_trade_market_fills_immediately_and_deducts_taker_fee(db):
@@ -551,7 +615,7 @@ def test_open_paper_trade_market_fills_immediately_and_deducts_taker_fee(db):
     assert order.fees_paid == pytest.approx(expected_fee)
 
     account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
-    assert account.cash_balance == pytest.approx(500.0 - expected_fee)
+    assert account.cash_balance == pytest.approx(1000.0 - expected_fee)
 
     ledger = db.query(MetaSignalsPaperLedger).filter_by(order_id=order.id, event_type="ENTRY_FEE").first()
     assert ledger is not None
@@ -567,7 +631,7 @@ def test_open_paper_trade_limit_rests_unfilled_until_touched(db):
     assert order.filled_at is None
 
     account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
-    assert account.cash_balance == pytest.approx(500.0)   # no fee yet -- not filled
+    assert account.cash_balance == pytest.approx(1000.0)   # no fee yet -- not filled
 
     # Price still above the resting limit -- no fill.
     event = engine.advance_order(db, order, mark_price=165.0)
@@ -725,7 +789,7 @@ def test_public_snapshot_shape(db):
     _approved_plan(db)
     snap = radar.get_public_snapshot(db)
     assert snap["ok"] is True
-    assert snap["account"]["starting_balance"] == pytest.approx(500.0)
+    assert snap["account"]["starting_balance"] == pytest.approx(1000.0)
     assert len(snap["recent_triage"]) == 1
 
 
@@ -972,7 +1036,7 @@ def test_alert_path_is_a_true_alias_of_webhook_and_still_accepts_the_legacy_prep
     legacy_payload = {
         "raw_text": "legacy text", "source": "discord_raspberry_pi",
         "symbol": "SOLUSDT", "side": "BUY", "entry_price": 160.0, "soft_stop": 150.0,
-        "tp1": 170.0, "tp2": 180.0, "tp3": None, "timeframe": "6H", "strategy": "2.0.1",
+        "tp1": 170.0, "tp2": 180.0, "tp3": None, "timeframe": "8H", "strategy": "2.0.1",   # a real PERMITTED_STRATEGY_TIMEFRAME_CELLS entry
         "timestamp": "2026-10-13T14:30:00Z",
     }
     resp = client.post("/api/metasignals/alert", json=legacy_payload, headers={"X-Kabroda-Secret": "test-ms-secret"})

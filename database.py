@@ -913,6 +913,29 @@ def init_db():
     except Exception:
         pass
 
+    # --- ONE-TIME BACKFILL: MetaSignalsPaperAccount bankroll raised
+    # $500 -> $1,000 (2026-10-13, Andy directive + Study 4 whitelist
+    # rewrite). The real production singleton row was already created
+    # (by get_or_init_paper_account(), the first time a webhook came in)
+    # BEFORE this change -- the ORM column default above only governs
+    # brand-new rows, so the already-existing row needs an explicit
+    # one-time UPDATE, same pattern as every other one-time fix in this
+    # function. Guarded to ONLY touch a row still at the pristine
+    # $500.00 starting state (confirmed via the live /api/metasignals/
+    # snapshot endpoint before writing this: total_trades=0, cash_
+    # balance=500.0, as of this change) -- if real paper trading has
+    # already moved the balance away from $500 by the time this runs
+    # anywhere else, this must NOT clobber that real (paper) P&L
+    # history with a blind overwrite. ---
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE metasignals_paper_accounts SET starting_balance = 1000.0, cash_balance = 1000.0, equity = 1000.0 "
+                "WHERE name = 'DEFAULT_PAPER_DESK' AND starting_balance = 500.0 AND cash_balance = 500.0 AND total_trades = 0"
+            ))
+    except Exception:
+        pass
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------
@@ -3168,9 +3191,12 @@ class MetaSignalsPaperAccount(Base):
     """Singleton paper-trading bankroll -- realistically exactly one row
     ever exists (name='DEFAULT_PAPER_DESK'), created on first use by
     metasignals_paper_engine.get_or_init_paper_account(), never by any
-    user-facing route. $500 starting bankroll, $50 fixed risk per trade
-    (Andy's own worked numbers, METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md
-    section 4A). cash_balance is a pure running P&L ledger (every fee and
+    user-facing route. $1,000 starting bankroll (raised from $500,
+    2026-10-13 same day as the Study 4 whitelist rewrite -- see
+    init_db()'s own one-time backfill comment for the already-existing
+    production row), $50 fixed risk per trade, 5% of bankroll
+    (METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md section 4A, updated same
+    day). cash_balance is a pure running P&L ledger (every fee and
     every realized P&L event adjusts it directly) -- this paper desk has
     no margin/leverage mechanics to simulate, only the fixed-dollar-risk
     sizing and fee accounting the spec actually describes. equity is
@@ -3198,9 +3224,9 @@ class MetaSignalsPaperAccount(Base):
     name = Column(String, nullable=False, default="DEFAULT_PAPER_DESK", unique=True)
     execution_mode = Column(String, nullable=False, default="PAPER")   # PAPER | SUBACCOUNT_DRY_RUN | SUBACCOUNT_LIVE -- see class docstring, NOT yet wired to real execution
     linked_account_id = Column(Integer, nullable=True)   # an ExecutorAccount.id, plain int (no FK object, matching this file's convention) -- display/config only today
-    starting_balance = Column(Float, nullable=False, default=500.0)
-    cash_balance = Column(Float, nullable=False, default=500.0)
-    equity = Column(Float, nullable=False, default=500.0)
+    starting_balance = Column(Float, nullable=False, default=1000.0)
+    cash_balance = Column(Float, nullable=False, default=1000.0)
+    equity = Column(Float, nullable=False, default=1000.0)
     risk_unit_usd = Column(Float, nullable=False, default=50.0)
     total_trades = Column(Integer, nullable=False, default=0)
     winning_trades = Column(Integer, nullable=False, default=0)

@@ -29,6 +29,16 @@
 #      outright (VETO_SIDE_NOT_SUPPORTED) rather than silently run through
 #      long-only math in the wrong direction -- a short would need its own
 #      mirrored formulas this spec never specified.
+#      STILL TRUE as of the 2026-10-13 pillar-5 rewrite below, flagged
+#      explicitly because the spec's own pillar-5 text now names SHORT-
+#      side monitored channels (mafioso-short-mtf/htf) -- that is a
+#      statement about what the Pi forwards, not a change to pillars 1-4
+#      (macro direction, extension sign, hard-stop side, all still
+#      long-only math). PERMITTED_STRATEGY_TIMEFRAME_CELLS below is
+#      built from the Study 4 CSV's LONG rows only for exactly this
+#      reason. Real short-side support needs its own mirrored pillars
+#      1/3/geometry, not assumed here -- a SHORT alert still vetoes at
+#      the side check before ever reaching pillar 5's cell lookup.
 #   2. Pillar 1's asset leg ("Daily Close > Daily 200 SMA (or Daily 55
 #      EMA)") is read as: use the 200 SMA when the asset has enough daily
 #      history to compute one; fall back to the 55 EMA only when it
@@ -40,19 +50,18 @@
 #      now would be inventing behavior nobody actually specified. If
 #      Andy wants the EMA-trail variant, that is a fresh, separately-
 #      scoped addition, not assumed here.
-#   4. Pillar 5's strategy whitelist has only two named examples in the
-#      spec ("2.0.1", "2.0 G2") -- WHITELISTED_STRATEGIES below contains
-#      exactly those two, nothing invented beyond them. Adding a new
-#      strategy name is a one-line edit to that set.
-#      2026-10-13 (Andy, confirmed via AskUserQuestion after a real live
-#      alert was checked against the actual triage log, not taken on a
-#      relayed claim): added "1.0 G2" and timeframe "3H" -- the first
-#      real production alert came in as symbol=SOLUSDT (already
-#      whitelisted, a wrong detail in the report that prompted this),
-#      strategy="1.0 G2", timeframe="3H", and was correctly vetoed
-#      VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED on BOTH the strategy and
-#      timeframe checks at once (the relayed report only mentioned the
-#      timeframe) -- confirmed Andy wants both admitted, not just one.
+#   4. Pillar 5's strategy whitelist. ORIGINAL version (2026-10-13
+#      morning) had only two named spec examples ("2.0.1", "2.0 G2"),
+#      then a same-day fix added "1.0 G2"/"3H" after the real first
+#      production alert was vetoed on both at once (confirmed against
+#      the live triage log, not a relayed claim -- a relayed report that
+#      same day had only flagged the timeframe and incorrectly claimed
+#      SOL itself needed whitelisting). SUPERSEDED same day, later, by
+#      the full Study 4 cell-level rewrite below (see the new block
+#      above PERMITTED_STRATEGY_TIMEFRAME_CELLS for the complete
+#      reasoning) -- a flat strategy-name whitelist can't express that
+#      the same strategy is validated at one timeframe and a known trap
+#      at another, which the real data shows happening repeatedly.
 #   5. "Live Bitunix price" for the extension check and the market-entry
 #      fill reference is markPrice from the SAME fetch_public_funding_rate
 #      call already used for pillar 4 -- one network call does double
@@ -77,9 +86,105 @@ from typing import Any, Dict, List, Optional
 
 import market_data
 
-WHITELISTED_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
-WHITELISTED_TIMEFRAMES = ("6H", "8H", "3H")
-WHITELISTED_STRATEGIES = ("2.0.1", "2.0 G2", "1.0 G2")   # see module header, decision 4, incl. the 2026-10-13 addition
+# 2026-10-13 (later same day) -- Andy's follow-up directives superseded
+# decision 4's flat strategy-name whitelist entirely. Verified directly
+# against METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md section 3's current
+# text (git history: commits 4873879, then 70288f4 which supersedes it
+# on the pair question) and the actual Study 4 output -- NOT just the
+# spec's own "e.g." abbreviated examples -- before changing anything:
+# `Kabroda Meta Signals AI/studies/strategy_reliability/
+# strategy_reliability_results.csv` (159 rows: strategy x direction x
+# timeframe CELLS, each independently classified SHORTLIST/WATCHLIST/
+# DO_NOT_TOUCH from real ~7-year backtest stats). This matters because
+# the classification is NOT a per-strategy-name property -- the SAME
+# strategy name can be validated at one timeframe and a known trap at
+# another (e.g. "3.0 G3" is SHORTLIST at 2H but DO_NOT_TOUCH at 4H,
+# where its edge is sub-breakeven on static stops). A flat strategy-name
+# set (this module's own prior approach) cannot express that at all.
+#
+# Three independent whitelist dimensions now, matching the spec's own
+# split into three distinct veto reasons (VETO_PAIR_NOT_ON_EXCHANGE /
+# VETO_TIMEFRAME_LTF_NOISE / VETO_STRATEGY_TRAP_OR_UNPROVEN) instead of
+# one generic VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED -- a lesson learned
+# directly from the 2026-10-13 real-production veto earlier today, where
+# a single combined reason masked that TWO separate checks were failing
+# at once and nearly caused an incomplete fix.
+#   1. PAIRS: no hardcoded symbol list anymore -- any USDT perpetual pair
+#      Bitunix actually has candle data for is allowed through to the
+#      other pillars (spec: "any USDT perpetual pair... from the
+#      monitored channels"). "Not on Bitunix at all" is detected, not
+#      assumed, by the candle fetch itself coming back completely empty.
+#   2. TIMEFRAMES: exactly the 8 MTF/HTF values the spec names --
+#      WHITELISTED_TIMEFRAMES below. Sub-60m (15m/30m/45m) is EXCLUDED
+#      OUTRIGHT regardless of what Study 4's own data says about any
+#      specific 45m/30m cell (several 45m cells ARE shortlisted in the
+#      raw data) -- the spec's pillar-5 timeframe rule is a separate,
+#      independent gate from the strategy-cell classification, not
+#      something Study 4's per-cell stats override.
+#   3. STRATEGY CELLS: PERMITTED_STRATEGY_TIMEFRAME_CELLS /
+#      KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS below are generated directly
+#      from the CSV's own LONG-direction, timeframe>=60 rows (this
+#      system is long-only, see decision 1 -- SHORT rows in the CSV are
+#      not yet relevant to anything this gate evaluates). PERMITTED =
+#      SHORTLIST union WATCHLIST status (the spec's own "Shortlist &
+#      Watchlist tiers" framing for what's allowed through); TRAP =
+#      DO_NOT_TOUCH. A (strategy, timeframe) pair appearing in NEITHER
+#      set was never in Study 4's 159-cell universe at all -- treated as
+#      unproven, not silently permitted, matching the veto reason's own
+#      name (VETO_STRATEGY_TRAP_OR_UNPROVEN, "...OR UNPROVEN").
+#      Generated once via a throwaway script reading the real CSV
+#      directly (not hand-transcribed) -- regenerate the same way if
+#      Study 4 is ever re-run with different cells.
+WHITELISTED_TIMEFRAMES = ("1H", "2H", "3H", "4H", "6H", "8H", "12H", "1D")
+
+PERMITTED_STRATEGY_TIMEFRAME_CELLS = frozenset({
+    ("1.0 G1", "2H"), ("1.0 G1", "3H"),
+    ("1.0 G2", "2H"), ("1.0 G2", "3H"), ("1.0 G2", "4H"), ("1.0 G2", "6H"),
+    ("1.0 G3", "1H"), ("1.0 G3", "2H"), ("1.0 G3", "3H"), ("1.0 G3", "4H"), ("1.0 G3", "6H"),
+    ("1.0 G4", "1H"), ("1.0 G4", "2H"), ("1.0 G4", "3H"), ("1.0 G4", "4H"),
+    ("1.0.1", "12H"), ("1.0.2", "1D"),
+    ("1.1 G2", "1H"), ("1.1 G2", "2H"), ("1.1 G2", "3H"), ("1.1 G2", "4H"),
+    ("1.1 G3", "1H"), ("1.1 G3", "2H"), ("1.1 G3", "4H"),
+    ("1.1 G4", "4H"), ("1.1.1", "1D"), ("1.1.1", "8H"), ("1.1.2", "1D"),
+    ("1.2 G2", "3H"), ("1.2 G3", "2H"),
+    ("1.3 G1", "2H"),
+    ("1.3 G2", "2H"), ("1.3 G2", "3H"), ("1.3 G2", "4H"), ("1.3 G2", "6H"),
+    ("1.3 G3", "2H"), ("1.3 G3", "3H"), ("1.3 G3", "4H"), ("1.3 G3", "6H"),
+    ("1.3 G4", "2H"), ("1.3 G4", "3H"), ("1.3 G4", "4H"), ("1.3 G4", "6H"),
+    ("2.0 G1", "3H"), ("2.0 G1", "4H"),
+    ("2.0 G2", "2H"), ("2.0 G2", "3H"), ("2.0 G2", "4H"), ("2.0 G2", "6H"),
+    ("2.0 G3", "4H"), ("2.0 G3", "6H"),
+    ("2.0.1", "1D"), ("2.0.1", "8H"),
+    ("2.1 G2", "3H"), ("2.1 G2", "4H"), ("2.1 G2", "6H"),
+    ("2.1 G3", "4H"), ("2.1 G4", "3H"), ("2.1 G4", "4H"),
+    ("3.0 G2", "4H"), ("3.0 G2", "6H"),
+    ("3.0 G3", "3H"), ("3.0 G3", "6H"),
+    ("3.0 G4", "3H"), ("3.0 G4", "4H"), ("3.0 G4", "6H"),
+    ("3.0.1", "1D"), ("3.0.1", "8H"), ("3.0.2", "8H"),
+    ("3.1 G2", "2H"), ("3.1 G3", "2H"), ("3.1 G4", "2H"),
+    ("4.0 G2", "3H"), ("4.0 G2", "4H"), ("4.0 G2", "6H"),
+    ("4.0 G3", "3H"), ("4.0 G3", "6H"),
+    ("4.0 G4", "4H"), ("4.0 G4", "6H"),
+    ("4.1 G2", "4H"), ("4.1 G2", "6H"), ("4.1 G4", "4H"),
+})   # 82 cells -- SHORTLIST + WATCHLIST, LONG direction, timeframe >= 60m
+
+KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS = frozenset({
+    ("1.0 G1", "1H"), ("1.0 G1", "4H"), ("1.0 G1", "6H"),
+    ("1.0 G2", "1H"), ("1.0 G4", "6H"),
+    ("1.0.1", "1D"), ("1.0.1", "8H"), ("1.0.2", "8H"),
+    ("1.1 G1", "1H"), ("1.1 G1", "2H"), ("1.1 G1", "3H"), ("1.1 G1", "4H"),
+    ("1.1.2", "8H"), ("1.2 G1", "2H"),
+    ("1.3 G1", "3H"), ("1.3 G1", "6H"),
+    ("1.4 G2", "1H"),
+    ("2.0 G1", "6H"), ("2.0 G3", "3H"), ("2.0 G4", "3H"), ("2.0 G4", "4H"),
+    ("2.0.2", "1D"), ("2.0.2", "8H"),
+    ("2.1 G1", "3H"), ("2.1 G1", "4H"), ("2.1 G3", "3H"),
+    ("3.0 G1", "3H"), ("3.0 G1", "4H"), ("3.0 G1", "6H"),
+    ("3.0 G3", "4H"), ("3.0.2", "1D"),
+    ("3.1 G1", "2H"), ("3.1 G2", "4H"), ("3.1 G3", "4H"),
+    ("4.0 G1", "4H"), ("4.0 G1", "6H"), ("4.0 G3", "4H"),
+    ("4.1 G1", "4H"), ("4.1 G1", "6H"), ("4.1 G3", "4H"),
+})   # 40 cells -- DO_NOT_TOUCH, LONG direction, timeframe >= 60m
 
 # Discord content parsing (2026-10-13, spec section 6A/commit `f770ec7`):
 # the Raspberry Pi daemon now forwards the RAW Discord payload (content +
@@ -336,11 +441,22 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {"symbol": symbol}
 
-    # Pillar 5 first -- cheapest check, no network I/O, and the spec's
-    # own ordering lists it last but every other pillar's math is moot
-    # on an un-whitelisted pair/timeframe/strategy.
-    if symbol not in WHITELISTED_SYMBOLS or timeframe not in WHITELISTED_TIMEFRAMES or strategy not in WHITELISTED_STRATEGIES:
-        out.update(verdict="NO", reason="VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED")
+    # Pillar 5, timeframe + strategy-cell legs first -- cheapest checks,
+    # no network I/O, and every other pillar's math is moot on an
+    # excluded timeframe or an unstudied/trap strategy cell. The PAIR
+    # leg of pillar 5 (is this symbol actually on Bitunix) can't be
+    # checked until after the candle fetch below -- there's no whitelist
+    # of valid symbols anymore (see module header, decision 4).
+    if timeframe not in WHITELISTED_TIMEFRAMES:
+        out.update(verdict="NO", reason="VETO_TIMEFRAME_LTF_NOISE")
+        return out
+
+    cell = (strategy, timeframe)
+    if cell in PERMITTED_STRATEGY_TIMEFRAME_CELLS:
+        out["strategy_cell_status"] = "PERMITTED"
+    else:
+        out["strategy_cell_status"] = "TRAP" if cell in KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS else "UNPROVEN"
+        out.update(verdict="NO", reason="VETO_STRATEGY_TRAP_OR_UNPROVEN")
         return out
 
     if side != "BUY":
@@ -352,6 +468,13 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
     candles_btc_1d = await _fetch_confirmed_daily("BTCUSDT")
     funding_mark = await _fetch_funding_and_mark(symbol)
 
+    if len(candles_4h) == 0 or len(candles_1d) == 0:
+        # Bitunix returned nothing at all for this symbol -- not "not
+        # enough history yet" (a real pair, new listing), but "this
+        # pair doesn't appear to exist on this exchange" (spec's own
+        # distinct veto reason for the two different real scenarios).
+        out.update(verdict="NO", reason="VETO_PAIR_NOT_ON_EXCHANGE")
+        return out
     if len(candles_4h) < 15:
         out.update(verdict="NO", reason="VETO_INSUFFICIENT_4H_HISTORY")
         return out
