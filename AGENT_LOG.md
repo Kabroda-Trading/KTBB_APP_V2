@@ -9006,3 +9006,53 @@ Andy directive: Eliminate friction by formalizing the full Study 4 Whitelist/Bla
    - Explicit Trap Blacklist: Banned cells from Study 4 `DO_NOT_TOUCH` that collapse under hard stops (e.g. `2.0 G4 3H`, `3.0 G3 4H`).
 2. PAPER ACCOUNT SEED UPDATE (Section 4 & 5):
    - Starting balance and cash balance updated from $500.00 to $1,000.00 in `metasignals_paper_account` ($50 risk = 5% risk budget).
+
+## 2026-10-13 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+PILLAR 5 REWRITTEN ON REAL STUDY 4 CELL DATA -- Andy relayed two
+instructions back to back that directly contradicted each other on the
+pair question (one kept the 3-coin symbol whitelist above; the other
+said remove it entirely, "any USDT pair"), and said plainly he wasn't
+sure they were consistent and to check the actual MD files. Did exactly
+that rather than guess: `git log` on METASIGNALS_TRIAGE_AND_EXECUTION_
+SPEC.md showed the "Majors only" pairs text logged above (commit
+`4873879`) was itself superseded by a LATER commit (`70288f4`, "allow
+all Bitunix USDT perpetual pairs from monitored Discord channels") --
+confirmed by reading that file's CURRENT content directly, not this
+log's own (now one commit stale) summary of the first pass. The second,
+later instruction was the real final word on pairs.
+
+More importantly, went past both relayed instructions AND the spec's
+own "e.g." abbreviated trap list to the actual Study 4 source:
+`Kabroda Meta Signals AI/studies/strategy_reliability/
+strategy_reliability_results.csv` -- 159 real strategy x direction x
+timeframe cells, each independently classified from ~7-year backtest
+stats. This matters because strategy validity isn't a per-name
+property: "3.0 G3" is SHORTLIST at 2H but a sub-breakeven DO_NOT_TOUCH
+trap at 4H in the real data. Neither relayed instruction's "permit
+strategy family X, exclude known trap Y" framing, nor the spec's own
+4-example trap list, can express that -- only the real per-cell data
+can. Generated PERMITTED_STRATEGY_TIMEFRAME_CELLS (82) and KNOWN_TRAP_
+STRATEGY_TIMEFRAME_CELLS (40) directly from the CSV via a throwaway
+script (LONG-direction, timeframe>=60m rows only -- this system is
+still long-only, see metasignals_triage.py's own decision 1), not
+hand-transcribed.
+
+Split the single old combined veto reason into the spec's own three
+distinct ones (VETO_TIMEFRAME_LTF_NOISE / VETO_PAIR_NOT_ON_EXCHANGE /
+VETO_STRATEGY_TRAP_OR_UNPROVEN) -- a direct lesson from this morning's
+near-miss, where one combined reason almost caused an incomplete fix.
+No symbol whitelist exists anymore; "pair not on Bitunix" is detected
+by the candle fetch coming back genuinely empty, not assumed from a
+hardcoded list.
+
+Also raised the paper account's starting/cash balance $500 -> $1,000
+(spec section 4A). The real production row already existed before this
+change -- added a guarded one-time backfill in init_db() (only touches
+a row still at the pristine $500/0-trades state) with a dedicated test
+proving it fires on a stale row AND leaves a row with real activity
+alone. Full suite: 879 passed, 0 failed. Real boot check passed (fresh
+account seeds at $1,000).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
