@@ -44,6 +44,15 @@
 #      spec ("2.0.1", "2.0 G2") -- WHITELISTED_STRATEGIES below contains
 #      exactly those two, nothing invented beyond them. Adding a new
 #      strategy name is a one-line edit to that set.
+#      2026-10-13 (Andy, confirmed via AskUserQuestion after a real live
+#      alert was checked against the actual triage log, not taken on a
+#      relayed claim): added "1.0 G2" and timeframe "3H" -- the first
+#      real production alert came in as symbol=SOLUSDT (already
+#      whitelisted, a wrong detail in the report that prompted this),
+#      strategy="1.0 G2", timeframe="3H", and was correctly vetoed
+#      VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED on BOTH the strategy and
+#      timeframe checks at once (the relayed report only mentioned the
+#      timeframe) -- confirmed Andy wants both admitted, not just one.
 #   5. "Live Bitunix price" for the extension check and the market-entry
 #      fill reference is markPrice from the SAME fetch_public_funding_rate
 #      call already used for pillar 4 -- one network call does double
@@ -69,8 +78,8 @@ from typing import Any, Dict, List, Optional
 import market_data
 
 WHITELISTED_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
-WHITELISTED_TIMEFRAMES = ("6H", "8H")
-WHITELISTED_STRATEGIES = ("2.0.1", "2.0 G2")   # the spec's only two named examples -- see module header, decision 4
+WHITELISTED_TIMEFRAMES = ("6H", "8H", "3H")
+WHITELISTED_STRATEGIES = ("2.0.1", "2.0 G2", "1.0 G2")   # see module header, decision 4, incl. the 2026-10-13 addition
 
 # Discord content parsing (2026-10-13, spec section 6A/commit `f770ec7`):
 # the Raspberry Pi daemon now forwards the RAW Discord payload (content +

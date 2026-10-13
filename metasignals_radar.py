@@ -70,7 +70,8 @@ def _order_dict(o: MetaSignalsPaperOrder) -> Dict[str, Any]:
 
 def _plan_dict(p: MetaSignalsPlan, full: bool = False) -> Dict[str, Any]:
     d: Dict[str, Any] = {
-        "id": p.id, "symbol": p.symbol, "side": p.side, "strategy": p.strategy, "timeframe": p.timeframe,
+        "id": p.id, "raw_alert_id": p.raw_alert_id, "symbol": p.symbol, "side": p.side,
+        "strategy": p.strategy, "timeframe": p.timeframe,
         "alert_price": p.alert_price, "triage_verdict": p.triage_verdict, "triage_reason": p.triage_reason,
         "status": p.status, "created_at": _iso(p.created_at),
     }
@@ -110,6 +111,23 @@ def get_public_snapshot(db: Session, recent_limit: int = 20, history_limit: int 
         "trade_history": [_order_dict(o) for o in closed_orders],
         "recent_triage": [_plan_dict(p) for p in recent_plans],
     }
+
+
+def get_audit_log(db: Session, limit: int = 20) -> Dict[str, Any]:
+    """Public, no login -- same reasoning as get_public_snapshot() above
+    (a $500 paper account, nothing real-money or user-identifying).
+    2026-10-13, DeepSeek/Kabroda AI Brain request (relayed via Andy):
+    a dedicated pull so an external evaluation session can cross-examine
+    exactly what the site decided and why, without needing the trimmed
+    public snapshot's shape. Unlike get_public_snapshot()'s own
+    recent_triage (trimmed, no pillar detail), every row here uses the
+    FULL plan dict -- every pillar readout (macro/RSI/extension/funding/
+    ATR) and the computed geometry on a YES, not just the verdict --
+    same depth as get_admin_status()'s own per-plan detail, just without
+    requiring an admin login (this is a backend-to-backend pull from a
+    separate evaluation workspace, not a browser session)."""
+    plans = db.query(MetaSignalsPlan).order_by(MetaSignalsPlan.id.desc()).limit(limit).all()
+    return {"ok": True, "alerts": [_plan_dict(p, full=True) for p in plans]}
 
 
 def get_admin_status(db: Session, recent_ledger_limit: int = 30) -> Dict[str, Any]:

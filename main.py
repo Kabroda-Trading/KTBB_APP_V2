@@ -1245,6 +1245,23 @@ async def api_metasignals_snapshot(db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e), "account": None, "positions": [], "trade_history": [], "recent_triage": []})
 
 
+@app.get("/api/metasignals/audit")
+async def api_metasignals_audit(limit: int = 20, db: Session = Depends(get_db)):
+    """Public, no login -- same reasoning as the snapshot route above
+    (paper account, nothing real-money or user-identifying). 2026-10-13,
+    DeepSeek/Kabroda AI Brain request (relayed via Andy): lets any
+    evaluation session in that separate workspace pull recent alerts +
+    full triage detail directly, to cross-examine what the site decided
+    without needing an admin login. `limit` is clamped to [1, 100] --
+    never an unbounded dump regardless of what's requested."""
+    limit = max(1, min(int(limit), 100))
+    try:
+        return JSONResponse(metasignals_radar.get_audit_log(db, limit))
+    except Exception as e:
+        print(f"[RADAR] metasignals-audit failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "alerts": []})
+
+
 class MetaSignalsConfigRequest(BaseModel):
     execution_mode: str
     linked_account_id: Optional[int] = None

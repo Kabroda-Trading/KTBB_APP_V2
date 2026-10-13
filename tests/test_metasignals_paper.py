@@ -308,6 +308,19 @@ def test_evaluate_alert_full_approval_yes(monkeypatch):
     assert result["tp2_price"] == pytest.approx(alert["tp2"])
 
 
+def test_evaluate_alert_real_production_alert_strategy_1_0_g2_timeframe_3h_now_passes_whitelist(monkeypatch):
+    # Regression for the real first-production-alert case (2026-10-13):
+    # symbol=SOLUSDT (already whitelisted), strategy="1.0 G2",
+    # timeframe="3H" -- vetoed VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED on
+    # BOTH the strategy AND timeframe checks before this fix (a relayed
+    # report only flagged the timeframe; verified against the real
+    # triage log before changing anything, per module header decision 4).
+    _patch_market(monkeypatch, mark_price=107.49)
+    alert = _good_alert(symbol="SOLUSDT", strategy="1.0 G2", timeframe="3H", entry_price=107.49, soft_stop=100.0)
+    result = _run(triage.evaluate_alert(alert))
+    assert result["reason"] != "VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED"
+
+
 def test_evaluate_alert_limit_entry_mode_when_moderately_extended(monkeypatch):
     # First pass (mark == entry, extension_r == 0) just to learn the
     # real r_distance (= entry - hard_stop) this fixture produces, then
@@ -716,6 +729,28 @@ def test_public_snapshot_shape(db):
     assert len(snap["recent_triage"]) == 1
 
 
+def test_audit_log_returns_full_plan_detail_not_just_the_trimmed_snapshot_shape(db):
+    plan = _approved_plan(db)
+    audit = radar.get_audit_log(db, limit=20)
+    assert audit["ok"] is True
+    assert len(audit["alerts"]) == 1
+    row = audit["alerts"][0]
+    # Full detail, unlike get_public_snapshot()'s own recent_triage --
+    # pillar readouts and computed geometry must be present.
+    assert row["id"] == plan.id
+    assert row["hard_stop"] == pytest.approx(150.0)
+    assert row["position_size"] == pytest.approx(5.0)
+    assert "asset_sma200" in row and "rsi_4h" in row and "funding_rate" in row
+
+
+def test_audit_log_respects_limit_and_orders_most_recent_first(db):
+    for i in range(3):
+        _approved_plan(db, symbol=f"SOL{i}USDT")
+    audit = radar.get_audit_log(db, limit=2)
+    assert len(audit["alerts"]) == 2
+    assert audit["alerts"][0]["symbol"] == "SOL2USDT"   # most recent first
+
+
 # ============================================================== HTTP routes
 
 sys.modules.setdefault("yfinance", MagicMock())
@@ -802,6 +837,35 @@ def test_public_snapshot_route_works_with_no_login(client_env):
     body = resp.json()
     assert body["ok"] is True
     assert "account" in body
+
+
+def test_audit_route_works_with_no_login_and_returns_full_detail(client_env):
+    db = client_env["db"]
+    _approved_plan(db)
+    db.commit()   # the route reads via its own separate session (Depends(get_db)) -- needs a real commit, not just this session's own flush
+    client = TestClient(app)
+    resp = client.get("/api/metasignals/audit")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert len(body["alerts"]) == 1
+    assert "hard_stop" in body["alerts"][0]   # full detail, not the trimmed snapshot shape
+
+
+def test_audit_route_clamps_limit_to_a_sane_range(client_env):
+    db = client_env["db"]
+    for i in range(5):
+        _approved_plan(db, symbol=f"SOL{i}USDT")
+    db.commit()
+    client = TestClient(app)
+    resp = client.get("/api/metasignals/audit", params={"limit": 2})
+    assert len(resp.json()["alerts"]) == 2
+
+    resp_huge = client.get("/api/metasignals/audit", params={"limit": 99999})
+    assert len(resp_huge.json()["alerts"]) <= 100
+
+    resp_zero = client.get("/api/metasignals/audit", params={"limit": 0})
+    assert len(resp_zero.json()["alerts"]) >= 1
 
 
 def test_admin_desk_page_requires_login(client_env):
