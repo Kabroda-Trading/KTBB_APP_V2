@@ -126,7 +126,18 @@ Every balance change (fee deduction, TP1 fill, stop fill, final exit) writes a r
 
 Add to `database.py` models and `init_db()`:
 
-```sql
+-- 0. Raw Incoming Webhook Alerts (Immutable Audit Trail)
+CREATE TABLE IF NOT EXISTS metasignals_raw_alerts (
+    id SERIAL PRIMARY KEY,
+    channel_id VARCHAR(64),
+    channel_name VARCHAR(64),
+    message_id VARCHAR(64),
+    author VARCHAR(64),
+    content TEXT,
+    embeds JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- 1. Paper Account & Configuration Singleton
 CREATE TABLE IF NOT EXISTS metasignals_paper_account (
     id SERIAL PRIMARY KEY,
@@ -149,6 +160,7 @@ CREATE TABLE IF NOT EXISTS metasignals_paper_account (
 CREATE TABLE IF NOT EXISTS metasignals_triage_plans (
     id SERIAL PRIMARY KEY,
     plan_id VARCHAR(64) UNIQUE NOT NULL,
+    raw_alert_id INT REFERENCES metasignals_raw_alerts(id) DEFAULT NULL,
     symbol VARCHAR(32) NOT NULL,
     side VARCHAR(8) NOT NULL,
     strategy VARCHAR(32) NOT NULL,
@@ -206,29 +218,31 @@ CREATE TABLE IF NOT EXISTS metasignals_paper_ledger (
 
 ## 6. The Ingestion API & Endpoints (`main.py`)
 
-### A. Ingestion Endpoint for Raspberry Pi:
+### A. Ingestion Webhook for Raspberry Pi:
 ```http
-POST /api/metasignals/alert
-Header: X-Kabroda-Secret: <METASIGNALS_INGEST_SECRET>
+POST /api/metasignals/webhook
+(alias: POST /api/metasignals/alert)
+Header: X-Kabroda-Secret: <METASIGNALS_SECRET_KEY>
 Body:
 {
-  "raw_text": "SOL | USDT @ $110.0400 - 6H - 2.0 G2...",
-  "symbol": "SOLUSDT",
-  "side": "BUY",
-  "entry_price": 110.04,
-  "soft_stop": 105.40,
-  "tp1": 114.19,
-  "tp2": 120.56,
-  "timeframe": "6H",
-  "strategy": "2.0 G2",
-  "timestamp": "2026-10-13T14:30:00Z"
+  "channel_id": "1175634339732664433",
+  "channel_name": "mafioso-majors",
+  "message_id": "...",
+  "author": "...",
+  "content": "SOL | USDT @ $110.0400 - 6H - 2.0 G2...",
+  "embeds": [...],
+  "created_at": "2026-10-13T14:30:00Z"
 }
 ```
+* **Authentication**: Check `X-Kabroda-Secret` against `os.getenv("METASIGNALS_SECRET_KEY")` (fallback: `os.getenv("METASIGNALS_INGEST_SECRET")`). Return 401 if missing or invalid.
 * **Behavior**:
-  1. Validates `X-Kabroda-Secret` against `.env`.
-  2. Runs `metasignals_triage.evaluate_alert()`.
-  3. If YES $\rightarrow$ invokes `metasignals_paper_engine.open_paper_trade()`.
-  4. Returns JSON: `{ "status": "ok", "verdict": "YES|NO", "reason": "...", "plan_id": "..." }`.
+  1. Saves the raw alert into `metasignals_raw_alerts` table (zero data loss).
+  2. Extracts text from `content` or `embeds`.
+  3. Parses alert parameters (Symbol, Side, Entry, SL, TP1, TP2, Strategy, Timeframe).
+  4. If parsed successfully as a trade alert:
+     - Runs `metasignals_triage.evaluate_alert()`.
+     - If YES $\rightarrow$ invokes `metasignals_paper_engine.open_paper_trade()`.
+  5. Returns JSON: `{ "status": "ok", "raw_id": ..., "parsed": true, "verdict": "YES|NO", "reason": "...", "plan_id": "..." }`.
 
 ### B. Snapshot Endpoint (for Dashboard & MetaSignals AI):
 ```http
