@@ -8955,3 +8955,40 @@ can do from here, same as every other env var this project's own
 CLAUDE.md already documents as "required only if you use this feature."
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-13 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+THE FIRST REAL ALERT ARRIVED AND WAS VETOED -- verified against the real
+data, not a relayed claim, before touching the whitelist. Andy relayed a
+report that "the Pi bridge is working 100%... please add SOL and 3H
+(180m) so it clears the filter." Checked `GET /api/metasignals/snapshot`
+on the live site directly instead of acting on the report: the real
+`recent_triage` row showed symbol=SOLUSDT, strategy="1.0 G2",
+timeframe="3H", verdict NO, reason VETO_PAIR_OR_TIMEFRAME_NOT_WHITELISTED.
+Two things the report got wrong/incomplete: SOLUSDT was ALREADY
+whitelisted (never the blocker), and the strategy "1.0 G2" -- not
+mentioned at all -- was ALSO failing the whitelist alongside the
+timeframe. Adding only "3H" would have left this exact alert vetoed
+and looked like the fix didn't work. Surfaced this via AskUserQuestion
+rather than guessing either way; Andy confirmed both "3H" and "1.0 G2"
+should be admitted. Added both to `metasignals_triage.py`'s
+WHITELISTED_TIMEFRAMES/WHITELISTED_STRATEGIES, with a regression test
+reproducing the exact real alert (symbol/strategy/timeframe/price) to
+confirm it now clears that pillar.
+
+Also built `GET /api/metasignals/audit?limit=N` on the same pass --
+DeepSeek/Brain request (relayed via Andy): lets any evaluation session
+in that separate workspace pull recent alerts with FULL pillar/geometry
+detail (not the public snapshot's trimmed shape) to cross-examine what
+the site decided. Public, no login -- same reasoning already applied to
+the snapshot route (paper account, nothing real-money or user-
+identifying). `limit` clamped to [1, 100] regardless of what's requested.
+
+Full suite: 875 passed, 0 failed. Both changes verified live against
+the real production site's own public endpoints before and after
+(confirmed the real veto data via /api/metasignals/snapshot; the new
+audit route is additive and was tested locally, not yet re-checked live
+post-deploy -- worth a quick live hit once this is on Render).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
