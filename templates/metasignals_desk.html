@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KABRODA // METASIGNALS DESK</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        body { background: #140d09; color: #f2e3cf; font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
+
+        .ms-header { display: flex; justify-content: space-between; align-items: center; margin: 30px 0 20px; flex-wrap: wrap; gap: 10px; }
+        .ms-title { font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 800; color: #f2e3cf; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+        .ms-subtitle { font-family: 'JetBrains Mono'; font-size: 11px; color: #8a6f57; margin-top: 4px; }
+        .ms-badge { background: rgba(244, 114, 182, 0.1); color: #f472b6; border: 1px solid rgba(244, 114, 182, 0.3); padding: 4px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; }
+
+        .ms-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .ms-stat { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px 16px; }
+        .ms-stat-label { font-family: 'JetBrains Mono'; font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .ms-stat-value { font-family: 'JetBrains Mono'; font-size: 20px; font-weight: 800; color: #f2e3cf; }
+        .ms-pos { color: #34d399; }
+        .ms-neg { color: #f87171; }
+
+        .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; margin-bottom: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        .card-header { background: #1e293b; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; }
+        .card-body { padding: 16px 18px; overflow-x: auto; }
+
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+        th { color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #334155; white-space: nowrap; }
+        td { padding: 9px 10px; border-bottom: 1px solid #1e293b; color: #e2e8f0; font-family: 'JetBrains Mono'; font-size: 12px; white-space: nowrap; }
+        tr:last-child td { border-bottom: none; }
+        .empty-row td { color: #475569; text-align: center; padding: 20px; white-space: normal; }
+
+        .badge { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; text-transform: uppercase; }
+        .badge-yes { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+        .badge-no { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .badge-state { background: rgba(148,163,184,0.1); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
+        .badge-open { background: rgba(14,165,233,0.1); color: #38bdf8; border: 1px solid rgba(14,165,233,0.3); }
+        .badge-closed-win { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+        .badge-closed-loss { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+
+        .ms-select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 7px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; max-width: 320px; }
+        .btn { border: 1px solid #475569; color: #cbd5e1; background: transparent; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
+        .btn:hover { background: #334155; color: #fff; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div style="max-width: 1300px; margin: 0 auto;">
+        <div class="ms-header">
+            <div>
+                <h1 class="ms-title">MetaSignals Paper Desk</h1>
+                <div class="ms-subtitle">5-pillar triage gate &middot; live Bitunix price tracking</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <select id="ms-exec-mode" class="ms-select">
+                    <option value="PAPER">Standalone Paper Trading Desk ($500 Virtual Balance)</option>
+                    {% for acc in executor_accounts %}
+                    <option value="SUBACCOUNT_DRY_RUN:{{ acc.id }}">Account #{{ acc.id }}: {{ acc.label }} (DRY_RUN Sim)</option>
+                    <option value="SUBACCOUNT_LIVE:{{ acc.id }}">Account #{{ acc.id }}: {{ acc.label }} (LIVE Trading)</option>
+                    {% endfor %}
+                </select>
+                <button class="btn" id="ms-exec-save" onclick="saveExecMode()">Save</button>
+                <span class="ms-badge" id="ms-exec-badge">PAPER MODE</span>
+            </div>
+        </div>
+        <div class="ms-subtitle" style="margin: -8px 0 18px;" id="ms-exec-note"></div>
+
+        <div class="ms-stats" id="ms-stats">
+            <div class="ms-stat"><div class="ms-stat-label">Cash Balance</div><div class="ms-stat-value" id="st-cash">--</div></div>
+            <div class="ms-stat"><div class="ms-stat-label">Equity</div><div class="ms-stat-value" id="st-equity">--</div></div>
+            <div class="ms-stat"><div class="ms-stat-label">Total Realized P&amp;L</div><div class="ms-stat-value" id="st-pnl">--</div></div>
+            <div class="ms-stat"><div class="ms-stat-label">Win Rate</div><div class="ms-stat-value" id="st-winrate">--</div></div>
+            <div class="ms-stat"><div class="ms-stat-label">Total Trades</div><div class="ms-stat-value" id="st-trades">--</div></div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Open Paper Positions</span></div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th><th>State</th><th>Entry Mode</th><th>Entry</th><th>Stop</th>
+                            <th>TP1</th><th>TP2</th><th>Remaining Qty</th><th>Mark</th><th>Unrealized</th><th>Realized</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ms-positions"><tr class="empty-row"><td colspan="11">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Trade History</span></div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th><th>Result</th><th>Entry</th><th>Exit</th>
+                            <th>Qty</th><th>Fees</th><th>Realized P&amp;L</th><th>Closed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ms-history"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Recent Triage Log</span></div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr><th>Time</th><th>Symbol</th><th>Strategy</th><th>Timeframe</th><th>Verdict</th><th>Reason</th><th>Status</th></tr>
+                    </thead>
+                    <tbody id="ms-triage"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function fmtUsd(v) {
+            if (v === null || v === undefined) return '--';
+            const n = Number(v);
+            const sign = n < 0 ? '-' : '';
+            return sign + '$' + Math.abs(n).toFixed(2);
+        }
+        function pnlClass(v) {
+            if (v === null || v === undefined) return '';
+            return Number(v) >= 0 ? 'ms-pos' : 'ms-neg';
+        }
+        function fmtPct(v) {
+            if (v === null || v === undefined) return '--';
+            return (Number(v) * 100).toFixed(1) + '%';
+        }
+        function esc(s) {
+            return (s === null || s === undefined) ? '' : String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+        }
+
+        async function refresh() {
+            let data;
+            try {
+                const resp = await fetch('/api/metasignals/snapshot');
+                data = await resp.json();
+            } catch (e) {
+                return;
+            }
+            if (!data || !data.ok || !data.account) return;
+
+            const a = data.account;
+            document.getElementById('st-cash').textContent = fmtUsd(a.cash_balance);
+            const eqEl = document.getElementById('st-equity');
+            eqEl.textContent = fmtUsd(a.equity);
+            eqEl.className = 'ms-stat-value ' + pnlClass(a.equity - a.starting_balance);
+            const pnlEl = document.getElementById('st-pnl');
+            pnlEl.textContent = fmtUsd(a.total_realized_pnl);
+            pnlEl.className = 'ms-stat-value ' + pnlClass(a.total_realized_pnl);
+            document.getElementById('st-winrate').textContent = fmtPct(a.win_rate);
+            document.getElementById('st-trades').textContent = a.total_trades + ' (' + a.winning_trades + 'W / ' + a.losing_trades + 'L)';
+
+            const badge = document.getElementById('ms-exec-badge');
+            const note = document.getElementById('ms-exec-note');
+            badge.textContent = (a.execution_mode || 'PAPER').replace('_', ' ') + ' MODE';
+            if (a.execution_mode && a.execution_mode !== 'PAPER') {
+                note.textContent = 'Note: ' + a.execution_mode + ' is selected but not yet wired to real order execution -- trades still simulate as paper.';
+            } else {
+                note.textContent = '';
+            }
+            const select = document.getElementById('ms-exec-mode');
+            if (!select.dataset.userTouched) {
+                const want = a.execution_mode === 'PAPER' || !a.execution_mode ? 'PAPER' : a.execution_mode + ':' + (a.linked_account_id || '');
+                if ([...select.options].some(o => o.value === want)) select.value = want;
+            }
+
+            const posBody = document.getElementById('ms-positions');
+            if (!data.positions || data.positions.length === 0) {
+                posBody.innerHTML = '<tr class="empty-row"><td colspan="11">No open paper positions.</td></tr>';
+            } else {
+                posBody.innerHTML = data.positions.map(p => `
+                    <tr>
+                        <td>${esc(p.symbol)}</td>
+                        <td><span class="badge badge-open">${esc(p.state)}</span></td>
+                        <td>${esc(p.entry_mode)}</td>
+                        <td>${p.entry_price != null ? p.entry_price : '--'}</td>
+                        <td>${p.current_stop != null ? p.current_stop : '--'}</td>
+                        <td>${p.tp1_price != null ? p.tp1_price : '--'}</td>
+                        <td>${p.tp2_price != null ? p.tp2_price : '--'}</td>
+                        <td>${p.remaining_qty != null ? p.remaining_qty : '--'}</td>
+                        <td>${p.last_mark_price != null ? p.last_mark_price : '--'}</td>
+                        <td class="${pnlClass(p.unrealized_pnl)}">${fmtUsd(p.unrealized_pnl)}</td>
+                        <td class="${pnlClass(p.realized_pnl)}">${fmtUsd(p.realized_pnl)}</td>
+                    </tr>
+                `).join('');
+            }
+
+            const historyBody = document.getElementById('ms-history');
+            if (!data.trade_history || data.trade_history.length === 0) {
+                historyBody.innerHTML = '<tr class="empty-row"><td colspan="8">No closed trades yet.</td></tr>';
+            } else {
+                historyBody.innerHTML = data.trade_history.map(o => `
+                    <tr>
+                        <td>${esc(o.symbol)}</td>
+                        <td><span class="badge ${o.realized_pnl >= 0 ? 'badge-closed-win' : 'badge-closed-loss'}">${esc(o.state)}</span></td>
+                        <td>${o.entry_price != null ? o.entry_price : '--'}</td>
+                        <td>${o.exit_price != null ? o.exit_price : '--'}</td>
+                        <td>${o.initial_qty != null ? o.initial_qty : '--'}</td>
+                        <td>${fmtUsd(o.fees_paid)}</td>
+                        <td class="${pnlClass(o.realized_pnl)}">${fmtUsd(o.realized_pnl)}</td>
+                        <td>${o.closed_at ? new Date(o.closed_at + 'Z').toLocaleString() : '--'}</td>
+                    </tr>
+                `).join('');
+            }
+
+            const triageBody = document.getElementById('ms-triage');
+            if (!data.recent_triage || data.recent_triage.length === 0) {
+                triageBody.innerHTML = '<tr class="empty-row"><td colspan="7">No alerts received yet.</td></tr>';
+            } else {
+                triageBody.innerHTML = data.recent_triage.map(p => `
+                    <tr>
+                        <td>${p.created_at ? new Date(p.created_at + 'Z').toLocaleString() : '--'}</td>
+                        <td>${esc(p.symbol)}</td>
+                        <td>${esc(p.strategy)}</td>
+                        <td>${esc(p.timeframe)}</td>
+                        <td><span class="badge ${p.triage_verdict === 'YES' ? 'badge-yes' : 'badge-no'}">${esc(p.triage_verdict)}</span></td>
+                        <td>${esc(p.triage_reason)}</td>
+                        <td><span class="badge badge-state">${esc(p.status)}</span></td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        async function saveExecMode() {
+            const select = document.getElementById('ms-exec-mode');
+            const raw = select.value;
+            let execution_mode, linked_account_id;
+            if (raw === 'PAPER') {
+                execution_mode = 'PAPER'; linked_account_id = null;
+            } else {
+                const parts = raw.split(':');
+                execution_mode = parts[0]; linked_account_id = parseInt(parts[1], 10);
+            }
+            select.dataset.userTouched = '1';
+            try {
+                const resp = await fetch('/api/metasignals/config', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ execution_mode, linked_account_id }),
+                });
+                const body = await resp.json();
+                if (!resp.ok || !body.ok) {
+                    alert('Save failed: ' + (body.error || resp.status));
+                    return;
+                }
+                delete select.dataset.userTouched;
+                refresh();
+            } catch (e) {
+                alert('Save failed: ' + e);
+            }
+        }
+
+        refresh();
+        setInterval(refresh, 10000);
+    </script>
+</body>
+</html>

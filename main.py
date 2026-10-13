@@ -41,6 +41,10 @@ import traveler_plan_engine
 import executor_live_e1_engine
 import alt_matrix_engine
 import alt_matrix_radar
+import metasignals_triage
+import metasignals_paper_engine
+import metasignals_watcher
+import metasignals_radar
 # mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
 # actually called in this file; the "mtf_confluence_scanner" string at the
 # dependency-graph metadata route below is a plain literal, not a reference
@@ -728,6 +732,14 @@ async def lifespan(app: FastAPI):
     # loop can place a real order regardless.
     app.state.alt_matrix_signal_task = asyncio.create_task(alt_matrix_engine.run_alt_matrix_signal_loop())
     app.state.alt_matrix_watch_task  = asyncio.create_task(alt_matrix_engine.run_alt_matrix_watch_loop())
+    # MetaSignals Realistic Paper Trading Desk (2026-10-13) -- a THIRD,
+    # fully isolated subsystem (BTC Iron Wall / Alt Matrix Iron Wall both
+    # apply, see metasignals_triage.py's own header). Only one loop: new
+    # plans/orders are created synchronously inline by POST /api/
+    # metasignals/alert, not by a polling tick -- this loop only advances
+    # paper positions that already exist. Zero real capital at risk no
+    # matter what this loop does; it never touches an ExecutorAccount.
+    app.state.metasignals_watch_task = asyncio.create_task(metasignals_watcher.run_metasignals_watch_loop())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
     # weekly_task (run_weekly_scheduler) removed 2026-09-24 -- see that
@@ -756,6 +768,7 @@ async def lifespan(app: FastAPI):
     app.state.session_lock_task.cancel()
     app.state.alt_matrix_signal_task.cancel()
     app.state.alt_matrix_watch_task.cancel()
+    app.state.metasignals_watch_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -1059,6 +1072,228 @@ async def api_radar_alt_matrix_snapshot(db: Session = Depends(get_db)):
     except Exception as e:
         print(f"[RADAR] alt-matrix-snapshot failed: {e}")
         return JSONResponse({"ok": False, "error": str(e), "symbols": {}})
+
+
+# ==============================================================================
+# METASIGNALS REALISTIC PAPER TRADING DESK -- Andy directive 2026-10-13
+# 09:34 CT, METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md. A THIRD, fully
+# isolated subsystem (Iron Wall, see metasignals_triage.py's own header).
+#
+# 2026-10-13 (same day, expanded): the spec's own commit `f770ec7`
+# ("align webhook endpoint and raw alert schema with running Pi daemon")
+# confirmed the REAL Raspberry Pi daemon already moved to a new shape --
+# POST /api/metasignals/webhook, raw Discord payload (channel/author/
+# content/embeds) instead of pre-parsed fields, auth checked against
+# METASIGNALS_SECRET_KEY. This repo's own committed scripts/raspberry_
+# pi_alert_forwarder.py was NOT updated in that commit (verified via git
+# log before trusting the claim) -- it still sends the OLD pre-parsed
+# shape to the OLD /alert path. Both shapes and both env var names are
+# supported below (one route, one body model covering both; the old
+# path kept as a true alias, not a separate behavior) so this doesn't
+# silently break regardless of which script version is actually
+# running on Andy's hardware right now.
+# ==============================================================================
+
+class MetaSignalsAlertRequest(BaseModel):
+    """Covers BOTH payload shapes this subsystem has to accept -- every
+    field optional at the Pydantic level; the route itself decides which
+    shape it got. NEW (raw webhook, current Pi daemon): channel_id/
+    channel_name/message_id/author/content/embeds/created_at -- parsed
+    server-side by metasignals_triage.parse_discord_alert(). LEGACY
+    (scripts/raspberry_pi_alert_forwarder.py as actually committed in
+    this repo): raw_text/source/symbol/side/entry_price/soft_stop/tp1/
+    tp2/tp3/timeframe/strategy/timestamp, already pre-parsed."""
+    # NEW raw-webhook shape
+    channel_id: Optional[str] = None
+    channel_name: Optional[str] = None
+    message_id: Optional[str] = None
+    author: Optional[str] = None
+    content: Optional[str] = None
+    embeds: Optional[list] = None
+    created_at: Optional[str] = None
+    # LEGACY pre-parsed shape
+    raw_text: Optional[str] = None
+    source: Optional[str] = None
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    entry_price: Optional[float] = None
+    soft_stop: Optional[float] = None
+    tp1: Optional[float] = None
+    tp2: Optional[float] = None
+    tp3: Optional[float] = None
+    timeframe: Optional[str] = None
+    strategy: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+async def _handle_metasignals_ingest(request: Request, body: MetaSignalsAlertRequest, db: Session):
+    """Shared handler for both POST /api/metasignals/webhook and its
+    alias POST /api/metasignals/alert -- genuinely one behavior under
+    two paths, not two different routes, matching the spec's own
+    "(alias: POST /api/metasignals/alert)" framing (section 6A).
+
+    Auth: X-Kabroda-Secret checked against METASIGNALS_SECRET_KEY first,
+    falling back to METASIGNALS_INGEST_SECRET if that's unset -- the
+    spec's own explicit fallback order (section 6A), not a guess; same
+    hmac.compare_digest, fail-closed-if-both-unset pattern as every
+    other secret-header route in this file.
+
+    Saves the raw payload to MetaSignalsRawAlert UNCONDITIONALLY, before
+    any parsing is attempted -- zero data loss even if neither shape
+    below matches (e.g. ordinary channel chatter the Pi forwarded, or a
+    future schema change this code doesn't understand yet)."""
+    secret = request.headers.get("X-Kabroda-Secret", "")
+    expected = os.getenv("METASIGNALS_SECRET_KEY") or os.getenv("METASIGNALS_INGEST_SECRET") or ""
+    if not expected or not hmac.compare_digest(secret, expected):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    payload = body.model_dump()
+    from database import MetaSignalsRawAlert as _MetaSignalsRawAlert
+    raw = _MetaSignalsRawAlert(
+        channel_id=payload.get("channel_id"), channel_name=payload.get("channel_name"),
+        message_id=payload.get("message_id"), author=payload.get("author"),
+        content=payload.get("content") or payload.get("raw_text"),
+        embeds_json=json.dumps(payload["embeds"]) if payload.get("embeds") else None,
+    )
+    db.add(raw)
+    db.flush()
+    raw_id = raw.id
+
+    alert = metasignals_triage.parse_discord_alert(payload.get("content"), payload.get("embeds"))
+    if alert is None and payload.get("symbol") and payload.get("entry_price") is not None and payload.get("soft_stop") is not None:
+        # LEGACY pre-parsed shape -- the committed Pi script's own contract.
+        alert = {
+            "symbol": payload["symbol"], "side": payload.get("side") or "BUY",
+            "entry_price": payload["entry_price"], "soft_stop": payload["soft_stop"],
+            "tp1": payload.get("tp1"), "tp2": payload.get("tp2"), "tp3": payload.get("tp3"),
+            "timeframe": payload.get("timeframe"), "strategy": payload.get("strategy"),
+            "raw_text": payload.get("raw_text"),
+        }
+    if alert is None:
+        db.commit()
+        return JSONResponse({"status": "ok", "raw_id": raw_id, "parsed": False})
+
+    try:
+        verdict = await metasignals_triage.evaluate_alert(alert)
+    except Exception as e:
+        print(f"[METASIGNALS] triage evaluation failed: {e}")
+        traceback.print_exc()
+        db.commit()   # keep the raw alert row either way
+        return JSONResponse({"status": "error", "raw_id": raw_id, "parsed": True, "error": str(e)}, status_code=500)
+
+    from database import MetaSignalsPlan as _MetaSignalsPlan
+    plan = _MetaSignalsPlan(
+        raw_alert_id=raw_id, symbol=alert["symbol"], side=alert.get("side", "BUY"),
+        strategy=alert.get("strategy"), timeframe=alert.get("timeframe"), raw_text=alert.get("raw_text"),
+        alert_price=alert["entry_price"], alert_soft_stop=alert["soft_stop"],
+        alert_tp1=alert.get("tp1"), alert_tp2=alert.get("tp2"), alert_tp3=alert.get("tp3"),
+        alert_timestamp=payload.get("timestamp") or payload.get("created_at"),
+        btc_daily_close=verdict.get("btc_daily_close"), btc_sma200=verdict.get("btc_sma200"),
+        asset_daily_close=verdict.get("asset_daily_close"), asset_sma200=verdict.get("asset_sma200"),
+        asset_ema55=verdict.get("asset_ema55"), rsi_4h=verdict.get("rsi_4h"),
+        live_price_at_alert=verdict.get("live_price_at_alert"), extension_r=verdict.get("extension_r"),
+        funding_rate=verdict.get("funding_rate"), atr14_4h=verdict.get("atr14_4h"),
+        entry_mode=verdict.get("entry_mode"), hard_stop=verdict.get("hard_stop"),
+        risk_usd=verdict.get("risk_usd", 50.0), position_size=verdict.get("position_size"),
+        tp1_price=verdict.get("tp1_price"), tp2_price=verdict.get("tp2_price"),
+        triage_verdict=verdict["verdict"], triage_reason=verdict["reason"],
+        status="APPROVED" if verdict["verdict"] == "YES" else "REJECTED",
+    )
+    db.add(plan)
+    db.flush()
+
+    plan_id = plan.id
+    if verdict["verdict"] == "YES":
+        try:
+            metasignals_paper_engine.open_paper_trade(db, plan)
+        except Exception as e:
+            print(f"[METASIGNALS] open_paper_trade failed for plan {plan_id}: {e}")
+            traceback.print_exc()
+            plan.status = "ERROR"
+    db.commit()
+
+    return JSONResponse({
+        "status": "ok", "raw_id": raw_id, "parsed": True,
+        "verdict": verdict["verdict"], "reason": verdict["reason"], "plan_id": str(plan_id),
+    })
+
+
+@app.post("/api/metasignals/webhook")
+async def api_metasignals_webhook(request: Request, body: MetaSignalsAlertRequest, db: Session = Depends(get_db)):
+    return await _handle_metasignals_ingest(request, body, db)
+
+
+@app.post("/api/metasignals/alert")
+async def api_metasignals_alert(request: Request, body: MetaSignalsAlertRequest, db: Session = Depends(get_db)):
+    """True alias of POST /api/metasignals/webhook -- kept so the
+    committed scripts/raspberry_pi_alert_forwarder.py (still pointed at
+    this path by default) keeps working unmodified."""
+    return await _handle_metasignals_ingest(request, body, db)
+
+
+@app.get("/api/metasignals/snapshot")
+async def api_metasignals_snapshot(db: Session = Depends(get_db)):
+    """Public, no login -- this is a $500 PAPER account, not real
+    capital or any real user's position, strictly less sensitive than
+    the already-public Traveler/Alt Matrix real-money radar feeds above.
+    Same graceful-degradation wrapping as every other radar route in
+    this file."""
+    try:
+        return JSONResponse(metasignals_radar.get_public_snapshot(db))
+    except Exception as e:
+        print(f"[RADAR] metasignals-snapshot failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "account": None, "positions": [], "trade_history": [], "recent_triage": []})
+
+
+class MetaSignalsConfigRequest(BaseModel):
+    execution_mode: str
+    linked_account_id: Optional[int] = None
+
+
+_METASIGNALS_VALID_EXECUTION_MODES = ("PAPER", "SUBACCOUNT_DRY_RUN", "SUBACCOUNT_LIVE")
+
+
+@app.post("/api/metasignals/config")
+async def api_metasignals_config(request: Request, body: MetaSignalsConfigRequest, db: Session = Depends(get_db)):
+    """Admin-only. Persists the execution-mode dropdown's selection onto
+    the singleton paper account -- spec section 6C. IMPORTANT: this
+    route only stores the preference. SUBACCOUNT_DRY_RUN/SUBACCOUNT_LIVE
+    do NOT yet route any order anywhere real -- see MetaSignalsPaperAccount's
+    own class docstring (database.py) and metasignals_paper_engine.py's
+    header for why wiring real sub-account execution is being treated as
+    a separate, far higher-stakes build that needs its own explicit
+    authorization, not something to bundle silently into this toggle."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    if body.execution_mode not in _METASIGNALS_VALID_EXECUTION_MODES:
+        return JSONResponse({"ok": False, "error": f"execution_mode must be one of {_METASIGNALS_VALID_EXECUTION_MODES}"}, status_code=400)
+
+    account = metasignals_paper_engine.get_or_init_paper_account(db)
+    account.execution_mode = body.execution_mode
+    account.linked_account_id = body.linked_account_id
+    db.commit()
+    return JSONResponse({
+        "ok": True, "execution_mode": account.execution_mode, "linked_account_id": account.linked_account_id,
+        "note": "SUBACCOUNT_DRY_RUN/SUBACCOUNT_LIVE are stored but not yet wired to real execution -- trades still simulate as paper." if body.execution_mode != "PAPER" else None,
+    })
+
+
+@app.get("/admin/metasignals")
+async def page_metasignals_desk(request: Request, db: Session = Depends(get_db)):
+    """Renders the MetaSignals dashboard. Admin-only (not merely
+    is_logged_in, unlike /admin/executor) -- this is a single global
+    singleton paper desk fed by Andy's own Raspberry Pi, not a per-user
+    feature with its own isolation model the way Executor accounts are;
+    there is no "owner" to scope a shared view to."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return RedirectResponse("/login", status_code=303)
+    if not ctx.get("is_admin"):
+        return HTMLResponse("<h2>Admin only.</h2>", status_code=403)
+    from database import ExecutorAccount as _ExecutorAccount
+    ctx["executor_accounts"] = db.query(_ExecutorAccount).order_by(_ExecutorAccount.id).all()
+    return _template_or_fallback(request, templates, "metasignals_desk.html", ctx)
 
 
 @app.get("/api/live-price")

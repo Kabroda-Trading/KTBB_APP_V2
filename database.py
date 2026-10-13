@@ -3103,3 +3103,249 @@ class AltMatrixConfig(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
+
+# ---------------------------------------------------------
+# METASIGNALS REALISTIC PAPER TRADING DESK (2026-10-13) -- Andy directive
+# (METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md, authority 2026-10-13 09:34 CT).
+# A THIRD, fully isolated subsystem alongside GATE_TRAVELER and Alt Matrix.
+# Ingests external Discord alerts (via Andy's Raspberry Pi forwarder) and
+# runs them through a 5-pillar YES/NO triage gate against live Bitunix
+# data, then paper-trades any approval on an isolated $500 simulated
+# bankroll -- zero real capital, zero ExecutorAccount/credentials touched.
+# Same no-ForeignKey, plain-Integer-id-with-a-comment convention as the
+# Alt Matrix tables above; same reasoning (no FK object needed when
+# nothing here is ever deleted out from under a dependent row in a way
+# that matters for a paper ledger).
+#
+# NOTE ON PROVISIONING: the spec's own Section 5 drafted these as raw
+# Postgres `CREATE TABLE IF NOT EXISTS` DDL (SERIAL, TIMESTAMP WITH TIME
+# ZONE, NUMERIC(16,4)) to be run inside init_db(). That syntax does not
+# run on this project's own default dev database (DATABASE_URL defaults
+# to sqlite:///./kabroda.db, see this file's own top) and does not match
+# this file's own established convention for brand-new tables: every one
+# of the four AltMatrixPlan/Order/Transition/Config tables above was
+# provisioned as a pure SQLAlchemy ORM model with zero raw SQL at all,
+# because init_db()'s very first line is Base.metadata.create_all(bind=
+# engine) -- which already creates any model class's table if it
+# doesn't exist yet. Raw ALTER TABLE/try-except blocks in this file are
+# reserved for ADDING COLUMNS to a table that may already exist in a
+# live production database; a brand-new table needs none of that. These
+# four models follow the proven AltMatrix precedent instead -- same
+# outcome (tables exist, created automatically, idempotent), portable
+# across SQLite and Postgres, no new raw-SQL path to maintain. Flagged
+# here, not silently swapped, per this project's standing "note a
+# deliberate deviation from a work order rather than let a doc quietly
+# stop matching reality" discipline.
+# ---------------------------------------------------------
+class MetaSignalsRawAlert(Base):
+    """Immutable audit trail of EVERY incoming webhook POST, saved
+    BEFORE any parsing or triage is attempted -- 2026-10-13 schema
+    addition (METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md section 5, commit
+    `f770ec7`, "align webhook endpoint and raw alert schema with running
+    Pi daemon"). The daemon now forwards the raw Discord payload
+    (channel/author/content/embeds) and the PARSING moved server-side
+    (metasignals_triage.parse_discord_alert()) -- this table exists so a
+    parse failure or a future regex change never loses data: the exact
+    bytes Discord sent are always recoverable here regardless of whether
+    metasignals_triage.py understood them. embeds_json is a JSON-
+    serialized string, not a native JSON/JSONB column -- this file has
+    no Postgres-specific column types anywhere else (see the Alt Matrix
+    tables' own header) and SQLite has no JSONB at all; portable text
+    storage costs nothing here since nothing queries inside it."""
+    __tablename__ = "metasignals_raw_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    channel_id = Column(String, nullable=True)
+    channel_name = Column(String, nullable=True)
+    message_id = Column(String, nullable=True)
+    author = Column(String, nullable=True)
+    content = Column(Text, nullable=True)
+    embeds_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class MetaSignalsPaperAccount(Base):
+    """Singleton paper-trading bankroll -- realistically exactly one row
+    ever exists (name='DEFAULT_PAPER_DESK'), created on first use by
+    metasignals_paper_engine.get_or_init_paper_account(), never by any
+    user-facing route. $500 starting bankroll, $50 fixed risk per trade
+    (Andy's own worked numbers, METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md
+    section 4A). cash_balance is a pure running P&L ledger (every fee and
+    every realized P&L event adjusts it directly) -- this paper desk has
+    no margin/leverage mechanics to simulate, only the fixed-dollar-risk
+    sizing and fee accounting the spec actually describes. equity is
+    cash_balance plus any currently-open position's unrealized P&L,
+    refreshed every 30s by metasignals_watcher.py so Andy can watch it
+    move in real time (section 4A.4).
+
+    execution_mode/linked_account_id (2026-10-13 addition, spec section
+    6C): PAPER | SUBACCOUNT_DRY_RUN | SUBACCOUNT_LIVE, settable via POST
+    /api/metasignals/config. IMPORTANT -- read metasignals_paper_engine.
+    py's own header before assuming this toggle does what its name
+    implies: as of this addition, every execution mode still simulates
+    as pure paper underneath. The DROPDOWN is real and persists; actual
+    order routing to a linked ExecutorAccount's real Bitunix credentials
+    is NOT wired yet (the spec's own section 1.5 calls this a "dormant
+    switch," and Andy's own directive was "paper trading desk FIRST" --
+    wiring SUBACCOUNT_LIVE to place real orders off a 5-pillar gate that
+    has never been backtested against real outcomes, the way Traveler
+    and Alt Matrix both were before going live, is a separate, far
+    higher-stakes build that needs its own explicit authorization and
+    smoke-test pass, not something to silently bundle into a UI toggle)."""
+    __tablename__ = "metasignals_paper_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, default="DEFAULT_PAPER_DESK", unique=True)
+    execution_mode = Column(String, nullable=False, default="PAPER")   # PAPER | SUBACCOUNT_DRY_RUN | SUBACCOUNT_LIVE -- see class docstring, NOT yet wired to real execution
+    linked_account_id = Column(Integer, nullable=True)   # an ExecutorAccount.id, plain int (no FK object, matching this file's convention) -- display/config only today
+    starting_balance = Column(Float, nullable=False, default=500.0)
+    cash_balance = Column(Float, nullable=False, default=500.0)
+    equity = Column(Float, nullable=False, default=500.0)
+    risk_unit_usd = Column(Float, nullable=False, default=50.0)
+    total_trades = Column(Integer, nullable=False, default=0)
+    winning_trades = Column(Integer, nullable=False, default=0)
+    losing_trades = Column(Integer, nullable=False, default=0)
+    total_realized_pnl = Column(Float, nullable=False, default=0.0)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class MetaSignalsPlan(Base):
+    """One row per ingested alert, win or veto alike -- same "always
+    write a row, even on a no" convention as AltMatrixPlan/ExecutorOrder.
+    status tracks the TRIAGE/PLAN lifecycle only (REJECTED | APPROVED |
+    ERROR); the resulting position's own lifecycle lives entirely on
+    MetaSignalsPaperOrder.state, matching the established Plan-vs-Order
+    split. alert_* fields preserve exactly what the Pi sent, unmodified,
+    for audit -- hard_stop/position_size/tp1_price below are this gate's
+    own COMPUTED geometry (METASIGNALS_TRIAGE_AND_EXECUTION_SPEC.md
+    section 3), which can differ from the alert's own stated soft_stop/
+    tp1, never overwriting the original."""
+    __tablename__ = "metasignals_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    raw_alert_id = Column(Integer, nullable=True, index=True)   # links back to MetaSignalsRawAlert.id when this plan came from the webhook's own parser
+    symbol = Column(String, index=True, nullable=False)   # "SOLUSDT" as received, not slash-normalized -- this subsystem never writes to session_locks/traveler_plans
+    side = Column(String, nullable=False, default="BUY")
+    strategy = Column(String, nullable=True)
+    timeframe = Column(String, nullable=True)
+    raw_text = Column(Text, nullable=True)
+
+    alert_price = Column(Float, nullable=False)
+    alert_soft_stop = Column(Float, nullable=False)
+    alert_tp1 = Column(Float, nullable=True)
+    alert_tp2 = Column(Float, nullable=True)
+    alert_tp3 = Column(Float, nullable=True)
+    alert_timestamp = Column(String, nullable=True)   # ISO string as received, stored verbatim
+
+    # Pillar readouts (every field populated regardless of verdict, for audit)
+    btc_daily_close = Column(Float, nullable=True)
+    btc_sma200 = Column(Float, nullable=True)
+    asset_daily_close = Column(Float, nullable=True)
+    asset_sma200 = Column(Float, nullable=True)
+    asset_ema55 = Column(Float, nullable=True)
+    rsi_4h = Column(Float, nullable=True)
+    live_price_at_alert = Column(Float, nullable=True)   # Bitunix markPrice read at evaluation time
+    extension_r = Column(Float, nullable=True)
+    funding_rate = Column(Float, nullable=True)
+    atr14_4h = Column(Float, nullable=True)
+
+    # Computed geometry (only meaningful when triage_verdict == "YES")
+    entry_mode = Column(String, nullable=True)   # "MARKET" | "LIMIT"
+    hard_stop = Column(Float, nullable=True)
+    risk_usd = Column(Float, nullable=False, default=50.0)
+    position_size = Column(Float, nullable=True)
+    tp1_price = Column(Float, nullable=True)   # computed: entry +/- 1.0 * |entry-hard_stop|
+    tp2_price = Column(Float, nullable=True)   # = alert_tp2 verbatim (no EMA-trail variant built -- see metasignals_triage.py header)
+
+    triage_verdict = Column(String, nullable=False)   # "YES" | "NO"
+    triage_reason = Column(String, nullable=False)    # "APPROVED" or a named VETO_* reason
+    status = Column(String, nullable=False, default="PENDING")   # "REJECTED" | "APPROVED" | "ERROR"
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class MetaSignalsPaperOrder(Base):
+    """One row per APPROVED MetaSignalsPlan -- the simulated position
+    itself. Unlike AltMatrixOrder there is no per-account fan-out (one
+    singleton MetaSignalsPaperAccount for the whole subsystem, per the
+    spec's own single-bankroll design), but plan_id/account_id are kept
+    as plain int columns (no ForeignKey object, matching this file's own
+    convention) rather than collapsing this into MetaSignalsPlan itself,
+    for the same reason Alt Matrix keeps Plan and Order separate: the
+    signal/gate decision and the resulting position's own lifecycle are
+    genuinely different things with different update cadences (the plan
+    is written once; the order is mutated every watcher tick)."""
+    __tablename__ = "metasignals_paper_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, nullable=False, index=True, unique=True)   # one order per plan
+    account_id = Column(Integer, nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    side = Column(String, nullable=False, default="BUY")
+    entry_mode = Column(String, nullable=False)   # "MARKET" | "LIMIT"
+
+    entry_price = Column(Float, nullable=True)   # fill price -- set once the order actually fills (immediately for MARKET, on touch for LIMIT)
+    hard_stop_initial = Column(Float, nullable=False)
+    current_stop = Column(Float, nullable=False)   # mirrors hard_stop_initial until the TP1 breakeven ratchet
+    tp1_price = Column(Float, nullable=False)
+    tp2_price = Column(Float, nullable=False)
+
+    initial_qty = Column(Float, nullable=False)
+    remaining_qty = Column(Float, nullable=False)
+
+    # Display-only, persisted every watcher tick regardless of whether a
+    # state transition fired -- same "cheap, already-fresh value for the
+    # radar to show without a second live fetch" convention as
+    # AltMatrixOrder.mfe_r/mfe_price (alt_matrix_engine.py's own header).
+    # Never read by any decision logic -- advance_order() takes the
+    # tick's mark price as a direct argument, not from these columns.
+    last_mark_price = Column(Float, nullable=True)
+    unrealized_pnl = Column(Float, nullable=True)
+
+    # PENDING_LIMIT (resting, not yet touched) | OPEN (filled, full size) |
+    # HALF_CLOSED_BE (TP1 taken, stop ratcheted to breakeven) |
+    # CLOSED_STOP | CLOSED_TP2 -- exactly the spec's own state list
+    # (section 5) plus PENDING_LIMIT, which the spec's state list omitted
+    # but pillar 3's own LIMIT-entry path requires (a resting order that
+    # has not yet touched the alert price is not yet "OPEN").
+    state = Column(String, nullable=False, default="OPEN")
+    exit_price = Column(Float, nullable=True)   # the ACTUAL fill level a closing leg executed at (the stop or TP price) -- NOT last_mark_price, which is just the last polled price and can differ from a real fill
+    realized_pnl = Column(Float, nullable=False, default=0.0)
+    fees_paid = Column(Float, nullable=False, default=0.0)
+
+    opened_at = Column(DateTime, default=datetime.datetime.utcnow)
+    filled_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class MetaSignalsPaperLedger(Base):
+    """Append-only balance/audit ledger -- every fee deduction, TP1
+    fill, stop fill, and final exit writes a row here, matching the
+    spec's own section 4B ("Andy can see the exact equity curve in real
+    time"). plan_id/order_id links added beyond the spec's own raw-SQL
+    draft (which had no such columns) -- a deliberate, additive
+    strengthening for real debuggability, same reasoning as AltMatrix
+    Transition's own richer linking; without it, a ledger row is an
+    unexplained number with no way to trace back to the trade that
+    caused it. equity_after is likewise added: section 4B's own prose
+    explicitly says each row carries "balance_after, equity_after, and
+    notes," but the spec's own raw SQL block omitted equity_after --
+    an internal inconsistency in the spec resolved in favor of the
+    richer, explicitly-requested field."""
+    __tablename__ = "metasignals_paper_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, nullable=True, index=True)
+    order_id = Column(Integer, nullable=True, index=True)
+    event_type = Column(String, nullable=False)   # "INITIAL_DEPOSIT" | "ENTRY_FEE" | "TP1_FILL" | "STOP_FILL" | "EXIT"
+    amount = Column(Float, nullable=False)
+    cash_balance_after = Column(Float, nullable=False)
+    equity_after = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+

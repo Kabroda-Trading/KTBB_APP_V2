@@ -35,7 +35,7 @@ pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Production deploys to Render at kabroda.com on port 10000. `pytest tests/` is a real, growing suite (513 tests as of 2026-09-24, post-V2-retirement) — run it, plus a live server + real routes for anything touching live behavior. (This line used to say "there is no test suite" — stale; keep it truthful as the suite grows, and keep the count roughly current rather than letting it drift for months at a time.)
+Production deploys to Render at kabroda.com on port 10000. `pytest tests/` is a real, growing suite (870 tests as of 2026-10-13, post-MetaSignals-build) — run it, plus a live server + real routes for anything touching live behavior. (This line used to say "there is no test suite" — stale; keep it truthful as the suite grows, and keep the count roughly current rather than letting it drift for months at a time.)
 
 ## Required Environment Variables
 
@@ -59,6 +59,13 @@ GATE_LOG_EXPORT_API_KEY  # Optional — required only to use GET /api/export/tra
                          # V2-era export, deleted 2026-09-24 along with GateLog's writer); the Traveler's
                          # own export reuses this same env var rather than adding a new one, per that
                          # route's own comment. Not worth an operational-change risk to rename in Render.
+METASIGNALS_SECRET_KEY   # Optional — required only for the Raspberry Pi daemon's POST /api/metasignals/webhook
+                         # (alias /api/metasignals/alert) to authenticate (X-Kabroda-Secret header,
+                         # hmac.compare_digest, fails closed/401 if unset). METASIGNALS_INGEST_SECRET is
+                         # checked as a fallback if this one is unset -- see main.py's
+                         # _handle_metasignals_ingest() for why both names are accepted (a real, confirmed
+                         # discrepancy between this repo's own committed Pi script and the spec's later
+                         # commit describing what's actually running on Andy's hardware, 2026-10-13).
 ```
 
 ---
