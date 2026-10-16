@@ -9142,3 +9142,43 @@ regressions in Traveler or Alt Matrix. Real boot check passed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 
+## 2026-10-16 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+AUDITED commit `6e8e817` ("Golden Setup": timeframe sweet-spot +
+concurrency cap + card-TP1 priority, citing Study 5) at Andy's request
+before treating it as deployment-ready. Full independent audit, not a
+read-through -- reproduced the committed Study 5 numbers directly from
+`approved_trades_log.csv` myself before trusting the report's own
+narrative (they check out: 8H's -11.08R is real, under the 21-EMA-
+runner variant specifically; -4.25R under the variant actually
+deployed; 19.47R max drawdown, matches "19.5R" almost exactly).
+
+Found and fixed a real, serious bug in the shipped concurrency check,
+by testing it directly rather than reading the code and assuming it
+worked: `os` was never imported in metasignals_triage.py, so every
+real call raised NameError, silently caught by a bare `except
+Exception: pass` -- the $250 risk cap the work order's own words call
+"strictly bounding peak desk risk" has never fired ONCE, in any
+scenario, since that commit. Separately, even with `os` fixed, the
+original handler failed OPEN on any DB error (the opposite of every
+other failure path in this module). Fixed both: import added, and a
+query failure now vetoes (fails closed) instead of silently proceeding.
+Added 5 dedicated tests -- the original commit shipped zero for either
+new behavior (concurrency cap or card-TP1 priority).
+
+Also found, NOT fixed (Andy's explicit choice via AskUserQuestion --
+flag, don't silently expand scope): the report's own single most-
+emphasized recommendation ("SHORTLIST Cells Carry 95% of the Edge" --
+restrict to SHORTLIST-only or half-size WATCHLIST) was never actually
+implemented, despite a code comment claiming it was. Verified directly:
+all 62 WATCHLIST cells are still in the live permitted set. The 21-EMA-
+runner management variant the report's best numbers depend on wasn't
+built either -- metasignals_paper_engine.py wasn't touched by that
+commit at all. Both are real feature decisions for Andy/DeepSeek to
+make explicitly, not something to patch in unilaterally.
+
+903 passed (full suite), 0 failed. Real boot check passed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
