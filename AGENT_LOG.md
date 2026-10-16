@@ -9182,3 +9182,22 @@ make explicitly, not something to patch in unilaterally.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 
+## 2026-10-16 (later same day, pointer) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+Andy asked whether the momentum-decay ("exhaustion") early-exit idea
+we discussed got written up for DeepSeek to backtest. Wrote it up as
+`STUDY6_SPEC.md` in the Kabroda Meta Signals AI repo (its own AGENT_LOG.md
+has the full entry) -- not here, since study specs live in that
+project's own `studies/` convention, not this one. Nothing in this repo
+changes unless that study comes back with a real recommendation.
+
+Also worth noting here specifically: the Meta Signals AI repo's own log
+shows the "Golden Setup" (commit `6e8e817`) was confirmed deployed live
+on Render BEFORE the concurrency-cap fix above (`e4d5332`) existed --
+meaning the broken, non-functional cap was live in real production, not
+just in the dev working tree, until this fix goes out on the next
+deploy.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
