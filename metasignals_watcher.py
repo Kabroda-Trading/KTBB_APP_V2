@@ -114,9 +114,21 @@ async def run_tick(db: Session) -> None:
     symbols = sorted({o.symbol for o in open_orders})
     mark_price_by_symbol: Dict[str, float] = {}
     for symbol in symbols:
-        price = await asyncio.wait_for(_fetch_mark_price(symbol), timeout=_ROW_TIMEOUT_SECONDS)
-        if price is not None:
-            mark_price_by_symbol[symbol] = price
+        # 2026-10-16 (CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md Finding
+        # F-03, confirmed by direct read): asyncio.wait_for() raises
+        # TimeoutError at THIS call site, not inside _fetch_mark_price()
+        # itself -- that function's own try/except only catches a fast
+        # failure, never a hang. Without this wrapper, one symbol
+        # timing out aborts run_tick() entirely, silently skipping
+        # stop/TP/BBWP checks and the equity refresh for every OTHER
+        # open position that tick too. Catch here, skip just this
+        # symbol, let the rest of the tick proceed.
+        try:
+            price = await asyncio.wait_for(_fetch_mark_price(symbol), timeout=_ROW_TIMEOUT_SECONDS)
+            if price is not None:
+                mark_price_by_symbol[symbol] = price
+        except Exception as e:
+            print(f"|| METASIGNALS WATCHER || mark price fetch failed for {symbol}: {e}")
 
     # BBWP exhaustion check (Study 6) only applies to state=="OPEN"
     # orders (metasignals_paper_engine.advance_order()'s own scope) --
@@ -134,9 +146,15 @@ async def run_tick(db: Session) -> None:
             if plan is not None and plan.timeframe:
                 needed_keys.add((o.symbol, plan.timeframe))
         for symbol, timeframe_label in needed_keys:
-            bbwp_by_key[(symbol, timeframe_label)] = await asyncio.wait_for(
-                _fetch_bbwp(symbol, timeframe_label), timeout=_ROW_TIMEOUT_SECONDS,
-            )
+            # Same F-03 fix as the mark-price loop above -- a hang on one
+            # symbol's BBWP candle fetch must not abort the whole tick.
+            try:
+                bbwp_by_key[(symbol, timeframe_label)] = await asyncio.wait_for(
+                    _fetch_bbwp(symbol, timeframe_label), timeout=_ROW_TIMEOUT_SECONDS,
+                )
+            except Exception as e:
+                print(f"|| METASIGNALS WATCHER || BBWP fetch failed for {symbol}/{timeframe_label}: {e}")
+                bbwp_by_key[(symbol, timeframe_label)] = None
 
     for order_row in open_orders:
         price = mark_price_by_symbol.get(order_row.symbol)

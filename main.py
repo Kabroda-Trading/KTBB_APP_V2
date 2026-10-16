@@ -19,6 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
 # --- CORE IMPORTS ---
@@ -1156,7 +1157,14 @@ async def _handle_metasignals_ingest(request: Request, body: MetaSignalsAlertReq
         embeds_json=json.dumps(payload["embeds"]) if payload.get("embeds") else None,
     )
     db.add(raw)
-    db.flush()
+    # 2026-10-16 (CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md):
+    # commit immediately, not just flush -- this function's own docstring
+    # already claimed "zero data loss" for the raw row, but that wasn't
+    # actually true until now: everything below this point shared ONE
+    # transaction with this insert, so a later DB-level conflict (the new
+    # per-symbol unique index on metasignals_paper_orders, see database.py's
+    # init_db()) forcing a rollback would have taken this row down with it.
+    db.commit()
     raw_id = raw.id
 
     alert = metasignals_triage.parse_discord_alert(payload.get("content"), payload.get("embeds"))
@@ -1170,7 +1178,6 @@ async def _handle_metasignals_ingest(request: Request, body: MetaSignalsAlertReq
             "raw_text": payload.get("raw_text"),
         }
     if alert is None:
-        db.commit()
         return JSONResponse({"status": "ok", "raw_id": raw_id, "parsed": False})
 
     try:
@@ -1178,7 +1185,6 @@ async def _handle_metasignals_ingest(request: Request, body: MetaSignalsAlertReq
     except Exception as e:
         print(f"[METASIGNALS] triage evaluation failed: {e}")
         traceback.print_exc()
-        db.commit()   # keep the raw alert row either way
         return JSONResponse({"status": "error", "raw_id": raw_id, "parsed": True, "error": str(e)}, status_code=500)
 
     from database import MetaSignalsPlan as _MetaSignalsPlan
@@ -1200,17 +1206,50 @@ async def _handle_metasignals_ingest(request: Request, body: MetaSignalsAlertReq
         status="APPROVED" if verdict["verdict"] == "YES" else "REJECTED",
     )
     db.add(plan)
-    db.flush()
-
+    # Committed immediately (not just flushed) for the same reason as the
+    # raw row above -- plan_id must stay valid/durable even if the order-
+    # creation step below hits the per-symbol unique-index race guard and
+    # has to roll back. Only the order-creation attempt below is its own
+    # separate transaction now.
+    db.commit()
     plan_id = plan.id
+
     if verdict["verdict"] == "YES":
         try:
             metasignals_paper_engine.open_paper_trade(db, plan)
+            db.commit()
+        except IntegrityError as e:
+            # EXPECTED, not a bug: the partial unique index on
+            # metasignals_paper_orders(symbol) (database.py's init_db())
+            # is the real backstop against the exact race the fast-path
+            # per-symbol SELECT in metasignals_triage.evaluate_alert()
+            # cannot fully close by itself -- two near-simultaneous
+            # webhooks for the same symbol can both pass that SELECT
+            # before either one's order is committed (separate per-
+            # request sessions; verified directly against the real
+            # LINKUSDT incident, 43ms apart, before any of this was
+            # built). This is that backstop actually firing -- roll back
+            # just the half-open order attempt (the plan row above is
+            # already safely committed) and correct the plan to show
+            # what really happened.
+            db.rollback()
+            print(f"[METASIGNALS] per-symbol unique-index race guard fired for plan {plan_id}: {e}")
+            plan = db.query(_MetaSignalsPlan).filter_by(id=plan_id).first()
+            plan.triage_verdict = "NO"
+            plan.triage_reason = "VETO_ALREADY_OPEN_POSITION"
+            plan.status = "REJECTED"
+            db.commit()
+            return JSONResponse({
+                "status": "ok", "raw_id": raw_id, "parsed": True,
+                "verdict": "NO", "reason": "VETO_ALREADY_OPEN_POSITION", "plan_id": str(plan_id),
+            })
         except Exception as e:
+            db.rollback()
             print(f"[METASIGNALS] open_paper_trade failed for plan {plan_id}: {e}")
             traceback.print_exc()
+            plan = db.query(_MetaSignalsPlan).filter_by(id=plan_id).first()
             plan.status = "ERROR"
-    db.commit()
+            db.commit()
 
     return JSONResponse({
         "status": "ok", "raw_id": raw_id, "parsed": True,
@@ -1294,6 +1333,46 @@ async def api_metasignals_config(request: Request, body: MetaSignalsConfigReques
         "ok": True, "execution_mode": account.execution_mode, "linked_account_id": account.linked_account_id,
         "note": "SUBACCOUNT_DRY_RUN/SUBACCOUNT_LIVE are stored but not yet wired to real execution -- trades still simulate as paper." if body.execution_mode != "PAPER" else None,
     })
+
+
+@app.post("/api/metasignals/orders/{order_id}/cancel")
+async def api_metasignals_cancel_order(order_id: int, request: Request, db: Session = Depends(get_db)):
+    """Admin-only. Voids a still-open MetaSignalsPaperOrder -- built
+    2026-10-16 (CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md
+    Part C) for the real LINKUSDT double-fill incident (two plans
+    approved 43ms apart via a Discord multi-channel cross-post,
+    independently confirmed against this site's own live /api/
+    metasignals/audit + /api/metasignals/snapshot before anything was
+    built). A real route + metasignals_paper_engine.cancel_order(),
+    not a one-off script someone has to run by hand against production --
+    reusable for any future false start.
+
+    After voiding, re-runs init_db() -- idempotent, safe to call
+    repeatedly (database.py's own docstring on it) -- so the per-symbol
+    unique index on metasignals_paper_orders (blocked until this exact
+    kind of duplicate is gone) gets created in this SAME request, with
+    no separate deploy or restart needed."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+
+    from database import MetaSignalsPaperOrder as _MetaSignalsPaperOrder, MetaSignalsPaperAccount as _MetaSignalsPaperAccount
+    order = db.query(_MetaSignalsPaperOrder).filter_by(id=order_id).first()
+    if order is None:
+        return JSONResponse({"ok": False, "error": "Order not found."}, status_code=404)
+    if order.state not in ("PENDING_LIMIT", "OPEN", "HALF_CLOSED_BE"):
+        return JSONResponse({"ok": False, "error": f"Order is already in a terminal state ({order.state}) -- nothing to cancel."}, status_code=400)
+
+    account = db.query(_MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    metasignals_paper_engine.cancel_order(db, account, order, reason="admin cancel via /admin/metasignals")
+    db.commit()
+
+    try:
+        init_db()
+    except Exception as e:
+        print(f"[METASIGNALS] post-cancel init_db() retry failed: {e}")
+
+    return JSONResponse({"ok": True, "order_id": order.id, "state": order.state, "cash_balance": account.cash_balance})
 
 
 @app.get("/admin/metasignals")

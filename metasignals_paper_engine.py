@@ -165,6 +165,31 @@ def _finalize_closed_trade(db: Session, account: MetaSignalsPaperAccount, order:
     order.closed_at = now
 
 
+def cancel_order(db: Session, account: MetaSignalsPaperAccount, order: MetaSignalsPaperOrder, reason: str) -> None:
+    """Administratively voids a still-open order (PENDING_LIMIT | OPEN |
+    HALF_CLOSED_BE) -- built 2026-10-16 (CC_WORK_ORDER_METASIGNALS_DEDUP_
+    AND_DESK_ALIGNMENT.md Part C, for the real LINKUSDT double-fill
+    incident) as a real, reusable admin action instead of a one-off
+    throwaway script, so any future false start has the same clean path.
+
+    Deliberately does NOT call _finalize_closed_trade() -- cancelling is
+    not a real trade outcome by this engine's own convention (that
+    function is the only place total_trades/winning_trades/losing_trades/
+    total_realized_pnl move, and only on a genuine STOP/TP/exhaustion/time
+    close). Refunds any entry fee already paid (a cancelled order never
+    really traded) and zeroes remaining_qty/sets a terminal state so
+    refresh_equity()/advance_order() (both key off order.state, not a
+    separate flag) immediately stop counting this position."""
+    if order.fees_paid:
+        account.cash_balance += order.fees_paid
+        _write_ledger(db, account, order.plan_id, order.id, "CANCEL_FEE_REFUND", order.fees_paid,
+                      notes=f"{order.symbol} order #{order.id} cancelled ({reason}) -- entry fee refunded")
+        order.fees_paid = 0.0
+    order.remaining_qty = 0.0
+    order.state = "CANCELLED_DUPLICATE"
+    order.closed_at = datetime.datetime.utcnow()
+
+
 BBWP_EXHAUSTION_THRESHOLD = 10.0   # CC_WORK_ORDER_METASIGNALS_BBWP_EXHAUSTION.md / Study 6 -- see metasignals_triage.py's own constant of the same name/value
 
 

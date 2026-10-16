@@ -936,6 +936,43 @@ def init_db():
     except Exception:
         pass
 
+    # --- ONE-TIME SCHEMA HARDENING: one open MetaSignals position per symbol ---
+    # 2026-10-16, CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md. Real
+    # production incident, independently verified against the live /api/
+    # metasignals/audit + /api/metasignals/snapshot endpoints (not taken on
+    # the work order's word): two LINKUSDT plans approved 43ms apart both
+    # opened live paper orders, doubling committed risk. The relayed fix's
+    # own per-symbol SELECT check in metasignals_triage.evaluate_alert()
+    # (added below this same change) CANNOT close that race by itself --
+    # several awaited network calls (candle/funding fetches) sit between
+    # that SELECT and the eventual order commit, so two near-simultaneous
+    # webhooks (exactly what happened) both pass the SELECT before either
+    # one's order is visible to the other's query (separate per-request
+    # sessions, each committing only once at the very end -- confirmed via
+    # get_db()'s own shape). A partial unique index is the actual fix: it
+    # makes a second concurrent commit for the same symbol fail at the DB
+    # layer regardless of timing or how many worker processes are running,
+    # which main.py's ingest handler catches and turns into a clean
+    # VETO_ALREADY_OPEN_POSITION response instead of a 500.
+    #
+    # Will fail harmlessly (caught below, logged, skipped) for as long as
+    # more than one open order for the same symbol already exists in the
+    # table -- true on production until the admin POST /api/metasignals/
+    # orders/<id>/cancel endpoint is used once to void the real duplicate
+    # LINK order. That route re-runs init_db() itself right after voiding,
+    # so this index gets created in that same request -- no separate
+    # deploy or restart needed.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_metasignals_paper_orders_open_symbol "
+                "ON metasignals_paper_orders (symbol) "
+                "WHERE state IN ('OPEN', 'HALF_CLOSED_BE', 'PENDING_LIMIT')"
+            ))
+    except Exception as e:
+        print(f">>> METASIGNALS: per-symbol open-order unique index not created yet "
+              f"(expected until any existing same-symbol duplicate is cancelled): {e}")
+
 # ---------------------------------------------------------
 # EXISTING USER MODEL
 # ---------------------------------------------------------

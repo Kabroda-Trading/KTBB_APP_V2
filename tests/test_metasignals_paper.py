@@ -393,21 +393,29 @@ def test_evaluate_alert_full_approval_yes(monkeypatch):
     assert result["tp2_price"] == pytest.approx(alert["tp2"])
 
 
-def test_evaluate_alert_real_production_alert_strategy_1_0_g2_timeframe_3h_now_passes_whitelist(monkeypatch):
+def test_evaluate_alert_real_production_alert_strategy_1_0_g2_timeframe_3h_now_vetoed_as_unproven(monkeypatch):
     # Regression for the real first-production-alert case (2026-10-13):
     # symbol=SOLUSDT (already whitelisted even under the old scheme),
     # strategy="1.0 G2", timeframe="3H" -- vetoed on BOTH the strategy
-    # AND timeframe checks before the same-day fixes (a relayed report
-    # only flagged the timeframe; verified against the real triage log
-    # first). Re-verified again under the FULL Study 4 cell-level
-    # rewrite that superseded that same-day fix -- ("1.0 G2", "3H") is a
-    # real PERMITTED_STRATEGY_TIMEFRAME_CELLS entry (SHORTLIST status
-    # per the actual CSV), not just "not vetoed by coincidence."
+    # AND timeframe checks before the same-day fixes, then PERMITTED
+    # once the timeframe fix landed and the whitelist still included
+    # WATCHLIST cells.
+    #
+    # 2026-10-16: re-verified directly against the real Study 4 CSV
+    # (not assumed from a prior comment, which turned out to be wrong --
+    # it claimed "SHORTLIST status per the actual CSV" without that
+    # actually having been checked) -- ("1.0 G2", "3H", LONG) is
+    # WATCHLIST, not SHORTLIST. Under the side-aware Golden Setup prune
+    # (CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md F-01, refined to keep
+    # WATCHLIST on SELL only -- see PERMITTED_STRATEGY_TIMEFRAME_CELLS'
+    # own header comment), this exact real alert now correctly gets
+    # vetoed as UNPROVEN. This is the real, concrete cost of that prune
+    # Andy accepted, not a bug.
     _patch_market(monkeypatch, mark_price=107.49)
     alert = _good_alert(symbol="SOLUSDT", strategy="1.0 G2", timeframe="3H", entry_price=107.49, soft_stop=100.0)
     result = _run(triage.evaluate_alert(alert))
-    assert result["strategy_cell_status"] == "PERMITTED"
-    assert result["reason"] not in ("VETO_TIMEFRAME_LTF_NOISE", "VETO_STRATEGY_TRAP_OR_UNPROVEN", "VETO_PAIR_NOT_ON_EXCHANGE")
+    assert result["strategy_cell_status"] == "UNPROVEN"
+    assert result["reason"] == "VETO_STRATEGY_TRAP_OR_UNPROVEN"
 
 
 def test_evaluate_alert_limit_entry_mode_when_moderately_extended(monkeypatch):
@@ -672,6 +680,43 @@ def test_triage_short_strategy_cell_is_independent_of_the_same_long_cell(monkeyp
     long_result = _run(triage.evaluate_alert(_good_alert(strategy="3.0 G3", timeframe="4H", entry_price=160.0, soft_stop=150.0)))
     assert long_result["strategy_cell_status"] == "TRAP"
     assert long_result["reason"] == "VETO_STRATEGY_TRAP_OR_UNPROVEN"
+
+
+# ----------------------------- 2026-10-16: Golden Setup whitelist, side-aware prune
+# (CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md F-01/F-02). A first pass pruned to pure
+# SHORTLIST on both sides -- wrong, caught by checking the real per-trade log instead of
+# the aggregate "+0.86R WATCHLIST dead weight" framing, which hid a real split (WATCHLIST
+# shorts +4.67R/57 trades, WATCHLIST longs -3.81R/86 trades). Final rule: BUY keeps
+# SHORTLIST only, SELL keeps SHORTLIST + WATCHLIST. Regression pin so a future change to
+# this set is a deliberate edit, not a silent drift.
+
+def test_permitted_cells_are_side_aware_shortlist_only_on_buy_both_on_sell():
+    # Fixture copied from Kabroda Meta Signals AI/studies/strategy_reliability/
+    # strategy_reliability_results.csv (Study 4's own source data) -- same
+    # "copy the fixture into this repo" convention as tests/fixtures/alt_matrix/,
+    # rather than reaching across to a sibling repo's path on disk.
+    import csv
+    csv_path = os.path.join(os.path.dirname(__file__), "fixtures", "metasignals", "strategy_reliability_results.csv")
+
+    tf_min_to_label = {60: "1H", 120: "2H", 180: "3H", 240: "4H", 360: "6H", 480: "8H", 720: "12H", 1440: "1D"}
+    status_by_cell = {}
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            strategy = row["strategy"].replace("Strategy ", "").strip()
+            tf = tf_min_to_label.get(int(row["timeframe"]))
+            if tf is None:
+                continue
+            side = "BUY" if row["direction"].upper() == "LONG" else "SELL"
+            status_by_cell[(strategy, tf, side)] = row["status"]
+
+    assert len(triage.PERMITTED_STRATEGY_TIMEFRAME_CELLS) == 48
+    for cell in triage.PERMITTED_STRATEGY_TIMEFRAME_CELLS:
+        assert cell[1] in triage.WHITELISTED_TIMEFRAMES, f"{cell} is on a dead (non-whitelisted) timeframe"
+        status = status_by_cell.get(cell)
+        if cell[2] == "BUY":
+            assert status == "SHORTLIST", f"{cell} is BUY but status is {status}, not SHORTLIST"
+        else:
+            assert status in ("SHORTLIST", "WATCHLIST"), f"{cell} is SELL but status is {status}"
 
 
 # ------------------------------------------------- 2026-10-16: concurrency cap (commit 6e8e817)
@@ -1179,6 +1224,80 @@ def test_bbwp_exit_on_a_short_order_closes_correctly(db):
     assert order.realized_pnl > 0
 
 
+# --------------------------------------------- 2026-10-16: cancel_order() (admin void)
+# CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md Part C -- the real LINKUSDT
+# double-fill incident's cleanup path, built as a reusable function + admin route
+# instead of a one-off script.
+
+def test_cancel_order_refunds_entry_fee_and_voids_the_position(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    fee_paid = order.fees_paid
+    assert fee_paid > 0
+    cash_before_cancel = account.cash_balance
+
+    engine.cancel_order(db, account, order, reason="test duplicate")
+
+    assert order.state == "CANCELLED_DUPLICATE"
+    assert order.remaining_qty == pytest.approx(0.0)
+    assert order.fees_paid == pytest.approx(0.0)
+    assert order.closed_at is not None
+    assert account.cash_balance == pytest.approx(cash_before_cancel + fee_paid)
+
+
+def test_cancel_order_never_counts_as_a_real_trade(db):
+    # Cancelling is not a trade outcome by this engine's own convention --
+    # only _finalize_closed_trade() (a real STOP/TP/exhaustion/time close)
+    # may move total_trades/winning_trades/losing_trades/total_realized_pnl.
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    trades_before = account.total_trades
+    realized_before = account.total_realized_pnl
+
+    engine.cancel_order(db, account, order, reason="test duplicate")
+
+    assert account.total_trades == trades_before
+    assert account.total_realized_pnl == pytest.approx(realized_before)
+    assert order.realized_pnl == pytest.approx(0.0)
+
+
+def test_cancel_order_removes_the_position_from_equity_and_advance_order(db):
+    # Both refresh_equity() and the watcher's own open-order filter key
+    # off order.state -- confirm a cancelled order drops out of both
+    # without needing any separate "is this cancelled" flag.
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+
+    engine.cancel_order(db, account, order, reason="test duplicate")
+    engine.refresh_equity(db, account, {"SOLUSDT": 165.0})
+    assert account.equity == pytest.approx(account.cash_balance)   # zero unrealized -- the cancelled leg contributes nothing
+
+    event = engine.advance_order(db, order, mark_price=1000.0)   # would hit TP1/stop/anything if still live
+    assert event is None
+    assert order.state == "CANCELLED_DUPLICATE"
+
+
+def test_cancel_order_on_a_pending_limit_order_also_works(db):
+    plan = _approved_plan(db, entry_mode="LIMIT", alert_price=160.0, live_price_at_alert=150.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    assert order.state == "PENDING_LIMIT"
+    assert order.fees_paid == pytest.approx(0.0)   # never filled -- no entry fee charged yet
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    cash_before = account.cash_balance
+
+    engine.cancel_order(db, account, order, reason="test duplicate")
+
+    assert order.state == "CANCELLED_DUPLICATE"
+    assert account.cash_balance == pytest.approx(cash_before)   # nothing to refund
+
+
 def test_stop_checked_before_tp1_when_both_conditions_are_met_in_one_tick(db):
     # A single mark price that is simultaneously <= stop AND >= tp1 is
     # impossible under normal entry/stop/tp1 ordering (stop < entry <
@@ -1246,6 +1365,44 @@ def test_watcher_tick_does_nothing_with_no_open_orders(db, monkeypatch):
         raise AssertionError("should not fetch when there is nothing open")
     monkeypatch.setattr(ebc, "fetch_public_funding_rate", _boom)
     _run(watcher.run_tick(db))   # must not raise
+
+
+def test_watcher_tick_survives_one_symbols_mark_price_fetch_hanging(db, monkeypatch):
+    # F-03 (CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md, confirmed by
+    # direct read before fixing): asyncio.wait_for()'s own TimeoutError
+    # (or any other exception) raises AT THE CALL SITE in run_tick(),
+    # not inside _fetch_mark_price() itself -- before this fix, one
+    # symbol hanging would abort the WHOLE tick, silently skipping
+    # stop/TP/BBWP checks and the equity refresh for every OTHER open
+    # position too. Two orders, two symbols; SOLUSDT's fetch hangs,
+    # ETHUSDT's must still be advanced normally in the same tick.
+    plan_sol = _approved_plan(db, symbol="SOLUSDT", entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                               hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order_sol = engine.open_paper_trade(db, plan_sol)
+    plan_eth = _approved_plan(db, symbol="ETHUSDT", entry_mode="MARKET", alert_price=2000.0, live_price_at_alert=2000.0,
+                               hard_stop=1900.0, position_size=1.0, tp1_price=2100.0, tp2_price=2200.0)
+    order_eth = engine.open_paper_trade(db, plan_eth)
+    db.commit()
+
+    async def flaky_funding(symbol):
+        if symbol.startswith("SOL"):
+            raise asyncio.TimeoutError("simulated hang")
+        return {"code": 0, "data": {"markPrice": "2150.0"}}
+    monkeypatch.setattr(ebc, "fetch_public_funding_rate", flaky_funding)
+
+    import market_data as _market_data
+    async def _no_candles(symbol, interval, target_bars=300):
+        return []
+    monkeypatch.setattr(_market_data, "fetch_bitunix_interval", _no_candles)
+
+    _run(watcher.run_tick(db))   # must not raise despite SOLUSDT's fetch hanging
+
+    refreshed_sol = db.query(MetaSignalsPaperOrder).filter_by(id=order_sol.id).first()
+    refreshed_eth = db.query(MetaSignalsPaperOrder).filter_by(id=order_eth.id).first()
+    assert refreshed_sol.last_mark_price is None   # its own fetch failed -- never guessed
+    assert refreshed_sol.state == "OPEN"           # untouched, not corrupted by the failure
+    assert refreshed_eth.last_mark_price == pytest.approx(2150.0)
+    assert refreshed_eth.state == "HALF_CLOSED_BE"   # TP1 hit at 2150 -- advanced normally despite SOL's hang
 
 
 # ============================================================== radar
@@ -1514,6 +1671,196 @@ def test_alert_path_is_a_true_alias_of_webhook_and_still_accepts_the_legacy_prep
     plan = db.query(MetaSignalsPlan).filter_by(id=int(body["plan_id"])).first()
     assert plan.symbol == "SOLUSDT"
     assert plan.raw_alert_id is not None   # the raw row is still saved even for the legacy shape
+
+
+# ------------------------------------------------------- 2026-10-16: per-symbol dedup
+# CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md -- the real LINKUSDT double-fill
+# incident (two plans approved 43ms apart via a Discord multi-channel cross-post,
+# independently confirmed against kabroda.com's own live /api/metasignals/audit before
+# anything here was built). Two layers: a cheap fast-path SELECT in evaluate_alert()
+# (tested end-to-end here, sequentially -- TestClient calls are not concurrent) and a
+# partial unique index at the DB layer, the real backstop for the actual race (tested
+# directly against the DB, and via a simulated race-guard catch on the route).
+
+def test_ingest_second_identical_symbol_alert_is_vetoed_by_the_fast_path(client_env, monkeypatch):
+    _patch_market(monkeypatch, mark_price=160.0)
+    client = TestClient(app)
+    alert = _good_alert(entry_price=160.0, soft_stop=150.0)
+
+    resp1 = client.post("/api/metasignals/alert", json=alert, headers={"X-Kabroda-Secret": "test-ms-secret"})
+    assert resp1.json()["verdict"] == "YES"
+
+    resp2 = client.post("/api/metasignals/alert", json=alert, headers={"X-Kabroda-Secret": "test-ms-secret"})
+    body2 = resp2.json()
+    assert resp2.status_code == 200
+    assert body2["verdict"] == "NO"
+    assert body2["reason"] == "VETO_ALREADY_OPEN_POSITION"
+
+    db = client_env["db"]
+    orders = db.query(MetaSignalsPaperOrder).filter_by(symbol=alert["symbol"]).all()
+    assert len(orders) == 1   # the second request never opened a position at all
+
+
+def test_unique_index_blocks_a_second_open_order_for_the_same_symbol_at_the_db_layer(db):
+    # The real backstop, tested directly against the database -- not the
+    # app-level SELECT (which a true race can outrun; see this set's own
+    # header comment and metasignals_triage.evaluate_alert()'s own
+    # comment on the per-symbol check for why).
+    from sqlalchemy.exc import IntegrityError
+    plan1 = _approved_plan(db, symbol="SOLUSDT")
+    order1 = engine.open_paper_trade(db, plan1)
+    db.commit()
+
+    plan2 = _approved_plan(db, symbol="SOLUSDT")
+    order2 = MetaSignalsPaperOrder(
+        plan_id=plan2.id, account_id=order1.account_id,
+        symbol="SOLUSDT", side="BUY", entry_mode="MARKET", entry_price=160.0,
+        hard_stop_initial=150.0, current_stop=150.0, tp1_price=170.0, tp2_price=180.0,
+        initial_qty=5.0, remaining_qty=5.0, state="OPEN",
+    )
+    db.add(order2)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_ingest_route_catches_the_db_race_guard_gracefully_not_as_a_500(client_env, monkeypatch):
+    # Simulates the actual race the fast-path SELECT can't fully close
+    # (two near-simultaneous requests both pass the SELECT before either
+    # commits) by forcing open_paper_trade() to raise the same error the
+    # real unique-index conflict would -- confirms the route degrades to
+    # a clean VETO, not an unhandled 500, and the raw/plan audit rows
+    # survive the forced rollback.
+    from sqlalchemy.exc import IntegrityError
+    _patch_market(monkeypatch, mark_price=160.0)
+
+    def _boom(db, plan):
+        raise IntegrityError("simulated unique-index race", params=None, orig=Exception("duplicate key"))
+    monkeypatch.setattr(engine, "open_paper_trade", _boom)
+
+    client = TestClient(app)
+    alert = _good_alert(entry_price=160.0, soft_stop=150.0)
+    resp = client.post("/api/metasignals/alert", json=alert, headers={"X-Kabroda-Secret": "test-ms-secret"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["verdict"] == "NO"
+    assert body["reason"] == "VETO_ALREADY_OPEN_POSITION"
+
+    db = client_env["db"]
+    plan = db.query(MetaSignalsPlan).filter_by(id=int(body["plan_id"])).first()
+    assert plan is not None   # the plan row survived the forced rollback -- it was committed before open_paper_trade() was even attempted
+    assert plan.status == "REJECTED"
+    assert plan.triage_reason == "VETO_ALREADY_OPEN_POSITION"
+    raw = db.query(MetaSignalsRawAlert).filter_by(id=int(body["raw_id"])).first()
+    assert raw is not None   # the raw row survived too -- committed immediately on receipt
+
+
+# ------------------------------------------------------- 2026-10-16: admin order cancel
+# CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md Part C -- the real LINKUSDT
+# double-fill incident's cleanup path, built as a real admin route instead of a one-off
+# script someone has to run by hand against production.
+
+def test_cancel_route_requires_admin(client_env):
+    db = client_env["db"]
+    plan = _approved_plan(db)
+    order = engine.open_paper_trade(db, plan)
+    db.commit()
+
+    client = TestClient(app)
+    resp = client.post(f"/api/metasignals/orders/{order.id}/cancel")
+    assert resp.status_code == 403
+
+    client2 = _login("ms_user@kabroda.com", "userpass123")
+    resp2 = client2.post(f"/api/metasignals/orders/{order.id}/cancel")
+    assert resp2.status_code == 403
+
+
+def test_cancel_route_404s_on_an_order_that_does_not_exist(client_env):
+    client = _login("ms_admin@kabroda.com", "adminpass123")
+    resp = client.post("/api/metasignals/orders/999999/cancel")
+    assert resp.status_code == 404
+
+
+def test_cancel_route_400s_on_an_already_terminal_order(client_env):
+    import datetime
+    db = client_env["db"]
+    plan = _approved_plan(db)
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    engine._close_full(db, account, order, order.tp1_price, "TP2", engine.MAKER_FEE_RATE, datetime.datetime.utcnow())
+    db.commit()
+
+    client = _login("ms_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/metasignals/orders/{order.id}/cancel")
+    assert resp.status_code == 400
+
+
+def test_cancel_route_voids_the_order_and_refunds_the_fee(client_env):
+    db = client_env["db"]
+    plan = _approved_plan(db)
+    order = engine.open_paper_trade(db, plan)
+    db.commit()
+    fee_paid = order.fees_paid
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    cash_before = account.cash_balance
+
+    client = _login("ms_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/metasignals/orders/{order.id}/cancel")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["state"] == "CANCELLED_DUPLICATE"
+    assert body["cash_balance"] == pytest.approx(cash_before + fee_paid)
+
+    db.refresh(order)
+    assert order.state == "CANCELLED_DUPLICATE"
+
+
+def test_cancel_route_self_heals_the_unique_index_so_a_fresh_duplicate_is_blocked_afterward(client_env):
+    # The index creation in init_db() fails harmlessly while a real
+    # same-symbol duplicate exists (expected, documented in database.py).
+    # This route re-runs init_db() right after voiding -- confirm a NEW
+    # same-symbol duplicate attempt is blocked at the DB layer afterward,
+    # with no separate deploy or restart in between.
+    #
+    # The db fixture's own init_db() call already created the index
+    # against a clean table, so it has to be dropped here first to
+    # actually reproduce the real pre-fix production sequencing (a
+    # duplicate that predates the index ever existing).
+    from sqlalchemy import text as _text
+    db = client_env["db"]
+    db.execute(_text("DROP INDEX IF EXISTS ux_metasignals_paper_orders_open_symbol"))
+    db.commit()
+
+    plan1 = _approved_plan(db, symbol="LINKUSDT")
+    order1 = engine.open_paper_trade(db, plan1)
+    plan2 = _approved_plan(db, symbol="LINKUSDT")
+    order2 = MetaSignalsPaperOrder(
+        plan_id=plan2.id, account_id=order1.account_id, symbol="LINKUSDT", side="BUY",
+        entry_mode="MARKET", entry_price=160.0, hard_stop_initial=150.0, current_stop=150.0,
+        tp1_price=170.0, tp2_price=180.0, initial_qty=5.0, remaining_qty=5.0, state="OPEN",
+    )
+    db.add(order2)
+    db.commit()   # succeeds -- the index was just dropped (this IS the pre-fix duplicate state)
+    order2_id = order2.id
+
+    client = _login("ms_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/metasignals/orders/{order2_id}/cancel")
+    assert resp.status_code == 200   # voids the second (duplicate) order -- now only order1 is open for LINKUSDT
+
+    # The index should now exist (only one LINKUSDT order left in an open
+    # state) -- a fresh attempt to open a second one must fail at the DB layer.
+    from sqlalchemy.exc import IntegrityError
+    plan3 = _approved_plan(db, symbol="LINKUSDT")
+    order3 = MetaSignalsPaperOrder(
+        plan_id=plan3.id, account_id=order1.account_id, symbol="LINKUSDT", side="BUY",
+        entry_mode="MARKET", entry_price=160.0, hard_stop_initial=150.0, current_stop=150.0,
+        tp1_price=170.0, tp2_price=180.0, initial_qty=5.0, remaining_qty=5.0, state="OPEN",
+    )
+    db.add(order3)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
 
 
 # ------------------------------------------------------- execution-mode config route

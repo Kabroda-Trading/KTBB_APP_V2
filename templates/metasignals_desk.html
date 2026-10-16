@@ -83,10 +83,10 @@
                     <thead>
                         <tr>
                             <th>Symbol</th><th>State</th><th>Entry Mode</th><th>Entry</th><th>Stop</th>
-                            <th>TP1</th><th>TP2</th><th>Remaining Qty</th><th>Mark</th><th>Unrealized</th><th>Realized</th>
+                            <th>TP1</th><th>TP2</th><th>Remaining Qty</th><th>Mark</th><th>Unrealized</th><th>Realized</th><th>Action</th>
                         </tr>
                     </thead>
-                    <tbody id="ms-positions"><tr class="empty-row"><td colspan="11">Loading...</td></tr></tbody>
+                    <tbody id="ms-positions"><tr class="empty-row"><td colspan="12">Loading...</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -175,7 +175,7 @@
 
             const posBody = document.getElementById('ms-positions');
             if (!data.positions || data.positions.length === 0) {
-                posBody.innerHTML = '<tr class="empty-row"><td colspan="11">No open paper positions.</td></tr>';
+                posBody.innerHTML = '<tr class="empty-row"><td colspan="12">No open paper positions.</td></tr>';
             } else {
                 posBody.innerHTML = data.positions.map(p => `
                     <tr>
@@ -190,6 +190,7 @@
                         <td>${p.last_mark_price != null ? p.last_mark_price : '--'}</td>
                         <td class="${pnlClass(p.unrealized_pnl)}">${fmtUsd(p.unrealized_pnl)}</td>
                         <td class="${pnlClass(p.realized_pnl)}">${fmtUsd(p.realized_pnl)}</td>
+                        <td><button class="btn" onclick="cancelOrder(${p.id}, '${esc(p.symbol)}')">Cancel</button></td>
                     </tr>
                 `).join('');
             }
@@ -255,6 +256,21 @@
                 refresh();
             } catch (e) {
                 alert('Save failed: ' + e);
+            }
+        }
+
+        async function cancelOrder(orderId, symbol) {
+            if (!confirm(`Cancel order #${orderId} (${symbol})? This voids the position and refunds its entry fee -- it is NOT counted as a win/loss/trade.`)) return;
+            try {
+                const resp = await fetch(`/api/metasignals/orders/${orderId}/cancel`, { method: 'POST' });
+                const body = await resp.json();
+                if (!resp.ok || !body.ok) {
+                    alert('Cancel failed: ' + (body.error || resp.status));
+                    return;
+                }
+                refresh();
+            } catch (e) {
+                alert('Cancel failed: ' + e);
             }
         }
 
