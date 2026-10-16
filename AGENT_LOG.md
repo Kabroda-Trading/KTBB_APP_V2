@@ -9056,3 +9056,31 @@ alone. Full suite: 879 passed, 0 failed. Real boot check passed (fresh
 account seeds at $1,000).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-16 — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open
+
+NEW WORK ORDER COMMITTED: `CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md` (repo root).
+Andy directive (2026-10-16 08:15 CT): "Clean it all up and put it in an MD file so that way CC can read it. It needs to be very thorough on the backtesting and auditing, and make sure the code is written correctly and the system doesn't break what's there or patch what's there... CC needs to double-check all your work."
+
+SUMMARY OF WORK ORDER:
+1. P0 FIX: MAJORS COMMA BUG (ETH & BTC)
+   - Polled audit endpoint confirmed 54 plans across 27 altcoins, 0 ETH, 0 BTC.
+   - Root cause: `_ALERT_PATTERN` and `_SL_PATTERN` use `\d+(?:\.\d+)?` which halts on thousands commas (`$2,534.63` and `$83,125.80`).
+   - Fix: Change to `[\d,]+(?:\.\d+)?` and `.replace(",", "")` before `float()` conversions.
+2. SYMMETRICAL SHORT-SIDE INTEGRATION
+   - Bitunix is a perpetual futures exchange; Andy expects both Longs and Shorts. Pi is already capturing `#mafioso-short-htf` and `#mafioso-short-mtf`.
+   - Study 4 Backtest Grounding: 26 Short cells evaluated; 4 Shortlist cells (Static PFs up to 2.04, WRs up to 65.6%; e.g. `Strategy 1.1 G2 4H`), 15 Watchlist cells (PFs up to 2.80), 7 Trap cells explicitly blacklisted.
+   - Symmetrical Mirroring:
+     * Side detection: Price geometry first (`soft_stop > entry_price` -> `SELL`).
+     * Pillar 1 Macro: Asset Daily Close < 200 SMA (structural downtrend).
+     * Pillar 2 Momentum: Inverted 4H RSI between 38.0 and 60.0.
+     * Pillar 3 Extension: `(alert_price - mark_price) / r_distance`.
+     * Pillar 4 Funding: `funding_rate > -0.0004` (avoid shorting crowded negative funding).
+     * Pillar 5 Whitelist: Add 19 permitted Short cells from Study 4.
+     * Execution (`metasignals_paper_engine.py`): Hard stop above entry (`soft_stop + 0.25*atr14`), stop trigger `mark_price >= current_stop`, TP trigger `mark_price <= tp1_price`, direction-aware P&L `qty * (entry - exit)`.
+3. CC MANDATE:
+   - Double-check all audit findings and regex test cases in `CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md`.
+   - Add unit tests covering Short lifecycle (stop hit, TP1 fill + BE ratchet, macro veto, comma parsing).
+   - Ensure full suite passes with zero regressions on Traveler and Alt Matrix.
+
