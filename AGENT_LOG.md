@@ -9201,3 +9201,42 @@ deploy.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 
+## 2026-10-16 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Implemented the BBWP exhaustion exit from CC_WORK_ORDER_METASIGNALS_
+BBWP_EXHAUSTION.md (commit bcca529, later corrected by 39aa665). Commit
+ff65fcd: `metasignals_triage.bbwp_percentile_series()` (unsmoothed raw-
+width formula, verified byte-for-byte against Study 6's own
+`calculate_bbwp_series()` on 400 synthetic bars -- deliberately NOT
+reusing market_data.py's existing `_calc_bbwp()`, which smooths width
+with a 5-bar SMA and returns 50.0 instead of None on insufficient data,
+a genuinely different formula), wired into `metasignals_paper_engine.
+advance_order()` between STOP and TP1 (OPEN state only -- Study 6
+measured applying it post-TP1/post-breakeven as actively harmful), fed
+by a new `metasignals_watcher._fetch_bbwp()` poll using each order's own
+native alert timeframe (via a new generic `market_data.
+fetch_bitunix_interval()`), deduped per tick same as the mark-price
+fetch. `bbwp_val=None` fails OPEN (skip the check) -- correct here,
+unlike the concurrency cap's fail-open bug, since skipping never
+escalates risk past what already existed before this feature shipped.
+
+Per the standing verification discipline this project runs on: the
+real, reconstructed effect against the engine that actually exists
+here (fixed TP1/TP2, no 21-EMA runner) is +1.59R/+13% -- not the
+originally-advertised +8.84R/+49%, which was measured against a
+management variant never built in this codebase. Andy/DeepSeek
+confirmed via AskUserQuestion: ship it anyway, the real number still
+justifies it. Also independently re-verified DeepSeek's fix (Meta
+Signals AI commit 2934917) for the separate report-generation bug found
+during this audit (the script computed correct numbers then printed
+fabricated hardcoded text) -- re-ran the fixed script myself, byte-for-
+byte reproducible against the committed REPORT.md now.
+
+8 new tests added (regression pin, threshold boundary, HALF_CLOSED_BE
+exclusion, None fail-open, STOP-before-BBWP priority, short-side).
+Full site suite: 910 passed, 0 failed. Real TestClient lifespan boot
+check green. Pushing to GitHub now; Andy to trigger the Render deploy.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
