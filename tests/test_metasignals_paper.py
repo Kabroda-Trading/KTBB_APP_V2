@@ -674,6 +674,66 @@ def test_triage_short_strategy_cell_is_independent_of_the_same_long_cell(monkeyp
     assert long_result["reason"] == "VETO_STRATEGY_TRAP_OR_UNPROVEN"
 
 
+# ------------------------------------------------- 2026-10-16: concurrency cap (commit 6e8e817)
+# Shipped with ZERO dedicated tests and TWO real bugs, both found and fixed the same day:
+#   1. `os` was never imported in metasignals_triage.py -- os.getenv() raised NameError on
+#      every single real call, silently swallowed by the bare except below it.
+#   2. The except itself failed OPEN (silently skipped the cap) rather than closed.
+# These tests exercise the real database-backed path directly (not a mock), since a mock
+# query object could never have caught either bug the way it actually shipped.
+
+def test_concurrency_cap_vetoes_when_at_or_over_the_limit(db, monkeypatch):
+    monkeypatch.setenv("METASIGNALS_MAX_CONCURRENT_POSITIONS", "2")
+    for i in range(2):
+        plan = _approved_plan(db, symbol=f"SOL{i}USDT")
+        engine.open_paper_trade(db, plan)
+    db.commit()
+
+    result = _run(triage.evaluate_alert(_good_alert(), db=db))
+    assert result["reason"] == "VETO_CONCURRENT_CAP_REACHED"
+    assert result["open_positions"] == 2
+
+
+def test_concurrency_cap_does_not_veto_when_under_the_limit(db, monkeypatch):
+    monkeypatch.setenv("METASIGNALS_MAX_CONCURRENT_POSITIONS", "5")
+    _patch_market(monkeypatch, mark_price=160.0)   # avoid a real network call once the check passes through
+    plan = _approved_plan(db)
+    engine.open_paper_trade(db, plan)
+    db.commit()
+
+    result = _run(triage.evaluate_alert(_good_alert(entry_price=160.0), db=db))
+    assert result["reason"] != "VETO_CONCURRENT_CAP_REACHED"
+
+
+def test_concurrency_cap_counts_pending_limit_orders_too(db, monkeypatch):
+    monkeypatch.setenv("METASIGNALS_MAX_CONCURRENT_POSITIONS", "1")
+    plan = _approved_plan(db, entry_mode="LIMIT", live_price_at_alert=170.0)   # extended -> PENDING_LIMIT, not yet filled
+    order = engine.open_paper_trade(db, plan)
+    assert order.state == "PENDING_LIMIT"
+    db.commit()
+
+    result = _run(triage.evaluate_alert(_good_alert(), db=db))
+    assert result["reason"] == "VETO_CONCURRENT_CAP_REACHED"
+
+
+def test_concurrency_cap_fails_closed_not_open_on_a_db_error():
+    # Regression for the real bug: a query failure used to be silently
+    # swallowed and evaluation continued as if the cap didn't exist.
+    class _BoomDB:
+        def query(self, *a, **kw):
+            raise RuntimeError("simulated DB failure")
+    result = _run(triage.evaluate_alert(_good_alert(), db=_BoomDB()))
+    assert result["reason"] == "VETO_CONCURRENT_CAP_REACHED"
+
+
+def test_concurrency_check_is_skipped_entirely_when_no_db_is_passed(monkeypatch):
+    # Backward-compat: every call site that doesn't pass db= (most of this
+    # test file) must behave exactly as before -- no accidental veto.
+    _patch_market(monkeypatch, mark_price=160.0)
+    result = _run(triage.evaluate_alert(_good_alert(entry_price=160.0)))
+    assert result["reason"] != "VETO_CONCURRENT_CAP_REACHED"
+
+
 # ============================================================== paper engine (real DB)
 
 def _clean_db_files():

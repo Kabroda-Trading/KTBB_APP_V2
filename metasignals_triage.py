@@ -86,6 +86,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import Any, Dict, List, Optional
@@ -525,7 +526,27 @@ async def evaluate_alert(alert: Dict[str, Any], db: Optional[Any] = None) -> Dic
     out: Dict[str, Any] = {"symbol": symbol, "side": side}
 
     # Concurrency check (Golden Profile: max 5 concurrent open paper positions)
-    # Prevents taking 10 correlated altcoin alerts simultaneously during market flushes.
+    # Prevents taking 10 correlated altcoin alerts simultaneously during market
+    # flushes -- the report's own words, "strictly bounding peak desk risk to
+    # $250." A risk cap that can be silently bypassed is not a risk cap.
+    #
+    # 2026-10-16 (Claude Code): FOUND AND FIXED TWO REAL BUGS HERE BEFORE THIS
+    # ever ran for real, not just a style cleanup:
+    #   1. `os` was never imported in this module at all -- every single call
+    #      with a real db raised NameError on os.getenv(), silently swallowed
+    #      by the bare `except Exception: pass` below. Verified directly: a
+    #      fake db reporting 999 open positions (way over any cap) still
+    #      produced a normal, non-concurrency verdict. The cap has never
+    #      fired once, in any scenario, since this code was written.
+    #   2. Even with `os` imported, the original `except Exception: pass`
+    #      fails OPEN on any DB error -- the opposite of every other failure
+    #      path in this module (funding rate, price feed, candle fetch all
+    #      fail CLOSED, per this module's own established convention). A
+    #      transient DB hiccup during exactly the kind of mass-alert market
+    #      flush this cap exists to guard against would have silently
+    #      disabled the $250 risk ceiling for that alert, with zero logging.
+    # Fixed to fail CLOSED: a query error now vetoes (treated the same as
+    # "cap reached"), not treated as "cap check didn't happen."
     if db is not None:
         try:
             from database import MetaSignalsPaperOrder
@@ -536,8 +557,10 @@ async def evaluate_alert(alert: Dict[str, Any], db: Optional[Any] = None) -> Dic
             if open_count >= max_cap:
                 out.update(verdict="NO", reason="VETO_CONCURRENT_CAP_REACHED", open_positions=open_count)
                 return out
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[METASIGNALS] concurrency check failed closed (treating as cap reached): {e}")
+            out.update(verdict="NO", reason="VETO_CONCURRENT_CAP_REACHED", open_positions=None)
+            return out
 
     if side not in ("BUY", "SELL"):
         out.update(verdict="NO", reason="VETO_SIDE_NOT_SUPPORTED")
