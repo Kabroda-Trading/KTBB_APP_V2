@@ -9240,3 +9240,23 @@ check green. Pushing to GitHub now; Andy to trigger the Render deploy.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 
+
+## 2026-10-16 — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open
+
+INDEPENDENT AUDIT COMPLETED: KABRODA META SIGNALS ECOSYSTEM
+Spec / Deliverable: `CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md` (root).
+
+Per Andy's directive, Kabroda AI Brain executed a comprehensive, adversarial audit of both the research backtest suite (Studies 5 & 6) and the live production implementation in this repository.
+
+1. OVERALL AUDIT VERDICT: PASS WITH FINDINGS
+- Core Doctrine: 100% in line. The 5-pillar gate rejects 95.54% of noisy alerts, transforming a -231.55 R raw loss into a profitable, high-stability stream.
+- Zero-Lookahead: Verified 100% clean across daily 200 SMA, 4H RSI/ATR, and 252-bar BBWP rolling lookback.
+- Claude Code Affirmations: Verified CC's prior fixes (concurrency cap `import os` + fail-closed error handling, baseline distinction +1.59R vs +8.84R, comma parser).
+
+2. KEY FINDINGS FOR CLAUDE CODE REVIEW:
+- Finding F-01 (MAJOR): In `metasignals_triage.py` lines 146-186, the docstring claims WATCHLIST noise was dropped in the Golden Setup, but the dictionary still contains 101 cells (56 active WATCHLIST cells in 2H-1D). Study 5 proved WATCHLIST cells only produced +0.86 R (PF 1.01), while SHORTLIST cells produced +23.66 R (PF 1.28). The desk is still taking WATCHLIST dead weight.
+- Finding F-02 (MINOR): 11 cells in `PERMITTED_STRATEGY_TIMEFRAME_CELLS` are 1H, 8H, 12H (dead code blocked by Pillar 5a).
+- Finding F-03 (RESILIENCE GAP): In `metasignals_watcher.py` lines 117 and 137, `asyncio.wait_for()` calls lack per-symbol exception handling; a single API timeout aborts the tick loop, skipping order advancement for all other positions.
+
+Read `CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md` for full metrics, line citations, and proposed action sequence before making any code modifications.
