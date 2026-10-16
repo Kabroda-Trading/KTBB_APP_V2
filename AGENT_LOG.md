@@ -9260,3 +9260,53 @@ Per Andy's directive, Kabroda AI Brain executed a comprehensive, adversarial aud
 - Finding F-03 (RESILIENCE GAP): In `metasignals_watcher.py` lines 117 and 137, `asyncio.wait_for()` calls lack per-symbol exception handling; a single API timeout aborts the tick loop, skipping order advancement for all other positions.
 
 Read `CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md` for full metrics, line citations, and proposed action sequence before making any code modifications.
+
+## 2026-10-16 (dedup work order + independent audit report, both resolved) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Implemented both CC_WORK_ORDER_METASIGNALS_DEDUP_AND_DESK_ALIGNMENT.md and
+CC_INDEPENDENT_AUDIT_REPORT_METASIGNALS.md's F-01/F-02/F-03 (commit 703665e).
+Verified every claim independently before acting, per this project's standing
+discipline -- the LINKUSDT incident itself is real (confirmed directly against
+kabroda.com's own live /api/metasignals/audit: plans 56/57, 43ms apart, both
+APPROVED, $100 committed instead of $50) and F-01/F-02/F-03's cell counts and
+code citations all reproduced exactly from the real CSV/code.
+
+ONE real course-correction mid-implementation, flagged here so it isn't lost:
+the relayed dedup fix (Part A, a per-symbol SELECT check) does NOT actually
+close the race that caused the real incident -- evaluate_alert() awaits several
+network calls between that SELECT and the eventual order commit, so two
+near-simultaneous webhooks both pass the SELECT before either order exists yet
+(separate per-request DB sessions, neither sees the other's uncommitted row).
+Closed it for real with a partial unique index on metasignals_paper_orders
+(symbol) for open states -- the SELECT stays as a cheap fast-path, the index is
+the actual backstop, caught gracefully in main.py (IntegrityError ->
+VETO_ALREADY_OPEN_POSITION, not a 500).
+
+SECOND course-correction: F-01's own recommended fix (prune to pure SHORTLIST
+on both sides) was itself wrong. Checking the real per-trade log
+(approved_trades_log.csv) instead of the aggregate "+0.86R WATCHLIST dead
+weight" framing showed WATCHLIST shorts are +4.67R/57 trades (genuinely good)
+and WATCHLIST longs are -3.81R/86 trades (genuinely bad) -- they only net to
++0.86R because a good number and a bad number partly cancelled. Final rule is
+side-aware (BUY: SHORTLIST only: 31 cells. SELL: SHORTLIST+WATCHLIST: 17
+cells. 48 total) -- strictly dominates the blanket prune on every axis: 257
+trades/+15.93R/54.9% WR vs. 200 trades/+11.26R/54.5% WR. Both corrections
+surfaced to Andy via AskUserQuestion before implementing, not decided
+unilaterally.
+
+F-03 (watcher abort-on-timeout) confirmed real by direct code read and fixed
+as specced -- per-symbol try/except around both asyncio.wait_for() calls in
+run_tick(), no behavioral tradeoff.
+
+Also built Part C as a real admin endpoint (POST /api/metasignals/orders/
+{id}/cancel + a Cancel button on the desk UI) instead of a one-off script --
+reusable for any future false start, refunds the entry fee, never counts as a
+trade, and self-heals the unique index (re-runs init_db() after voiding, no
+separate deploy needed once the real duplicate LINK order is cancelled).
+
+22 new tests, full site suite 924 passed, real boot check green. Pushing to
+GitHub; Andy to trigger the Render deploy, then use the new Cancel button on
+/admin/metasignals to void the real duplicate LINK order on production.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
