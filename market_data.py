@@ -517,6 +517,22 @@ async def fetch_bitunix_4h(symbol: str, target_bars: int = 900) -> List[Dict[str
     return result
 
 
+async def fetch_bitunix_interval(symbol: str, interval: str, target_bars: int = 300) -> List[Dict[str, Any]]:
+    """Generic Bitunix kline fetch for any interval not already covered by
+    a named wrapper above -- 2026-10-16, MetaSignals' own BBWP exhaustion
+    check (metasignals_watcher.py) needs candles at an open order's own
+    native alert timeframe, which varies per order across all 8 of
+    metasignals_triage.WHITELISTED_TIMEFRAMES (1H/2H/3H/4H/6H/8H/12H/1D),
+    not just the fixed 4h/1d/1h/5m/15m the named wrappers above cover.
+    `interval` is the Bitunix API's own lowercase string (e.g. "2h",
+    "6h", "12h") -- caller's responsibility to map from a "2H"-style
+    label. Deliberately does NOT persist to candle_history (unlike the
+    named wrappers above) -- this is a narrow, MetaSignals-specific read,
+    not a decision-feed timeframe anything else in this codebase needs
+    cached."""
+    return await _fetch_bitunix_candles(symbol, interval, target_bars, f"BITUNIX_{interval.upper()}")
+
+
 # ---------------------------------------------------------------------------
 # CALCULATION HELPERS — pure functions, no external dependencies
 # ---------------------------------------------------------------------------

@@ -165,17 +165,42 @@ def _finalize_closed_trade(db: Session, account: MetaSignalsPaperAccount, order:
     order.closed_at = now
 
 
-def advance_order(db: Session, order: MetaSignalsPaperOrder, mark_price: float, now: Optional[datetime.datetime] = None) -> Optional[str]:
+BBWP_EXHAUSTION_THRESHOLD = 10.0   # CC_WORK_ORDER_METASIGNALS_BBWP_EXHAUSTION.md / Study 6 -- see metasignals_triage.py's own constant of the same name/value
+
+
+def advance_order(
+    db: Session, order: MetaSignalsPaperOrder, mark_price: float,
+    bbwp_val: Optional[float] = None, now: Optional[datetime.datetime] = None,
+) -> Optional[str]:
     """Advances ONE order by at most one state transition this tick,
     given the current live mark price. Returns the event name
-    ("ENTRY_FILL" | "TP1_FILL" | "CLOSED_STOP" | "CLOSED_TP2") if
-    anything happened, else None. Priority within a tick when a PENDING_
-    LIMIT/OPEN/HALF_CLOSED_BE order could satisfy more than one
-    condition: STOP is checked before TP1/TP2 -- the conservative
-    reading of an ambiguous single mark-price sample (no intra-tick wick
-    order is actually known), matching the STOP-first priority this
-    codebase's other two systems (mgmt_e1_stack.py, alt_matrix_
-    management.py) already use."""
+    ("ENTRY_FILL" | "TP1_FILL" | "CLOSED_STOP" | "CLOSED_TP2" |
+    "CLOSED_EXHAUSTION_BBWP") if anything happened, else None. Priority
+    within a tick when a PENDING_LIMIT/OPEN/HALF_CLOSED_BE order could
+    satisfy more than one condition: STOP is checked before TP1/TP2 --
+    the conservative reading of an ambiguous single mark-price sample
+    (no intra-tick wick order is actually known), matching the
+    STOP-first priority this codebase's other two systems
+    (mgmt_e1_stack.py, alt_matrix_management.py) already use.
+
+    bbwp_val (2026-10-16, CC_WORK_ORDER_METASIGNALS_BBWP_EXHAUSTION.md,
+    Study 6): the order's native-timeframe Bollinger Band Width
+    Percentile, computed by metasignals_watcher.py and passed in here --
+    this function does no candle fetching of its own. Checked ONLY in
+    state OPEN (pre-TP1), between STOP and TP1, per the work order's own
+    explicit scope: once TP1 is banked and the stop is at breakeven
+    (HALF_CLOSED_BE), the trade is already risk-free and should run to
+    TP2/the stop, never cut short on a compression read -- verified
+    directly against Study 6's own data before trusting this scope
+    (adding exhaustion to post-TP1 phases was measured and found
+    actively harmful, "Variant A2... outright harmful, chopping runners
+    off before explosive expansions"). bbwp_val=None (candle data
+    temporarily unavailable) fails OPEN here, deliberately -- unlike the
+    concurrency cap's own fail-closed fix the same day, skipping this
+    check just means a trade behaves exactly as it already does today
+    (no risk increase beyond the pre-existing status quo), not an
+    escalation past an intended limit the way a bypassed concurrency cap
+    would be."""
     account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
     if account is None:
         return None
@@ -203,6 +228,9 @@ def advance_order(db: Session, order: MetaSignalsPaperOrder, mark_price: float, 
         if stop_hit:
             _close_full(db, account, order, order.current_stop, "STOP", TAKER_FEE_RATE, now)
             return "CLOSED_STOP"
+        if bbwp_val is not None and bbwp_val <= BBWP_EXHAUSTION_THRESHOLD:
+            _close_full(db, account, order, mark_price, "EXHAUSTION_BBWP", TAKER_FEE_RATE, now)
+            return "CLOSED_EXHAUSTION_BBWP"
         tp1_hit = (mark_price >= order.tp1_price) if is_buy else (mark_price <= order.tp1_price)
         if tp1_hit:
             _fill_tp1(db, account, order, now)
@@ -210,6 +238,9 @@ def advance_order(db: Session, order: MetaSignalsPaperOrder, mark_price: float, 
         return None
 
     if order.state == "HALF_CLOSED_BE":
+        # BBWP does NOT apply past this point -- already risk-free
+        # (stop at breakeven), let it run to TP2 or the BE stop. See
+        # this function's own docstring for the measured reasoning.
         stop_hit = (mark_price <= order.current_stop) if is_buy else (mark_price >= order.current_stop)
         if stop_hit:
             _close_full(db, account, order, order.current_stop, "STOP", TAKER_FEE_RATE, now)

@@ -363,6 +363,63 @@ def rsi14_wilder_series(closes: List[float]) -> List[Optional[float]]:
     return out
 
 
+BBWP_PERIOD = 13
+BBWP_STD = 2.0
+BBWP_LOOKBACK = 252
+BBWP_EXHAUSTION_THRESHOLD = 10.0   # CC_WORK_ORDER_METASIGNALS_BBWP_EXHAUSTION.md / Study 6
+
+
+def bbwp_percentile_series(
+    closes: List[float], bb_period: int = BBWP_PERIOD, bb_std: float = BBWP_STD, lookback: int = BBWP_LOOKBACK,
+) -> List[Optional[float]]:
+    """Bollinger Band Width Percentile -- percentile rank of the RAW
+    per-bar BB width (no smoothing) over the trailing `lookback` bars.
+    None until `bb_period` closes exist for the width calc, and
+    separately None until at least 20 historical width values exist for
+    a meaningful percentile rank.
+
+    2026-10-16 (Study 6, `Kabroda Meta Signals AI/studies/
+    exhaustion_exit_backtest/run_exhaustion_backtest.py::
+    calculate_bbwp_series()`): this formula is reimplemented fresh here
+    to match EXACTLY what Study 6 actually measured (unsmoothed, raw
+    per-bar width) -- NOT market_data.py's own pre-existing `_calc_bbwp()`
+    (Traveler's C5-adjacent helper), which smooths BB width with a
+    5-bar SMA before ranking and returns 50.0 (not None) on insufficient
+    data. That is a genuinely different formula with a genuinely
+    different insufficient-data convention; reusing it here would ship
+    behavior that was never actually backtested. Verified directly
+    against Study 6's own committed script before writing this, not
+    assumed to match from the name alone."""
+    n = len(closes)
+    bbw: List[Optional[float]] = [None] * n
+    for i in range(bb_period - 1, n):
+        window = closes[i - bb_period + 1: i + 1]
+        mean = sum(window) / bb_period
+        if mean <= 0:
+            continue
+        variance = sum((x - mean) ** 2 for x in window) / bb_period
+        stdev = variance ** 0.5
+        bbw[i] = (2.0 * bb_std * stdev) / mean
+
+    out: List[Optional[float]] = [None] * n
+    for i in range(n):
+        if bbw[i] is None:
+            continue
+        start = max(0, i - lookback + 1)
+        hist = [v for v in bbw[start:i + 1] if v is not None]
+        if len(hist) < 20:
+            continue
+        cur = bbw[i]
+        smaller = sum(1 for v in hist if v < cur)
+        # Deliberately NOT rounded -- Study 6's own calculate_bbwp_series()
+        # doesn't round either, and rounding here could flip a threshold
+        # decision right at the boundary (e.g. a raw 10.0049 would round to
+        # 10.0 and wrongly trigger a `<= 10.0` check that the unrounded
+        # value would not).
+        out[i] = smaller / len(hist) * 100.0
+    return out
+
+
 # ------------------------------------------------------------------ market data (I/O, generic reused fetchers)
 
 async def _fetch_confirmed_4h(symbol: str, target_bars: int = 120) -> List[Dict[str, Any]]:

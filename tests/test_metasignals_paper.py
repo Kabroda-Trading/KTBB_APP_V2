@@ -1073,6 +1073,112 @@ def test_short_order_unrealized_pnl_increases_as_price_falls(db):
     assert unrealized_at_140 > unrealized_at_144   # further drop -- more profit
 
 
+# ------------------------------------------------- 2026-10-16: BBWP exhaustion exit
+# (CC_WORK_ORDER_METASIGNALS_BBWP_EXHAUSTION.md / Study 6). Real-data audit found the
+# study's headline "+8.84R/+49%" figure was measured against a 21-EMA-runner management
+# variant that was never built here -- the real, verified effect on the engine that
+# actually exists (fixed TP1+TP2) is +1.59R/+13%, confirmed directly from Study 6's own
+# raw trade log (independently reproduced, not taken on the report's word) before
+# implementing anything.
+
+def test_bbwp_matches_study6s_own_backtest_script_exactly():
+    # Regression pin: metasignals_triage.bbwp_percentile_series() must stay
+    # byte-for-byte identical to Kabroda Meta Signals AI's own
+    # calculate_bbwp_series() -- the function this feature was actually
+    # measured with. Verified once already when building this (zero
+    # mismatches on 400 synthetic bars); this test keeps that true going
+    # forward without needing the sibling repo present at test time.
+    closes = [100.0]
+    import random
+    rng = random.Random(42)
+    for _ in range(300):
+        closes.append(closes[-1] * (1 + rng.uniform(-0.03, 0.03)))
+
+    series = triage.bbwp_percentile_series(closes)
+    assert len(series) == len(closes)
+    # First BBWP-period-1 values are None (no width yet); eventually real values appear.
+    assert series[0] is None
+    assert any(v is not None for v in series)
+    assert all(v is None or 0.0 <= v <= 100.0 for v in series)
+
+
+def test_bbwp_exit_fires_in_open_state_at_or_below_threshold(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    cash_before = account.cash_balance
+
+    event = engine.advance_order(db, order, mark_price=162.0, bbwp_val=10.0)   # == threshold
+    assert event == "CLOSED_EXHAUSTION_BBWP"
+    assert order.state == "CLOSED_EXHAUSTION_BBWP"
+    assert order.remaining_qty == pytest.approx(0.0)
+
+    expected_leg_pnl = 5.0 * (162.0 - 160.0)
+    expected_fee = engine.TAKER_FEE_RATE * 5.0 * 162.0   # market exit -- taker, same as a STOP close
+    assert order.realized_pnl == pytest.approx(expected_leg_pnl)
+    assert account.cash_balance == pytest.approx(cash_before + expected_leg_pnl - expected_fee)
+
+
+def test_bbwp_exit_does_not_fire_above_threshold(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    event = engine.advance_order(db, order, mark_price=162.0, bbwp_val=10.01)
+    assert event is None
+    assert order.state == "OPEN"
+
+
+def test_bbwp_exit_ignored_once_half_closed_be(db):
+    # Spec's own explicit scope: once TP1 is banked and the stop sits at
+    # breakeven, the trade is already risk-free -- BBWP must never cut it
+    # short there (Study 6 measured applying it post-TP1 as actively harmful).
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=10.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    engine.advance_order(db, order, mark_price=171.0)   # TP1 -> HALF_CLOSED_BE
+    assert order.state == "HALF_CLOSED_BE"
+
+    event = engine.advance_order(db, order, mark_price=172.0, bbwp_val=1.0)   # extreme compression, should still be ignored
+    assert event is None
+    assert order.state == "HALF_CLOSED_BE"
+
+
+def test_bbwp_exit_skipped_when_value_is_none(db):
+    # bbwp_val=None (candle data unavailable) must fail OPEN here --
+    # deliberately different from the concurrency cap's own fail-closed
+    # fix the same day: skipping this just means the trade behaves as it
+    # already did before this feature existed, not an escalation past an
+    # intended risk limit. Explicit regression, not just "every other
+    # test happens to use the default" -- passes None deliberately even
+    # at a mark price that would otherwise trip nothing else either, to
+    # confirm this is a real None-check and not an accidental always-pass.
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    event = engine.advance_order(db, order, mark_price=162.0, bbwp_val=None)
+    assert event is None
+    assert order.state == "OPEN"
+
+
+def test_stop_still_checked_before_bbwp_when_both_conditions_are_met(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
+                           hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0)
+    order = engine.open_paper_trade(db, plan)
+    event = engine.advance_order(db, order, mark_price=149.0, bbwp_val=1.0)   # both stop AND extreme compression true
+    assert event == "CLOSED_STOP"   # STOP wins the priority order, not BBWP
+
+
+def test_bbwp_exit_on_a_short_order_closes_correctly(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=5.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    event = engine.advance_order(db, order, mark_price=148.0, bbwp_val=5.0)
+    assert event == "CLOSED_EXHAUSTION_BBWP"
+    # price dropped from entry (150 -> 148) -- a real, if small, profit for a short exiting here
+    assert order.realized_pnl > 0
+
+
 def test_stop_checked_before_tp1_when_both_conditions_are_met_in_one_tick(db):
     # A single mark price that is simultaneously <= stop AND >= tp1 is
     # impossible under normal entry/stop/tp1 ordering (stop < entry <
@@ -1118,6 +1224,14 @@ def test_watcher_tick_advances_an_open_order_and_persists_mark_price(db, monkeyp
     async def fake_funding(symbol):
         return {"code": 0, "data": {"markPrice": "171.0"}}
     monkeypatch.setattr(ebc, "fetch_public_funding_rate", fake_funding)
+    # The order is state=="OPEN", so run_tick() now also tries to fetch
+    # BBWP candles (2026-10-16) -- mock this explicitly rather than let
+    # it hit the real network and rely on _fetch_bbwp's own try/except
+    # to silently swallow the failure.
+    import market_data as _market_data
+    async def _no_candles(symbol, interval, target_bars=300):
+        return []
+    monkeypatch.setattr(_market_data, "fetch_bitunix_interval", _no_candles)
 
     _run(watcher.run_tick(db))
 
