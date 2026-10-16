@@ -1327,7 +1327,7 @@ def test_alert_path_is_a_true_alias_of_webhook_and_still_accepts_the_legacy_prep
     legacy_payload = {
         "raw_text": "legacy text", "source": "discord_raspberry_pi",
         "symbol": "SOLUSDT", "side": "BUY", "entry_price": 160.0, "soft_stop": 150.0,
-        "tp1": 170.0, "tp2": 180.0, "tp3": None, "timeframe": "8H", "strategy": "2.0.1",   # a real PERMITTED_STRATEGY_TIMEFRAME_CELLS entry
+        "tp1": 170.0, "tp2": 180.0, "tp3": None, "timeframe": "4H", "strategy": "2.0 G2",   # a real PERMITTED_STRATEGY_TIMEFRAME_CELLS entry
         "timestamp": "2026-10-13T14:30:00Z",
     }
     resp = client.post("/api/metasignals/alert", json=legacy_payload, headers={"X-Kabroda-Secret": "test-ms-secret"})

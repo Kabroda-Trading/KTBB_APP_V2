@@ -1174,7 +1174,7 @@ async def _handle_metasignals_ingest(request: Request, body: MetaSignalsAlertReq
         return JSONResponse({"status": "ok", "raw_id": raw_id, "parsed": False})
 
     try:
-        verdict = await metasignals_triage.evaluate_alert(alert)
+        verdict = await metasignals_triage.evaluate_alert(alert, db=db)
     except Exception as e:
         print(f"[METASIGNALS] triage evaluation failed: {e}")
         traceback.print_exc()

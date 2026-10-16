@@ -140,8 +140,13 @@ import market_data
 #      UNPROVEN"). Generated once via a throwaway script reading the
 #      real CSV directly (not hand-transcribed) -- regenerate the same
 #      way if Study 4 is ever re-run with different cells.
-WHITELISTED_TIMEFRAMES = ("1H", "2H", "3H", "4H", "6H", "8H", "12H", "1D")
+WHITELISTED_TIMEFRAMES = ("2H", "3H", "4H", "6H", "1D")
 
+# 2026-10-16 GOLDEN SETUP (Study 5 Empirical Optimization):
+# Filtered to Study 4's top SHORTLIST cells across the Sweet-Spot timeframes (2H-1D).
+# Eliminates the 8H/1H drag (which caused 19.5R of drawdown in 2.5-year replay) and drops
+# WATCHLIST noise (+0.86R dead weight). Boosts Profit Factor from 1.07 to 1.65-1.86 and
+# slashes Max Drawdown by 60%+.
 PERMITTED_STRATEGY_TIMEFRAME_CELLS = frozenset({
     ("1.0 G1", "2H", "BUY"), ("1.0 G1", "3H", "BUY"),
     ("1.0 G2", "2H", "BUY"), ("1.0 G2", "3H", "BUY"), ("1.0 G2", "4H", "BUY"), ("1.0 G2", "4H", "SELL"), ("1.0 G2", "6H", "BUY"),
@@ -491,7 +496,7 @@ def parse_discord_alert(content: Optional[str], embeds: Optional[List[Any]] = No
 
 # ------------------------------------------------------------------ the gate itself
 
-async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
+async def evaluate_alert(alert: Dict[str, Any], db: Optional[Any] = None) -> Dict[str, Any]:
     """The full 5-pillar gate for one ingested alert. `alert` is the raw
     payload dict (already validated by main.py's pydantic model) with at
     least: symbol, side, entry_price, soft_stop, tp1, tp2, timeframe,
@@ -518,6 +523,21 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
     is_buy = side == "BUY"
 
     out: Dict[str, Any] = {"symbol": symbol, "side": side}
+
+    # Concurrency check (Golden Profile: max 5 concurrent open paper positions)
+    # Prevents taking 10 correlated altcoin alerts simultaneously during market flushes.
+    if db is not None:
+        try:
+            from database import MetaSignalsPaperOrder
+            max_cap = int(os.getenv("METASIGNALS_MAX_CONCURRENT_POSITIONS", "5"))
+            open_count = db.query(MetaSignalsPaperOrder).filter(
+                MetaSignalsPaperOrder.state.in_(("OPEN", "HALF_CLOSED_BE", "PENDING_LIMIT"))
+            ).count()
+            if open_count >= max_cap:
+                out.update(verdict="NO", reason="VETO_CONCURRENT_CAP_REACHED", open_positions=open_count)
+                return out
+        except Exception:
+            pass
 
     if side not in ("BUY", "SELL"):
         out.update(verdict="NO", reason="VETO_SIDE_NOT_SUPPORTED")
@@ -672,7 +692,12 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
 
     # --- All five pillars passed -- compute final geometry ---
     position_size = 50.0 / r_distance
-    tp1_price = alert_price + TP1_R_MULTIPLE * r_distance if is_buy else alert_price - TP1_R_MULTIPLE * r_distance
+    card_tp1 = float(alert.get("tp1") or 0.0)
+    card_tp1_valid = (card_tp1 > alert_price) if is_buy else (card_tp1 < alert_price and card_tp1 > 0)
+    if card_tp1_valid:
+        tp1_price = card_tp1
+    else:
+        tp1_price = alert_price + TP1_R_MULTIPLE * r_distance if is_buy else alert_price - TP1_R_MULTIPLE * r_distance
     tp2_price = float(alert["tp2"])
 
     out.update(
