@@ -9084,3 +9084,61 @@ SUMMARY OF WORK ORDER:
    - Add unit tests covering Short lifecycle (stop hit, TP1 fill + BE ratchet, macro veto, comma parsing).
    - Ensure full suite passes with zero regressions on Traveler and Alt Matrix.
 
+## 2026-10-16 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+
+WORK ORDER EXECUTED -- both parts verified against live/real data before
+implementing, not taken on the work order's own word alone. Andy's own
+closing instruction was explicit ("CC needs to double-check all your
+work"), so every claim was re-checked independently first.
+
+P0 COMMA FIX: re-ran `GET /api/metasignals/audit?limit=100` myself before
+touching any code -- 54 real plans, 27 distinct altcoins, exactly 0
+BTCUSDT and 0 ETHUSDT, matching the work order's claim exactly. Root
+cause confirmed by reading the actual regex, not assumed: `\d+(?:\.\d+)?`
+genuinely cannot match a thousands-separator comma. Fixed with a
+comma-tolerant pattern across all five numeric capture groups plus a
+`.replace(",", "")` before every float() cast. Verified against the
+real BTC ($83,125.80) and ETH ($2,534.63) price formats directly.
+
+SHORT-SIDE INTEGRATION: every pillar in `metasignals_triage.py` now
+branches on side (macro inverted, BTC's own trend genuinely not checked
+for a short, RSI band 38-60 vs 40-62, funding veto on deeply negative
+rate, hard stop above entry, extension sign inverted) and
+`metasignals_paper_engine.py`'s fill/P&L/mark-to-market logic is
+direction-aware via one shared sign helper rather than duplicated
+mirrored formulas. Side itself is detected from price geometry first
+(deterministic, per Andy's own directive), falling back to text/emoji
+only when geometry can't disambiguate.
+
+DID NOT hand-transcribe the work order's own 4-example short-cell
+excerpt -- regenerated PERMITTED_STRATEGY_TIMEFRAME_CELLS/KNOWN_TRAP_
+STRATEGY_TIMEFRAME_CELLS directly from the real Study 4 CSV as
+(strategy, timeframe, SIDE) 3-tuples (101 permitted / 47 trap, split
+82/19 and 40/7 BUY/SELL -- exact match to the work order's own claimed
+19/7 SHORT split, independent corroboration). This is NOT cosmetic: the
+real data has cells where the SAME (strategy, timeframe) pair is a LONG
+trap and a validated SHORT at once ("3.0 G3"/"4H" is DO_NOT_TOUCH for
+BUY, SHORTLIST for SELL) -- a 2-tuple key would have silently permitted
+the LONG trap the moment SELL cells were added under the old scheme.
+Verified the regenerated sets against a fresh CSV parse by direct set
+equality, not just a count match.
+
+A real bug caught by this work's own new tests before shipping, not
+flagged by the work order itself: the TP1/TP2 default-fallback formulas
+(used when an alert's own text omits an explicit Target line) were
+single-direction -- always above entry -- regardless of which side was
+actually detected. A SELL alert giving Target 1 but omitting Target 2
+would have gotten a TP2 default on the WRONG side of entry. Fixed by
+deciding side first from explicit values only (never a filled-in
+default), then applying a direction-correct default to whichever
+target was actually missing.
+
+20 new tests (parser comma/short-geometry/TP-default-direction bug
+regression, triage short pillar mirroring including the same-cell
+BUY-trap/SELL-permitted case, full short order lifecycle in the paper
+engine). Full suite: 898 passed, 0 failed, up from 879 -- zero
+regressions in Traveler or Alt Matrix. Real boot check passed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
