@@ -15,12 +15,14 @@ In response to Andy's inquiry regarding momentum-decay exits (analogous to Bitco
 1. **RSI Momentum Decay (C5) Fails on Altcoins:**
    - Exiting on RSI decay (RSI lower than 6 bars ago) caused severe false alarms on altcoins, choking off **63 winning trades** and dropping win rate from **54.5% down to 42.9%**.
    - **Ruling: Do NOT implement RSI decay (C5).**
-2. **BBWP Volatility Compression (`BBWP <= 10.0`) Is a Massive Edge Upgrade:**
-   - Exiting when Bollinger Band Width Percentile reaches **extreme compression (`BBWP <= 10.0`)** before TP1 is hit produced the **highest Net R (+26.87 R)** and **highest Profit Factor (1.20)** across the entire study.
-   - It boosted net profit from **+18.03 R to +26.87 R (+49% gain / +8.84 R)**.
-   - It cut average loss on stopped trades from **-1.04 R down to -0.83 R**.
-   - It saved **35 trades** from full -1.04R hard stops (cutting them at an average of **-0.20R**), generating a **+8.70 R net tradeoff advantage**.
-   - On Shortlist cells, Net R jumped to **+30.15 R (PF 1.37)**.
+2. **BBWP Volatility Compression (`BBWP <= 10.0`) Is a Verified Edge on BOTH Exit Engines:**
+   - **On the Currently Deployed Engine (Card TP1 + Card TP2):**
+     - Deployed Base: **+12.12 R**, PF 1.07, Max DD 20.0 R
+     - Deployed + BBWP <= 10: **+13.71 R**, PF 1.10, Max DD 17.2 R (**+1.59 R / +13% gain**, cuts Max DD by 2.8 R)
+   - **On the 21 EMA Runner Engine (Card TP1 + 21 EMA Runner):**
+     - Runner Base: **+18.03 R**, PF 1.11, Max DD 21.9 R
+     - Runner + BBWP <= 10: **+26.87 R**, PF 1.20, Max DD 19.7 R (**+8.84 R / +49% gain**, cuts Max DD by 2.2 R)
+   - In both cases, BBWP compression before TP1 cuts average loss on stopped trades from **-1.04 R down to -0.83 R**, saving **35 trades** from full hard stops.
 
 ---
 
