@@ -247,6 +247,87 @@ def test_parse_discord_alert_reads_embeds_title_description_and_fields():
     assert parsed["soft_stop"] == pytest.approx(105.40)
 
 
+# ------------------------------------------------- 2026-10-16: comma-price P0 fix + short-side parsing
+# (CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md)
+
+def test_comma_separated_prices_parse_eth_and_btc():
+    # Regression for the real, live-verified bug: GET /api/metasignals/
+    # audit?limit=100 showed 54 real plans across 27 altcoins, exactly
+    # 0 BTCUSDT and 0 ETHUSDT -- both price over $1,000 and format with
+    # a thousands-separator comma ("$83,125.80", "$2,534.63"), which the
+    # old \d+(?:\.\d+)? pattern can't match at all.
+    btc = triage.parse_discord_alert(
+        "BTC | USDT @ $83,125.80 - 4H - 2.0 G2 SL Close Below: 81,500.00 Target 1: 85,000.00 Target 2: 87,000.00")
+    assert btc is not None
+    assert btc["symbol"] == "BTCUSDT"
+    assert btc["entry_price"] == pytest.approx(83125.80)
+    assert btc["soft_stop"] == pytest.approx(81500.00)
+    assert btc["tp1"] == pytest.approx(85000.00)
+    assert btc["tp2"] == pytest.approx(87000.00)
+
+    eth = triage.parse_discord_alert(
+        "ETH | USDT @ $2,534.63 - 4H - 1.0 G3 SL Close Below: 2,450.00 Target 1: 2,650.00")
+    assert eth is not None
+    assert eth["symbol"] == "ETHUSDT"
+    assert eth["entry_price"] == pytest.approx(2534.63)
+    assert eth["soft_stop"] == pytest.approx(2450.00)
+
+
+def test_parse_short_alert_geometry():
+    # Price geometry alone (soft_stop above entry, target below entry)
+    # must deterministically detect SELL -- no emoji/text needed.
+    parsed = triage.parse_discord_alert(
+        "ETH | USDT @ $2,534.63 - 4H - 1.1 G2 SL Close Below: 2,650.00 Target 1: 2,400.00")
+    assert parsed is not None
+    assert parsed["side"] == "SELL"
+    assert parsed["soft_stop"] > parsed["entry_price"]
+    assert parsed["tp1"] < parsed["entry_price"]
+
+
+def test_parse_short_alert_falls_back_to_text_when_geometry_is_ambiguous():
+    # Degenerate case: soft_stop == entry_price, so neither the SELL
+    # nor the BUY geometry branch fires (both require a strict
+    # inequality) -- falls back to the text scan. "Direction: SHORT"
+    # placed AFTER the SL line so it can't be swallowed into the
+    # (separately, already-tested) strategy capture.
+    parsed = triage.parse_discord_alert("SOL | USDT @ $150.00 - 4H - 1.0 G2 SL Close Below: 150.00 Direction: SHORT")
+    assert parsed is not None
+    assert parsed["strategy"] == "1.0 G2"
+    assert parsed["side"] == "SELL"
+
+
+def test_parse_short_alert_tp2_default_is_below_entry_not_above():
+    # Regression (caught by this module's own test suite before
+    # shipping): the TP1/TP2 default-fallback formulas used to be
+    # single-direction (always entry*1.04/1.08, ABOVE entry) regardless
+    # of which side was actually detected. A SELL alert that specifies
+    # Target 1 but omits Target 2 used to get a TP2 default ABOVE entry
+    # -- nonsensical for a short. Side must be decided first, then the
+    # correct-direction default applied.
+    parsed = triage.parse_discord_alert(
+        "ETH | USDT @ $2,534.63 - 4H - 1.1 G2 SL Close Below: 2,650.00 Target 1: 2,400.00")
+    assert parsed["side"] == "SELL"
+    assert parsed["tp1"] == pytest.approx(2400.00)   # explicit, unaffected
+    assert parsed["tp2"] < parsed["entry_price"]     # default -- must still be below entry
+
+
+def test_parse_short_alert_with_no_explicit_targets_at_all_defaults_below_entry():
+    parsed = triage.parse_discord_alert("SOL | USDT @ $150.00 - 4H - 1.0 G2 SL Close Below: 160.00")
+    assert parsed["side"] == "SELL"
+    assert parsed["tp1"] < parsed["entry_price"]
+    assert parsed["tp2"] < parsed["entry_price"]
+    assert parsed["tp2"] < parsed["tp1"]   # TP2 further than TP1 in the short's favorable direction
+
+
+def test_parse_buy_alert_defaults_still_above_entry_regression():
+    # Confirms the BUY path's own defaults weren't disturbed by adding
+    # the SELL-side default branch.
+    parsed = triage.parse_discord_alert("SOL | USDT @ $150.00 - 4H - 1.0 G2 SL Close Below: 140.00")
+    assert parsed["side"] == "BUY"
+    assert parsed["tp1"] > parsed["entry_price"]
+    assert parsed["tp2"] > parsed["entry_price"]
+
+
 # ============================================================== pure math
 
 def test_rsi_all_gains_is_100():
@@ -391,9 +472,12 @@ def test_evaluate_alert_permits_a_real_shortlisted_cell(monkeypatch):
     assert result["reason"] != "VETO_STRATEGY_TRAP_OR_UNPROVEN"
 
 
-def test_evaluate_alert_vetoes_short_side(monkeypatch):
+def test_evaluate_alert_vetoes_genuinely_malformed_side(monkeypatch):
+    # 2026-10-16: SELL is now a real, supported path (short-side work
+    # order) -- this test used to assert SELL itself was rejected. Only
+    # a value outside {BUY, SELL} should still fail closed.
     _patch_market(monkeypatch)
-    alert = _good_alert(side="SELL")
+    alert = _good_alert(side="HOLD")
     result = _run(triage.evaluate_alert(alert))
     assert result["reason"] == "VETO_SIDE_NOT_SUPPORTED"
 
@@ -497,6 +581,99 @@ def test_evaluate_alert_asset_macro_falls_back_to_ema55_without_enough_history_f
     assert result["verdict"] == "YES"   # uptrend -> close > ema55 -> macro pass via fallback
 
 
+# ------------------------------------------------- 2026-10-16: short-side pillar mirroring
+# (CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md section 3C)
+
+def _good_short_alert(**overrides):
+    # ("3.0 G3", "4H", "SELL") is a real PERMITTED_STRATEGY_TIMEFRAME_
+    # CELLS entry (confirmed against the Study 4 CSV directly) -- and
+    # deliberately the SAME (strategy, timeframe) pair that's a known
+    # LONG trap ("3.0 G3"/"4H"/BUY is DO_NOT_TOUCH), proving the 3-tuple
+    # key actually distinguishes the two.
+    base = dict(
+        symbol="SOLUSDT", side="SELL", entry_price=150.0, soft_stop=160.0,
+        tp1=140.0, tp2=130.0, timeframe="4H", strategy="3.0 G3",
+    )
+    base.update(overrides)
+    return base
+
+
+def test_triage_short_macro_pass_and_veto(monkeypatch):
+    # PASS: asset in a confirmed downtrend -- BTC's own trend (default
+    # fixture: uptrend) is NOT checked at all for a short.
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_down(), mark_price=150.0)
+    alert = _good_short_alert()
+    result = _run(triage.evaluate_alert(alert))
+    assert result["reason"] != "VETO_MACRO_ABOVE_200SMA"
+    assert result["asset_daily_close"] < result["asset_sma200"]
+
+    # VETO: asset in an uptrend -- wrong side of the market for a short.
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_up(), mark_price=150.0)
+    result2 = _run(triage.evaluate_alert(alert))
+    assert result2["reason"] == "VETO_MACRO_ABOVE_200SMA"
+    assert result2["asset_daily_close"] > result2["asset_sma200"]
+
+
+def test_triage_short_ignores_btc_trend_entirely(monkeypatch):
+    # Asset downtrend + BTC ALSO in a downtrend -- still passes (BTC's
+    # own direction never binds for a short, per the work order's own
+    # explicit note).
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_down(),
+                   candles_daily_btc=_candles_daily_down(start=70000.0, step=50.0), mark_price=150.0)
+    result = _run(triage.evaluate_alert(_good_short_alert()))
+    assert result["reason"] != "VETO_MACRO_ABOVE_200SMA"
+
+
+def test_triage_short_rsi_band_is_38_to_60_not_the_long_40_to_62_band(monkeypatch):
+    overbought_4h = [
+        {"time": 1_000_000 + i * 14400, "open": 100 + i, "high": 100 + i + 0.5, "low": 100 + i - 0.5, "close": 100.0 + i}
+        for i in range(30)
+    ]
+    _patch_market(monkeypatch, candles_4h=overbought_4h, candles_daily_asset=_candles_daily_down(), mark_price=overbought_4h[-1]["close"])
+    alert = _good_short_alert(entry_price=overbought_4h[-1]["close"], soft_stop=overbought_4h[-1]["close"] + 10, tp1=overbought_4h[-1]["close"] - 10)
+    result = _run(triage.evaluate_alert(alert))
+    assert result["reason"] == "VETO_MOMENTUM_OVERBOUGHT"
+
+
+def test_triage_short_funding_veto_is_deeply_negative_not_positive(monkeypatch):
+    # SELL vetoes on deeply NEGATIVE funding (shorts overcrowded,
+    # paying longs) -- the mirror image of BUY's positive-funding veto.
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_down(), mark_price=150.0, funding_rate="-0.0010")
+    result = _run(triage.evaluate_alert(_good_short_alert()))
+    assert result["reason"] == "VETO_FUNDING_OVERCROWDED"
+
+    # Mildly negative (above the -0.04% threshold) does NOT veto.
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_down(), mark_price=150.0, funding_rate="-0.0001")
+    result2 = _run(triage.evaluate_alert(_good_short_alert()))
+    assert result2["reason"] != "VETO_FUNDING_OVERCROWDED"
+
+
+def test_triage_short_full_approval_geometry(monkeypatch):
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_down(), mark_price=150.0)
+    alert = _good_short_alert()
+    result = _run(triage.evaluate_alert(alert))
+    assert result["verdict"] == "YES", result.get("reason")
+    assert result["hard_stop"] > alert["entry_price"]          # stop ABOVE entry for a short
+    assert result["tp1_price"] < alert["entry_price"]          # TP1 BELOW entry for a short
+    assert result["position_size"] == pytest.approx(50.0 / (result["hard_stop"] - alert["entry_price"]))
+
+
+def test_triage_short_strategy_cell_is_independent_of_the_same_long_cell(monkeypatch):
+    # ("3.0 G3", "4H") is DO_NOT_TOUCH for BUY but SHORTLIST for SELL --
+    # the exact real-data asymmetry the 3-tuple key exists to capture.
+    assert ("3.0 G3", "4H", "BUY") in triage.KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS
+    assert ("3.0 G3", "4H", "SELL") in triage.PERMITTED_STRATEGY_TIMEFRAME_CELLS
+
+    _patch_market(monkeypatch, candles_daily_asset=_candles_daily_down(), mark_price=150.0)
+    short_result = _run(triage.evaluate_alert(_good_short_alert()))
+    assert short_result["strategy_cell_status"] == "PERMITTED"
+
+    _patch_market(monkeypatch, mark_price=160.0)   # default fixture -- uptrend, good for a BUY
+    long_result = _run(triage.evaluate_alert(_good_alert(strategy="3.0 G3", timeframe="4H", entry_price=160.0, soft_stop=150.0)))
+    assert long_result["strategy_cell_status"] == "TRAP"
+    assert long_result["reason"] == "VETO_STRATEGY_TRAP_OR_UNPROVEN"
+
+
 # ============================================================== paper engine (real DB)
 
 def _clean_db_files():
@@ -540,10 +717,14 @@ def db():
 
 
 def _approved_plan(db, entry_mode="MARKET", alert_price=160.0, live_price_at_alert=160.0,
-                    hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0, symbol="SOLUSDT"):
+                    hard_stop=150.0, position_size=5.0, tp1_price=170.0, tp2_price=180.0,
+                    symbol="SOLUSDT", side="BUY"):
+    # alert_soft_stop is audit/display only -- metasignals_paper_engine.py
+    # never reads it -- but kept geometrically sane for either side.
+    alert_soft_stop = hard_stop + 1.0 if side == "BUY" else hard_stop - 1.0
     plan = MetaSignalsPlan(
-        symbol=symbol, side="BUY", strategy="2.0.1", timeframe="6H",
-        alert_price=alert_price, alert_soft_stop=hard_stop + 1.0,
+        symbol=symbol, side=side, strategy="2.0.1", timeframe="6H",
+        alert_price=alert_price, alert_soft_stop=alert_soft_stop,
         alert_tp1=tp1_price, alert_tp2=tp2_price,
         live_price_at_alert=live_price_at_alert, entry_mode=entry_mode,
         hard_stop=hard_stop, risk_usd=50.0, position_size=position_size,
@@ -720,6 +901,116 @@ def test_tp2_hit_closes_full_position_with_maker_fee(db):
     assert account.winning_trades == 1
     ledger_exit = db.query(MetaSignalsPaperLedger).filter_by(order_id=order.id, event_type="EXIT").first()
     assert ledger_exit is not None
+
+
+# ------------------------------------------------- 2026-10-16: SHORT order lifecycle
+# (CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md section 3D)
+
+def test_short_order_opens_with_stop_above_and_tp_below_entry(db):
+    # hard_stop=160 is ABOVE entry=150 and tp1=140 is BELOW -- real
+    # short geometry, mirroring the long fixtures' own shape.
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=5.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    assert order.side == "SELL"
+    assert order.state == "OPEN"
+    assert order.current_stop == pytest.approx(160.0)
+    assert order.tp1_price == pytest.approx(140.0)
+
+
+def test_short_order_tp1_fill_and_breakeven_ratchet(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=10.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    cash_after_entry = account.cash_balance
+
+    # Price must FALL to 140 or below to hit a short's TP1 (mirror of a
+    # long's "price must rise" condition).
+    event = engine.advance_order(db, order, mark_price=139.0)
+    assert event == "TP1_FILL"
+    assert order.state == "HALF_CLOSED_BE"
+    assert order.current_stop == pytest.approx(150.0)   # ratcheted DOWN to entry (breakeven) for a short
+    assert order.remaining_qty == pytest.approx(5.0)
+
+    half_qty = 5.0
+    expected_leg_pnl = half_qty * (150.0 - 140.0)   # price DROP is profit for a short
+    expected_fee = engine.MAKER_FEE_RATE * half_qty * 140.0
+    assert order.realized_pnl == pytest.approx(expected_leg_pnl)
+    assert account.cash_balance == pytest.approx(cash_after_entry + expected_leg_pnl - expected_fee)
+
+
+def test_short_order_stop_hit(db):
+    # A short's stop sits ABOVE entry -- hit when price RISES to it,
+    # realizing a loss (price went up against the short).
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=5.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+
+    event = engine.advance_order(db, order, mark_price=161.0)
+    assert event == "CLOSED_STOP"
+    assert order.state == "CLOSED_STOP"
+
+    expected_leg_pnl = 5.0 * (150.0 - 160.0)   # -$50, same magnitude as the long's own worked example
+    assert order.realized_pnl == pytest.approx(expected_leg_pnl)
+    assert account.losing_trades == 1
+    assert account.total_realized_pnl == pytest.approx(order.realized_pnl)
+
+
+def test_short_order_stop_hit_after_breakeven_ratchet_is_near_zero(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=10.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    engine.advance_order(db, order, mark_price=139.0)   # TP1 -> ratchets stop DOWN to entry (150)
+    assert order.current_stop == pytest.approx(150.0)
+
+    event = engine.advance_order(db, order, mark_price=151.0)   # BE stop touched (price rose back to entry)
+    assert event == "CLOSED_STOP"
+    tp1_leg_pnl = 5.0 * (150.0 - 140.0)
+    assert order.realized_pnl == pytest.approx(tp1_leg_pnl)   # remaining leg's own P&L is ~0 at breakeven
+
+
+def test_short_order_tp2_hit_closes_full_position(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=10.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    engine.advance_order(db, order, mark_price=139.0)   # TP1
+    event = engine.advance_order(db, order, mark_price=129.0)   # TP2 -- price fell further
+    assert event == "CLOSED_TP2"
+    assert order.remaining_qty == pytest.approx(0.0)
+
+    account = db.query(MetaSignalsPaperAccount).filter_by(id=order.account_id).first()
+    assert account.winning_trades == 1
+
+
+def test_short_order_pending_limit_fills_on_price_rising_back_to_it(db):
+    # For a short converted to a resting LIMIT (price already extended
+    # down past the alert price), the fill condition is price RISING
+    # back UP to the limit -- the mirror of a long's "price falling
+    # back down" condition.
+    plan = _approved_plan(db, entry_mode="LIMIT", alert_price=150.0, live_price_at_alert=140.0,
+                           hard_stop=160.0, position_size=5.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    assert order.state == "PENDING_LIMIT"
+    assert order.entry_price == pytest.approx(150.0)
+
+    assert engine.advance_order(db, order, mark_price=145.0) is None   # still below the limit -- no fill
+    assert order.state == "PENDING_LIMIT"
+
+    event = engine.advance_order(db, order, mark_price=151.0)   # rose back up to the resting limit
+    assert event == "ENTRY_FILL"
+    assert order.state == "OPEN"
+
+
+def test_short_order_unrealized_pnl_increases_as_price_falls(db):
+    plan = _approved_plan(db, entry_mode="MARKET", alert_price=150.0, live_price_at_alert=150.0,
+                           hard_stop=160.0, position_size=5.0, tp1_price=140.0, tp2_price=130.0, side="SELL")
+    order = engine.open_paper_trade(db, plan)
+    unrealized_at_144 = engine.mark_unrealized(order, 144.0)
+    unrealized_at_140 = engine.mark_unrealized(order, 140.0)
+    assert unrealized_at_144 > 0      # price dropped below entry -- profit for a short
+    assert unrealized_at_140 > unrealized_at_144   # further drop -- more profit
 
 
 def test_stop_checked_before_tp1_when_both_conditions_are_met_in_one_tick(db):

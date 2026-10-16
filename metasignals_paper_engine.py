@@ -56,6 +56,17 @@
 # resting TP exit. TP1/TP2 closes (both explicit limit fills) pay MAKER.
 # A STOP close (market/stop-market exit) pays TAKER, matching section 4B
 # ("Deducts Taker Fee (0.06%)") explicitly for the stop-hit case too.
+#
+# DIRECTION-AWARE as of 2026-10-16 (CC_WORK_ORDER_METASIGNALS_SHORTS_
+# AND_MAJORS.md section 3D). For a SELL order the geometry is fully
+# mirrored: hard_stop/current_stop sits ABOVE entry, tp1_price/tp2_price
+# sit BELOW entry, a stop hit is `mark_price >= current_stop` (not
+# `<=`), a TP hit is `mark_price <= tp_price` (not `>=`), and P&L is
+# `qty * (entry_price - exit_price)` (price DROP is profit). Every
+# comparison and P&L formula below multiplies by `_dir(order)` (+1 for
+# BUY, -1 for SELL) rather than duplicating the BUY logic with signs
+# hand-flipped -- one formula, same for both directions, instead of two
+# parallel code paths that could drift.
 # ==============================================================================
 
 from __future__ import annotations
@@ -72,6 +83,13 @@ MAKER_FEE_RATE = 0.0002
 DEFAULT_ACCOUNT_NAME = "DEFAULT_PAPER_DESK"
 
 _OPEN_STATES = ("OPEN", "HALF_CLOSED_BE")
+
+
+def _dir(order: MetaSignalsPaperOrder) -> float:
+    """+1.0 for BUY, -1.0 for SELL -- the one place the direction sign
+    lives, so every P&L/comparison formula below reads identically for
+    both sides instead of two hand-mirrored copies."""
+    return 1.0 if order.side == "BUY" else -1.0
 
 
 def _write_ledger(
@@ -112,7 +130,7 @@ def open_paper_trade(db: Session, plan: MetaSignalsPlan) -> MetaSignalsPaperOrde
 
     target_price = plan.live_price_at_alert if plan.entry_mode == "MARKET" else plan.alert_price
     order = MetaSignalsPaperOrder(
-        plan_id=plan.id, account_id=account.id, symbol=plan.symbol, side="BUY",
+        plan_id=plan.id, account_id=account.id, symbol=plan.symbol, side=plan.side,
         entry_mode=plan.entry_mode, entry_price=target_price,
         hard_stop_initial=plan.hard_stop, current_stop=plan.hard_stop,
         tp1_price=plan.tp1_price, tp2_price=plan.tp2_price,
@@ -164,26 +182,40 @@ def advance_order(db: Session, order: MetaSignalsPaperOrder, mark_price: float, 
     if now is None:
         now = datetime.datetime.utcnow()
 
+    # Direction-aware as of 2026-10-16 (CC_WORK_ORDER_METASIGNALS_
+    # SHORTS_AND_MAJORS.md section 3D) -- a SELL's stop sits ABOVE
+    # entry (hit on a RISE) and its TPs sit BELOW entry (hit on a
+    # FALL), the mirror image of BUY's own comparisons.
+    is_buy = order.side == "BUY"
+
     if order.state == "PENDING_LIMIT":
-        if mark_price <= order.entry_price:
+        # The resting limit fills when price retraces back to it --
+        # DOWN to the limit for a BUY (it was extended upward), UP to
+        # the limit for a SELL (it was extended downward).
+        limit_touched = (mark_price <= order.entry_price) if is_buy else (mark_price >= order.entry_price)
+        if limit_touched:
             _fill_entry(db, account, order, now)
             return "ENTRY_FILL"
         return None
 
     if order.state == "OPEN":
-        if mark_price <= order.current_stop:
+        stop_hit = (mark_price <= order.current_stop) if is_buy else (mark_price >= order.current_stop)
+        if stop_hit:
             _close_full(db, account, order, order.current_stop, "STOP", TAKER_FEE_RATE, now)
             return "CLOSED_STOP"
-        if mark_price >= order.tp1_price:
+        tp1_hit = (mark_price >= order.tp1_price) if is_buy else (mark_price <= order.tp1_price)
+        if tp1_hit:
             _fill_tp1(db, account, order, now)
             return "TP1_FILL"
         return None
 
     if order.state == "HALF_CLOSED_BE":
-        if mark_price <= order.current_stop:
+        stop_hit = (mark_price <= order.current_stop) if is_buy else (mark_price >= order.current_stop)
+        if stop_hit:
             _close_full(db, account, order, order.current_stop, "STOP", TAKER_FEE_RATE, now)
             return "CLOSED_STOP"
-        if mark_price >= order.tp2_price:
+        tp2_hit = (mark_price >= order.tp2_price) if is_buy else (mark_price <= order.tp2_price)
+        if tp2_hit:
             _close_full(db, account, order, order.tp2_price, "TP2", MAKER_FEE_RATE, now)
             return "CLOSED_TP2"
         return None
@@ -199,7 +231,7 @@ def _fill_tp1(db: Session, account: MetaSignalsPaperAccount, order: MetaSignalsP
     off" framed against the original position). Ratchets the stop on
     the remainder to breakeven (entry_price) -- spec section 4A.4."""
     half_qty = order.initial_qty * 0.5
-    leg_pnl = half_qty * (order.tp1_price - order.entry_price)
+    leg_pnl = half_qty * (order.tp1_price - order.entry_price) * _dir(order)
     fee = MAKER_FEE_RATE * half_qty * order.tp1_price
 
     account.cash_balance += leg_pnl - fee
@@ -217,7 +249,7 @@ def _close_full(
     db: Session, account: MetaSignalsPaperAccount, order: MetaSignalsPaperOrder,
     exit_price: float, reason: str, fee_rate: float, now: datetime.datetime,
 ) -> None:
-    leg_pnl = order.remaining_qty * (exit_price - order.entry_price)
+    leg_pnl = order.remaining_qty * (exit_price - order.entry_price) * _dir(order)
     fee = fee_rate * order.remaining_qty * exit_price
 
     account.cash_balance += leg_pnl - fee
@@ -235,7 +267,7 @@ def _close_full(
 
 def mark_unrealized(order: MetaSignalsPaperOrder, mark_price: float) -> float:
     if order.state in _OPEN_STATES and order.entry_price is not None:
-        return order.remaining_qty * (mark_price - order.entry_price)
+        return order.remaining_qty * (mark_price - order.entry_price) * _dir(order)
     return 0.0
 
 

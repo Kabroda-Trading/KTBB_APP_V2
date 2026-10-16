@@ -22,23 +22,18 @@
 #
 # SCOPE DECISIONS made resolving real ambiguity in the spec (flagged here,
 # not silently picked, per this project's standing discipline):
-#   1. LONG-ONLY. The spec's every formula, example, and worked number
-#      (macro "not into bear flushes," RSI floor/ceiling framed around a
-#      squeeze, stop below entry, TP above entry) describes a long trade,
-#      and the Pi forwarder hardcodes side="BUY". A SHORT alert is vetoed
-#      outright (VETO_SIDE_NOT_SUPPORTED) rather than silently run through
-#      long-only math in the wrong direction -- a short would need its own
-#      mirrored formulas this spec never specified.
-#      STILL TRUE as of the 2026-10-13 pillar-5 rewrite below, flagged
-#      explicitly because the spec's own pillar-5 text now names SHORT-
-#      side monitored channels (mafioso-short-mtf/htf) -- that is a
-#      statement about what the Pi forwards, not a change to pillars 1-4
-#      (macro direction, extension sign, hard-stop side, all still
-#      long-only math). PERMITTED_STRATEGY_TIMEFRAME_CELLS below is
-#      built from the Study 4 CSV's LONG rows only for exactly this
-#      reason. Real short-side support needs its own mirrored pillars
-#      1/3/geometry, not assumed here -- a SHORT alert still vetoes at
-#      the side check before ever reaching pillar 5's cell lookup.
+#   1. LONG-ONLY -- SUPERSEDED 2026-10-16. The spec's every original
+#      formula described a long trade and the Pi forwarder used to
+#      hardcode side="BUY"; a SHORT alert was vetoed outright. Andy's
+#      2026-10-16 directive (`CC_WORK_ORDER_METASIGNALS_SHORTS_AND_
+#      MAJORS.md`, repo root) authorized full symmetrical short-side
+#      integration, grounded in Study 4's own 26 real SHORT cells (19
+#      permitted, 7 trap, tf>=60m) -- see decision 4 below for the full
+#      cell-generation detail. Every pillar below now branches on side;
+#      see each pillar's own comment for its mirrored SELL-side formula.
+#      A side outside {BUY, SELL} still fails closed (VETO_SIDE_NOT_
+#      SUPPORTED) -- real, malformed-data protection, not a stand-in for
+#      "shorts aren't supported" any more.
 #   2. Pillar 1's asset leg ("Daily Close > Daily 200 SMA (or Daily 55
 #      EMA)") is read as: use the 200 SMA when the asset has enough daily
 #      history to compute one; fall back to the 55 EMA only when it
@@ -57,11 +52,22 @@
 #      the live triage log, not a relayed claim -- a relayed report that
 #      same day had only flagged the timeframe and incorrectly claimed
 #      SOL itself needed whitelisting). SUPERSEDED same day, later, by
-#      the full Study 4 cell-level rewrite below (see the new block
-#      above PERMITTED_STRATEGY_TIMEFRAME_CELLS for the complete
-#      reasoning) -- a flat strategy-name whitelist can't express that
-#      the same strategy is validated at one timeframe and a known trap
-#      at another, which the real data shows happening repeatedly.
+#      a full Study 4 cell-level rewrite (LONG-only, 2-tuple keys) --
+#      a flat strategy-name whitelist can't express that the same
+#      strategy is validated at one timeframe and a known trap at
+#      another, which the real data shows happening repeatedly.
+#      SUPERSEDED AGAIN 2026-10-16 (short-side work order): re-keyed
+#      from (strategy, timeframe) to (strategy, timeframe, side) 3-
+#      tuples -- not cosmetic. The real data has cells where the SAME
+#      (strategy, timeframe) is a LONG trap but a validated SHORT (e.g.
+#      "3.0 G3"/"4H" is DO_NOT_TOUCH for BUY, SHORTLIST for SELL) -- a
+#      2-tuple key would have silently permitted the LONG trap once
+#      SELL cells were added under the old scheme. Regenerated directly
+#      from the same CSV via the same throwaway-script method, this
+#      time keeping both directions: 101 permitted (82 BUY + 19 SELL),
+#      47 trap (40 BUY + 7 SELL), tf>=60m. Counts cross-checked against
+#      the work order's own claimed 19/7 SHORT split before trusting it
+#      -- exact match.
 #   5. "Live Bitunix price" for the extension check and the market-entry
 #      fill reference is markPrice from the SAME fetch_public_funding_rate
 #      call already used for pillar 4 -- one network call does double
@@ -123,68 +129,76 @@ import market_data
 #      something Study 4's per-cell stats override.
 #   3. STRATEGY CELLS: PERMITTED_STRATEGY_TIMEFRAME_CELLS /
 #      KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS below are generated directly
-#      from the CSV's own LONG-direction, timeframe>=60 rows (this
-#      system is long-only, see decision 1 -- SHORT rows in the CSV are
-#      not yet relevant to anything this gate evaluates). PERMITTED =
+#      from the CSV's own timeframe>=60 rows, BOTH directions (see
+#      decision 4 for the 2026-10-16 re-key to 3-tuples). PERMITTED =
 #      SHORTLIST union WATCHLIST status (the spec's own "Shortlist &
 #      Watchlist tiers" framing for what's allowed through); TRAP =
-#      DO_NOT_TOUCH. A (strategy, timeframe) pair appearing in NEITHER
-#      set was never in Study 4's 159-cell universe at all -- treated as
-#      unproven, not silently permitted, matching the veto reason's own
-#      name (VETO_STRATEGY_TRAP_OR_UNPROVEN, "...OR UNPROVEN").
-#      Generated once via a throwaway script reading the real CSV
-#      directly (not hand-transcribed) -- regenerate the same way if
-#      Study 4 is ever re-run with different cells.
+#      DO_NOT_TOUCH. A (strategy, timeframe, side) triple appearing in
+#      NEITHER set was never in Study 4's 159-cell universe at all --
+#      treated as unproven, not silently permitted, matching the veto
+#      reason's own name (VETO_STRATEGY_TRAP_OR_UNPROVEN, "...OR
+#      UNPROVEN"). Generated once via a throwaway script reading the
+#      real CSV directly (not hand-transcribed) -- regenerate the same
+#      way if Study 4 is ever re-run with different cells.
 WHITELISTED_TIMEFRAMES = ("1H", "2H", "3H", "4H", "6H", "8H", "12H", "1D")
 
 PERMITTED_STRATEGY_TIMEFRAME_CELLS = frozenset({
-    ("1.0 G1", "2H"), ("1.0 G1", "3H"),
-    ("1.0 G2", "2H"), ("1.0 G2", "3H"), ("1.0 G2", "4H"), ("1.0 G2", "6H"),
-    ("1.0 G3", "1H"), ("1.0 G3", "2H"), ("1.0 G3", "3H"), ("1.0 G3", "4H"), ("1.0 G3", "6H"),
-    ("1.0 G4", "1H"), ("1.0 G4", "2H"), ("1.0 G4", "3H"), ("1.0 G4", "4H"),
-    ("1.0.1", "12H"), ("1.0.2", "1D"),
-    ("1.1 G2", "1H"), ("1.1 G2", "2H"), ("1.1 G2", "3H"), ("1.1 G2", "4H"),
-    ("1.1 G3", "1H"), ("1.1 G3", "2H"), ("1.1 G3", "4H"),
-    ("1.1 G4", "4H"), ("1.1.1", "1D"), ("1.1.1", "8H"), ("1.1.2", "1D"),
-    ("1.2 G2", "3H"), ("1.2 G3", "2H"),
-    ("1.3 G1", "2H"),
-    ("1.3 G2", "2H"), ("1.3 G2", "3H"), ("1.3 G2", "4H"), ("1.3 G2", "6H"),
-    ("1.3 G3", "2H"), ("1.3 G3", "3H"), ("1.3 G3", "4H"), ("1.3 G3", "6H"),
-    ("1.3 G4", "2H"), ("1.3 G4", "3H"), ("1.3 G4", "4H"), ("1.3 G4", "6H"),
-    ("2.0 G1", "3H"), ("2.0 G1", "4H"),
-    ("2.0 G2", "2H"), ("2.0 G2", "3H"), ("2.0 G2", "4H"), ("2.0 G2", "6H"),
-    ("2.0 G3", "4H"), ("2.0 G3", "6H"),
-    ("2.0.1", "1D"), ("2.0.1", "8H"),
-    ("2.1 G2", "3H"), ("2.1 G2", "4H"), ("2.1 G2", "6H"),
-    ("2.1 G3", "4H"), ("2.1 G4", "3H"), ("2.1 G4", "4H"),
-    ("3.0 G2", "4H"), ("3.0 G2", "6H"),
-    ("3.0 G3", "3H"), ("3.0 G3", "6H"),
-    ("3.0 G4", "3H"), ("3.0 G4", "4H"), ("3.0 G4", "6H"),
-    ("3.0.1", "1D"), ("3.0.1", "8H"), ("3.0.2", "8H"),
-    ("3.1 G2", "2H"), ("3.1 G3", "2H"), ("3.1 G4", "2H"),
-    ("4.0 G2", "3H"), ("4.0 G2", "4H"), ("4.0 G2", "6H"),
-    ("4.0 G3", "3H"), ("4.0 G3", "6H"),
-    ("4.0 G4", "4H"), ("4.0 G4", "6H"),
-    ("4.1 G2", "4H"), ("4.1 G2", "6H"), ("4.1 G4", "4H"),
-})   # 82 cells -- SHORTLIST + WATCHLIST, LONG direction, timeframe >= 60m
+    ("1.0 G1", "2H", "BUY"), ("1.0 G1", "3H", "BUY"),
+    ("1.0 G2", "2H", "BUY"), ("1.0 G2", "3H", "BUY"), ("1.0 G2", "4H", "BUY"), ("1.0 G2", "4H", "SELL"), ("1.0 G2", "6H", "BUY"),
+    ("1.0 G3", "1H", "BUY"), ("1.0 G3", "2H", "BUY"), ("1.0 G3", "3H", "BUY"), ("1.0 G3", "4H", "BUY"), ("1.0 G3", "4H", "SELL"), ("1.0 G3", "6H", "BUY"),
+    ("1.0 G4", "1H", "BUY"), ("1.0 G4", "2H", "BUY"), ("1.0 G4", "3H", "BUY"), ("1.0 G4", "4H", "BUY"), ("1.0 G4", "4H", "SELL"),
+    ("1.0.1", "12H", "BUY"), ("1.0.1", "1H", "SELL"), ("1.0.1", "2H", "SELL"),
+    ("1.0.2", "1D", "BUY"), ("1.0.2", "2H", "SELL"),
+    ("1.1 G2", "1H", "BUY"), ("1.1 G2", "2H", "BUY"), ("1.1 G2", "3H", "BUY"), ("1.1 G2", "4H", "BUY"), ("1.1 G2", "4H", "SELL"),
+    ("1.1 G3", "1H", "BUY"), ("1.1 G3", "2H", "BUY"), ("1.1 G3", "4H", "BUY"), ("1.1 G3", "4H", "SELL"),
+    ("1.1 G4", "4H", "BUY"), ("1.1 G4", "4H", "SELL"),
+    ("1.1.1", "1D", "BUY"), ("1.1.1", "1H", "SELL"), ("1.1.1", "8H", "BUY"),
+    ("1.1.2", "1D", "BUY"), ("1.1.2", "2H", "SELL"),
+    ("1.2 G2", "3H", "BUY"), ("1.2 G3", "2H", "BUY"),
+    ("1.3 G1", "2H", "BUY"),
+    ("1.3 G2", "2H", "BUY"), ("1.3 G2", "3H", "BUY"), ("1.3 G2", "4H", "BUY"), ("1.3 G2", "6H", "BUY"),
+    ("1.3 G3", "2H", "BUY"), ("1.3 G3", "3H", "BUY"), ("1.3 G3", "4H", "BUY"), ("1.3 G3", "6H", "BUY"),
+    ("1.3 G4", "2H", "BUY"), ("1.3 G4", "3H", "BUY"), ("1.3 G4", "4H", "BUY"), ("1.3 G4", "6H", "BUY"),
+    ("2.0 G1", "3H", "BUY"), ("2.0 G1", "4H", "BUY"),
+    ("2.0 G2", "2H", "BUY"), ("2.0 G2", "3H", "BUY"), ("2.0 G2", "4H", "BUY"), ("2.0 G2", "4H", "SELL"), ("2.0 G2", "6H", "BUY"),
+    ("2.0 G3", "4H", "BUY"), ("2.0 G3", "6H", "BUY"),
+    ("2.0 G4", "4H", "SELL"),
+    ("2.0.1", "1D", "BUY"), ("2.0.1", "8H", "BUY"),
+    ("2.1 G2", "3H", "BUY"), ("2.1 G2", "4H", "BUY"), ("2.1 G2", "6H", "BUY"),
+    ("2.1 G3", "4H", "BUY"), ("2.1 G4", "3H", "BUY"), ("2.1 G4", "4H", "BUY"),
+    ("3.0 G2", "4H", "BUY"), ("3.0 G2", "4H", "SELL"), ("3.0 G2", "6H", "BUY"),
+    ("3.0 G3", "3H", "BUY"), ("3.0 G3", "4H", "SELL"), ("3.0 G3", "6H", "BUY"),
+    ("3.0 G4", "3H", "BUY"), ("3.0 G4", "4H", "BUY"), ("3.0 G4", "4H", "SELL"), ("3.0 G4", "6H", "BUY"),
+    ("3.0.1", "1D", "BUY"), ("3.0.1", "8H", "BUY"), ("3.0.2", "8H", "BUY"),
+    ("3.1 G2", "2H", "BUY"), ("3.1 G2", "4H", "SELL"),
+    ("3.1 G3", "2H", "BUY"), ("3.1 G3", "4H", "SELL"),
+    ("3.1 G4", "2H", "BUY"), ("3.1 G4", "4H", "SELL"),
+    ("4.0 G2", "3H", "BUY"), ("4.0 G2", "4H", "BUY"), ("4.0 G2", "6H", "BUY"),
+    ("4.0 G3", "3H", "BUY"), ("4.0 G3", "6H", "BUY"),
+    ("4.0 G4", "4H", "BUY"), ("4.0 G4", "6H", "BUY"),
+    ("4.1 G2", "4H", "BUY"), ("4.1 G2", "6H", "BUY"), ("4.1 G4", "4H", "BUY"),
+})   # 101 cells -- SHORTLIST + WATCHLIST, both directions, timeframe >= 60m (82 BUY + 19 SELL)
 
 KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS = frozenset({
-    ("1.0 G1", "1H"), ("1.0 G1", "4H"), ("1.0 G1", "6H"),
-    ("1.0 G2", "1H"), ("1.0 G4", "6H"),
-    ("1.0.1", "1D"), ("1.0.1", "8H"), ("1.0.2", "8H"),
-    ("1.1 G1", "1H"), ("1.1 G1", "2H"), ("1.1 G1", "3H"), ("1.1 G1", "4H"),
-    ("1.1.2", "8H"), ("1.2 G1", "2H"),
-    ("1.3 G1", "3H"), ("1.3 G1", "6H"),
-    ("1.4 G2", "1H"),
-    ("2.0 G1", "6H"), ("2.0 G3", "3H"), ("2.0 G4", "3H"), ("2.0 G4", "4H"),
-    ("2.0.2", "1D"), ("2.0.2", "8H"),
-    ("2.1 G1", "3H"), ("2.1 G1", "4H"), ("2.1 G3", "3H"),
-    ("3.0 G1", "3H"), ("3.0 G1", "4H"), ("3.0 G1", "6H"),
-    ("3.0 G3", "4H"), ("3.0.2", "1D"),
-    ("3.1 G1", "2H"), ("3.1 G2", "4H"), ("3.1 G3", "4H"),
-    ("4.0 G1", "4H"), ("4.0 G1", "6H"), ("4.0 G3", "4H"),
-    ("4.1 G1", "4H"), ("4.1 G1", "6H"), ("4.1 G3", "4H"),
-})   # 40 cells -- DO_NOT_TOUCH, LONG direction, timeframe >= 60m
+    ("1.0 G1", "1H", "BUY"), ("1.0 G1", "4H", "BUY"), ("1.0 G1", "4H", "SELL"), ("1.0 G1", "6H", "BUY"),
+    ("1.0 G2", "1H", "BUY"), ("1.0 G4", "6H", "BUY"),
+    ("1.0.1", "1D", "BUY"), ("1.0.1", "8H", "BUY"), ("1.0.2", "8H", "BUY"),
+    ("1.1 G1", "1H", "BUY"), ("1.1 G1", "2H", "BUY"), ("1.1 G1", "3H", "BUY"), ("1.1 G1", "4H", "BUY"), ("1.1 G1", "4H", "SELL"),
+    ("1.1.1", "2H", "SELL"), ("1.1.2", "8H", "BUY"), ("1.2 G1", "2H", "BUY"),
+    ("1.3 G1", "3H", "BUY"), ("1.3 G1", "6H", "BUY"),
+    ("1.4 G2", "1H", "BUY"),
+    ("2.0 G1", "4H", "SELL"), ("2.0 G1", "6H", "BUY"),
+    ("2.0 G3", "3H", "BUY"), ("2.0 G3", "4H", "SELL"),
+    ("2.0 G4", "3H", "BUY"), ("2.0 G4", "4H", "BUY"),
+    ("2.0.1", "2H", "SELL"),
+    ("2.0.2", "1D", "BUY"), ("2.0.2", "8H", "BUY"),
+    ("2.1 G1", "3H", "BUY"), ("2.1 G1", "4H", "BUY"), ("2.1 G3", "3H", "BUY"),
+    ("3.0 G1", "3H", "BUY"), ("3.0 G1", "4H", "BUY"), ("3.0 G1", "4H", "SELL"), ("3.0 G1", "6H", "BUY"),
+    ("3.0 G3", "4H", "BUY"), ("3.0.2", "1D", "BUY"),
+    ("3.1 G1", "2H", "BUY"), ("3.1 G2", "4H", "BUY"), ("3.1 G3", "4H", "BUY"),
+    ("4.0 G1", "4H", "BUY"), ("4.0 G1", "6H", "BUY"), ("4.0 G3", "4H", "BUY"),
+    ("4.1 G1", "4H", "BUY"), ("4.1 G1", "6H", "BUY"), ("4.1 G3", "4H", "BUY"),
+})   # 47 cells -- DO_NOT_TOUCH, both directions, timeframe >= 60m (40 BUY + 7 SELL)
 
 # Discord content parsing (2026-10-13, spec section 6A/commit `f770ec7`):
 # the Raspberry Pi daemon now forwards the RAW Discord payload (content +
@@ -216,22 +230,43 @@ KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS = frozenset({
 # Fixed with a lazy capture bounded by a lookahead for the next known
 # field label (SL Close Below: / Target N:) or end of string, rather
 # than guessing a fixed strategy-name shape.
+#
+# 2026-10-16 P0 FIX (CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md):
+# the numeric capture groups were STILL `\d+(?:\.\d+)?` -- no comma
+# tolerance -- which silently drops every BTC/ETH alert (both priced
+# over $1,000, formatted with a thousands separator: "$83,125.80",
+# "$2,534.63"). Confirmed via GET /api/metasignals/audit?limit=100
+# BEFORE changing anything: 54 real plans across 27 distinct altcoins,
+# exactly 0 BTCUSDT and 0 ETHUSDT -- not a guess, a live-verified empty
+# set matching this exact failure mode (every other alert in that list
+# prices under $1,000 and has no comma to trip on). _NUM_RE now allows
+# commas in the integer part; parse_discord_alert() strips them before
+# any float() cast (commas would otherwise raise ValueError there).
+_NUM_RE = r"[\d,]+(?:\.\d+)?"
 _NEXT_FIELD_LOOKAHEAD = r"(?=\s*(?:SL\s+Close\s+Below\s*:|Target\s*\d\s*:|$))"
 _ALERT_PATTERN = re.compile(
-    r"(?P<symbol>[A-Z0-9]+)\s*\|\s*USDT\s*@\s*\$(?P<entry>\d+(?:\.\d+)?)\s*-\s*(?P<timeframe>[0-9A-Za-z]+)\s*-\s*"
+    r"(?P<symbol>[A-Z0-9]+)\s*\|\s*USDT\s*@\s*\$(?P<entry>" + _NUM_RE + r")\s*-\s*(?P<timeframe>[0-9A-Za-z]+)\s*-\s*"
     r"(?P<strategy>[0-9A-Za-z][0-9A-Za-z\.\s]*?)" + _NEXT_FIELD_LOOKAHEAD,
     re.IGNORECASE,
 )
-_SL_PATTERN = re.compile(r"SL Close Below:\s*(?P<sl>\d+(?:\.\d+)?)", re.IGNORECASE)
-_T1_PATTERN = re.compile(r"Target 1:\s*(?P<tp1>\d+(?:\.\d+)?)", re.IGNORECASE)
-_T2_PATTERN = re.compile(r"Target 2:\s*(?P<tp2>\d+(?:\.\d+)?)", re.IGNORECASE)
-_T3_PATTERN = re.compile(r"Target 3:\s*(?P<tp3>\d+(?:\.\d+)?)", re.IGNORECASE)
+_SL_PATTERN = re.compile(r"SL Close Below:\s*(?P<sl>" + _NUM_RE + r")", re.IGNORECASE)
+_T1_PATTERN = re.compile(r"Target 1:\s*(?P<tp1>" + _NUM_RE + r")", re.IGNORECASE)
+_T2_PATTERN = re.compile(r"Target 2:\s*(?P<tp2>" + _NUM_RE + r")", re.IGNORECASE)
+_T3_PATTERN = re.compile(r"Target 3:\s*(?P<tp3>" + _NUM_RE + r")", re.IGNORECASE)
 
+# BUY (long) thresholds -- unchanged from the original spec.
 RSI_FLOOR = 40.0
 RSI_CEILING = 62.0
+FUNDING_VETO_THRESHOLD = 0.0004   # +0.04% per spec section 3, pillar 4 -- BUY vetoes at/above this
+# SELL (short) thresholds -- mirrored per CC_WORK_ORDER_METASIGNALS_SHORTS_AND_MAJORS.md section 3,
+# pillars 2 and 4. NOT simply the BUY numbers negated/swapped -- the work order specifies genuinely
+# different RSI band edges (38-60, not 40-62) for the short side, reflecting the asymmetry Study 4's
+# own long/short cell data shows, not a hand-mirrored guess.
+RSI_FLOOR_SHORT = 38.0
+RSI_CEILING_SHORT = 60.0
+FUNDING_VETO_THRESHOLD_SHORT = -0.0004   # SELL vetoes at/below this (deeply negative funding = overcrowded shorts)
 EXTENSION_MARKET_MAX_R = 0.10
 EXTENSION_LIMIT_MAX_R = 0.25
-FUNDING_VETO_THRESHOLD = 0.0004   # +0.04% per spec section 3, pillar 4
 HARD_STOP_ATR_MULTIPLE = 0.25
 TP1_R_MULTIPLE = 1.0
 
@@ -376,7 +411,17 @@ def parse_discord_alert(content: Optional[str], embeds: Optional[List[Any]] = No
     a recognized MetaSignals trade alert at all (ordinary channel
     chatter, a message missing the SL line, etc.) -- a None here is
     NOT an error, just "nothing to triage," exactly how the Pi's own
-    on_message() silently returns on a non-match today."""
+    on_message() silently returns on a non-match today.
+
+    SIDE DETECTION (2026-10-16, short-side work order section 3B):
+    deterministic price geometry first -- soft_stop above entry with a
+    target at or below entry means SELL; soft_stop below entry with a
+    target at or above entry means BUY. Only falls back to an emoji/
+    text scan (📉 or the literal word SHORT) when geometry alone can't
+    disambiguate (no Target 1 line present at all) -- channel name/
+    emoji is NOT the primary signal, since Andy's own directive calls
+    for a 100% deterministic check, not a text-matching heuristic that
+    could misfire on an alert copy-pasted into the wrong channel."""
     text = content or ""
     for embed in (embeds or []):
         if not isinstance(embed, dict):
@@ -394,24 +439,51 @@ def parse_discord_alert(content: Optional[str], embeds: Optional[List[Any]] = No
         return None
 
     symbol = f"{match.group('symbol').upper()}USDT"
-    entry_price = float(match.group("entry"))
+    entry_price = float(match.group("entry").replace(",", ""))
     timeframe = match.group("timeframe").strip().upper()
     strategy = match.group("strategy").strip()
 
     sl_match = _SL_PATTERN.search(text)
     if not sl_match:
         return None   # matched the header but no SL line -- same "skip, don't guess" rule as the Pi's own parser
-    soft_stop = float(sl_match.group("sl"))
+    soft_stop = float(sl_match.group("sl").replace(",", ""))
 
     tp1_match = _T1_PATTERN.search(text)
     tp2_match = _T2_PATTERN.search(text)
     tp3_match = _T3_PATTERN.search(text)
-    tp1 = float(tp1_match.group("tp1")) if tp1_match else round(entry_price * 1.04, 4)
-    tp2 = float(tp2_match.group("tp2")) if tp2_match else round(entry_price * 1.08, 4)
-    tp3 = float(tp3_match.group("tp3")) if tp3_match else None
+    tp1_explicit = float(tp1_match.group("tp1").replace(",", "")) if tp1_match else None
+    tp2_explicit = float(tp2_match.group("tp2").replace(",", "")) if tp2_match else None
+    tp3 = float(tp3_match.group("tp3").replace(",", "")) if tp3_match else None
+
+    # Side MUST be determined before any default (unspecified) TP1/TP2
+    # value is filled in -- the default formula itself is direction-
+    # dependent (above entry for a BUY, below entry for a SELL), so
+    # computing it first and only then checking direction against it
+    # would be circular. Decided from soft_stop/entry_price plus the
+    # EXPLICIT tp1 value only (tp1_match is None, not a filled-in
+    # default, is the real "we don't know" signal here).
+    if soft_stop > entry_price and (tp1_match is None or tp1_explicit < entry_price):
+        side = "SELL"
+    elif soft_stop < entry_price and (tp1_match is None or tp1_explicit > entry_price):
+        side = "BUY"
+    else:
+        side = "SELL" if ("📉" in text or "SHORT" in text.upper()) else "BUY"
+
+    # NOW it's safe to fill in a direction-correct default for any
+    # target the alert itself didn't specify -- a found bug (caught by
+    # this module's own test suite): the original single-direction
+    # defaults (`entry*1.04`/`entry*1.08`, always ABOVE entry) would
+    # have produced a target on the WRONG SIDE of entry for a SELL
+    # whose alert happened to omit Target 2 but include Target 1.
+    if side == "BUY":
+        tp1 = tp1_explicit if tp1_explicit is not None else round(entry_price * 1.04, 4)
+        tp2 = tp2_explicit if tp2_explicit is not None else round(entry_price * 1.08, 4)
+    else:
+        tp1 = tp1_explicit if tp1_explicit is not None else round(entry_price * 0.96, 4)
+        tp2 = tp2_explicit if tp2_explicit is not None else round(entry_price * 0.92, 4)
 
     return {
-        "symbol": symbol, "side": "BUY", "entry_price": entry_price, "soft_stop": soft_stop,
+        "symbol": symbol, "side": side, "entry_price": entry_price, "soft_stop": soft_stop,
         "tp1": tp1, "tp2": tp2, "tp3": tp3, "timeframe": timeframe, "strategy": strategy,
         "raw_text": text,
     }
@@ -431,15 +503,25 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
 
     Checks run in the pillar order given in the spec; the FIRST failing
     pillar's reason is returned (no partial credit, matching every other
-    gate in this codebase's own "all must pass" convention)."""
+    gate in this codebase's own "all must pass" convention).
+
+    SIDE-AWARE as of 2026-10-16 (CC_WORK_ORDER_METASIGNALS_SHORTS_AND_
+    MAJORS.md) -- every pillar below branches on `side`, mirrored per
+    that work order's own section 3. BUY and SELL are both real,
+    Study-4-backed paths now; anything else still fails closed."""
     symbol = str(alert.get("symbol", "")).upper()
     side = str(alert.get("side", "BUY")).upper()
     timeframe = str(alert.get("timeframe", "")).upper()
     strategy = str(alert.get("strategy", "")).strip()
     alert_price = float(alert["entry_price"])
     alert_soft_stop = float(alert["soft_stop"])
+    is_buy = side == "BUY"
 
-    out: Dict[str, Any] = {"symbol": symbol}
+    out: Dict[str, Any] = {"symbol": symbol, "side": side}
+
+    if side not in ("BUY", "SELL"):
+        out.update(verdict="NO", reason="VETO_SIDE_NOT_SUPPORTED")
+        return out
 
     # Pillar 5, timeframe + strategy-cell legs first -- cheapest checks,
     # no network I/O, and every other pillar's math is moot on an
@@ -451,16 +533,12 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
         out.update(verdict="NO", reason="VETO_TIMEFRAME_LTF_NOISE")
         return out
 
-    cell = (strategy, timeframe)
+    cell = (strategy, timeframe, side)
     if cell in PERMITTED_STRATEGY_TIMEFRAME_CELLS:
         out["strategy_cell_status"] = "PERMITTED"
     else:
         out["strategy_cell_status"] = "TRAP" if cell in KNOWN_TRAP_STRATEGY_TIMEFRAME_CELLS else "UNPROVEN"
         out.update(verdict="NO", reason="VETO_STRATEGY_TRAP_OR_UNPROVEN")
-        return out
-
-    if side != "BUY":
-        out.update(verdict="NO", reason="VETO_SIDE_NOT_SUPPORTED")
         return out
 
     candles_4h = await _fetch_confirmed_4h(symbol)
@@ -482,7 +560,7 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
         out.update(verdict="NO", reason="VETO_INSUFFICIENT_DAILY_HISTORY")
         return out
 
-    # --- Pillar 1: Macro Trend ---
+    # --- Pillar 1: Macro Trend (mirrored for SELL, work order section 3C) ---
     btc_closes = _closes(candles_btc_1d)
     btc_sma200 = sma_series(btc_closes, 200)[-1]
     btc_daily_close = btc_closes[-1]
@@ -498,17 +576,29 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
         asset_daily_close=asset_daily_close, asset_sma200=asset_sma200, asset_ema55=asset_ema55,
     )
 
-    btc_macro_pass = btc_sma200 is not None and btc_daily_close > btc_sma200
-    if asset_sma200 is not None:
-        asset_macro_pass = asset_daily_close > asset_sma200
+    if is_buy:
+        btc_macro_pass = btc_sma200 is not None and btc_daily_close > btc_sma200
+        if asset_sma200 is not None:
+            asset_macro_pass = asset_daily_close > asset_sma200
+        else:
+            asset_macro_pass = asset_ema55 is not None and asset_daily_close > asset_ema55   # decision 2, module header
+        if not (btc_macro_pass and asset_macro_pass):
+            out.update(verdict="NO", reason="VETO_MACRO_BELOW_200SMA")
+            return out
     else:
-        asset_macro_pass = asset_ema55 is not None and asset_daily_close > asset_ema55   # decision 2, module header
+        # SELL: BTC's own trend is NOT checked at all (work order's own
+        # note: "BTC macro trend can either be below 200 SMA or
+        # neutral; asset downtrend is the binding filter") -- only the
+        # ASSET's own structural downtrend binds.
+        if asset_sma200 is not None:
+            asset_macro_pass = asset_daily_close < asset_sma200
+        else:
+            asset_macro_pass = asset_ema55 is not None and asset_daily_close < asset_ema55
+        if not asset_macro_pass:
+            out.update(verdict="NO", reason="VETO_MACRO_ABOVE_200SMA")
+            return out
 
-    if not (btc_macro_pass and asset_macro_pass):
-        out.update(verdict="NO", reason="VETO_MACRO_BELOW_200SMA")
-        return out
-
-    # --- Pillar 2: Energy / Exhaustion ---
+    # --- Pillar 2: Energy / Exhaustion (inverted RSI band for SELL) ---
     closes_4h = _closes(candles_4h)
     rsi_4h = rsi14_wilder_series(closes_4h)[-1]
     out["rsi_4h"] = rsi_4h
@@ -516,10 +606,12 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
     if rsi_4h is None:
         out.update(verdict="NO", reason="VETO_INSUFFICIENT_4H_HISTORY")
         return out
-    if rsi_4h > RSI_CEILING:
+    rsi_ceiling = RSI_CEILING if is_buy else RSI_CEILING_SHORT
+    rsi_floor = RSI_FLOOR if is_buy else RSI_FLOOR_SHORT
+    if rsi_4h > rsi_ceiling:
         out.update(verdict="NO", reason="VETO_MOMENTUM_OVERBOUGHT")
         return out
-    if rsi_4h < RSI_FLOOR:
+    if rsi_4h < rsi_floor:
         out.update(verdict="NO", reason="VETO_MOMENTUM_COLLAPSED")
         return out
 
@@ -530,24 +622,31 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
         out.update(verdict="NO", reason="VETO_INSUFFICIENT_4H_HISTORY")
         return out
 
-    hard_stop = alert_soft_stop - HARD_STOP_ATR_MULTIPLE * atr14_4h
-    r_distance = alert_price - hard_stop
+    # Hard stop geometry: BUY sits below entry (soft_stop - buffer),
+    # SELL sits above entry (soft_stop + buffer) -- work order section 3C.
+    if is_buy:
+        hard_stop = alert_soft_stop - HARD_STOP_ATR_MULTIPLE * atr14_4h
+        r_distance = alert_price - hard_stop
+    else:
+        hard_stop = alert_soft_stop + HARD_STOP_ATR_MULTIPLE * atr14_4h
+        r_distance = hard_stop - alert_price
     out["hard_stop"] = hard_stop
     if r_distance <= 0:
-        # The alert's own soft_stop sits at or above the alert price --
-        # a malformed/contradictory alert, not a real setup. Fails
-        # closed rather than computing a nonsensical negative-risk size.
+        # The alert's own soft_stop sits on the wrong side of entry for
+        # this direction -- a malformed/contradictory alert, not a real
+        # setup. Fails closed rather than computing a nonsensical
+        # negative-risk size.
         out.update(verdict="NO", reason="VETO_INVALID_STOP_GEOMETRY")
         return out
 
-    # --- Pillar 3: Extension ("Don't Chase") ---
+    # --- Pillar 3: Extension ("Don't Chase"), inverted sign for SELL ---
     mark_price = funding_mark["mark_price"]
     out["live_price_at_alert"] = mark_price
     if mark_price is None:
         out.update(verdict="NO", reason="VETO_PRICE_FEED_UNAVAILABLE")
         return out
 
-    extension_r = (mark_price - alert_price) / r_distance
+    extension_r = (mark_price - alert_price) / r_distance if is_buy else (alert_price - mark_price) / r_distance
     out["extension_r"] = extension_r
 
     if extension_r <= EXTENSION_MARKET_MAX_R:
@@ -558,19 +657,22 @@ async def evaluate_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
         out.update(verdict="NO", reason="VETO_PRICE_OVER_EXTENDED")
         return out
 
-    # --- Pillar 4: Funding Crowding ---
+    # --- Pillar 4: Funding Crowding, inverted direction for SELL ---
     funding_rate = funding_mark["funding_rate"]
     out["funding_rate"] = funding_rate
     if funding_rate is None:
         out.update(verdict="NO", reason="VETO_FUNDING_UNAVAILABLE")
         return out
-    if funding_rate >= FUNDING_VETO_THRESHOLD:
+    if is_buy and funding_rate >= FUNDING_VETO_THRESHOLD:
+        out.update(verdict="NO", reason="VETO_FUNDING_OVERCROWDED")
+        return out
+    if not is_buy and funding_rate <= FUNDING_VETO_THRESHOLD_SHORT:
         out.update(verdict="NO", reason="VETO_FUNDING_OVERCROWDED")
         return out
 
     # --- All five pillars passed -- compute final geometry ---
     position_size = 50.0 / r_distance
-    tp1_price = alert_price + TP1_R_MULTIPLE * r_distance
+    tp1_price = alert_price + TP1_R_MULTIPLE * r_distance if is_buy else alert_price - TP1_R_MULTIPLE * r_distance
     tp2_price = float(alert["tp2"])
 
     out.update(
