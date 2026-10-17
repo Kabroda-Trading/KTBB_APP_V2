@@ -9310,3 +9310,57 @@ GitHub; Andy to trigger the Render deploy, then use the new Cancel button on
 /admin/metasignals to void the real duplicate LINK order on production.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-17 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Follow-up on the dedup fix above, with a real post-deploy finding plus two
+explicit rulings from Andy, both confirmed via AskUserQuestion rather than
+assumed:
+
+1. **The unique index had never actually activated on production until
+   today.** It can't install itself while any same-symbol duplicate already
+   violates it, and the LINK duplicate from the 10-16 incident was still
+   sitting open the whole time -- so only the fast-path SELECT was live,
+   and (as already documented above) that alone can't catch a sub-second
+   race. Confirmed this really happened: a SECOND real incident fired
+   2026-10-17 06:03:15 UTC, ETHUSDT, two plans 13ms apart (tighter than
+   LINK's 43ms) -- independently verified against the live /api/
+   metasignals/snapshot, not assumed. Andy cancelled both the stale LINK
+   duplicate and the new ETH duplicate via the admin UI; the cancel
+   route's own self-heal (re-runs init_db() after voiding) should have
+   let the index install successfully once no violation remained -- not
+   independently re-verified against the live schema (no direct DB
+   access from this session), but the mechanism is confirmed sound by
+   code read and the local test suite's own direct-DB test
+   (test_unique_index_blocks_a_second_open_order_for_the_same_symbol_at_the_db_layer).
+   Worth a live spot-check next time two same-symbol alerts land close
+   together, to directly confirm zero manual cleanup is needed now.
+
+2. **Ruling: one open position per symbol, period -- not per (symbol,
+   timeframe, strategy).** Andy asked directly whether two genuinely
+   different signals on the same coin (e.g. ETH 4H and ETH 1D, not a
+   duplicate of the same alert) should both be allowed to run at once.
+   Confirmed via AskUserQuestion: NO -- keep the current scope exactly as
+   built (bare `symbol`, matching the original work order's own literal
+   wording). A second legitimate setup on an already-open symbol is
+   skipped (VETO_ALREADY_OPEN_POSITION), same as a true duplicate, on the
+   reasoning that two positions on one coin are correlated risk
+   regardless of which signal triggered them. No code change needed --
+   this is what's already deployed; flagging here only so the scope is a
+   recorded, deliberate ruling going forward, not an unexamined side
+   effect of the duplicate-alert fix.
+
+3. **New hard requirement for whenever SUBACCOUNT_LIVE execution actually
+   gets built (NOT built yet -- metasignals_paper_engine.py's own header
+   still confirms the dormant-switch status, nothing wired to a real
+   exchange call today):** the per-symbol unique-index write must happen
+   BEFORE any real exchange order-placement call, not after. If sequenced
+   the other way (place the real order, then try to record it), two
+   near-simultaneous duplicates could both get real fills before either
+   DB write happens -- the database can only block the second ROW, not a
+   real order that was already sent. Whoever builds that path needs to
+   reuse the same reserve-then-execute ordering this fix already
+   established for paper, not re-derive it from scratch or skip it.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
