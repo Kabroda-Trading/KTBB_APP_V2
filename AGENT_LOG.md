@@ -9364,3 +9364,46 @@ assumed:
    established for paper, not re-derive it from scratch or skip it.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-10-17 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+
+Fixed the ARMED-email-contradicts-cancellation-email UX bug (commit
+be0c809) that produced the 4-confusing-emails incident Andy raised
+(BTC breakdown cross, ~10:50-11:05 AM CT today). DeepSeek diagnosed
+this in the Kabroda AI Brain conversation (never actually written to
+any file or AGENT_LOG entry, despite saying it would be -- only found
+by reading that session's own transcript) and proposed a fix, but its
+stated root cause doesn't match the real code: no "two parallel
+engines," no "public newsletter simulator" tied to accounts #12/#14 --
+there is one gate engine, account #12 is an internal DRY_RUN eval
+account, and no account #14 exists anywhere in this codebase. Verified
+independently (a dedicated Explore agent read the real source) before
+touching anything, same discipline as every other relayed claim this
+project runs on.
+
+The real mechanism: `traveler_plan_notify.py::build_traveler_armed_email()`
+is a PLAN-level broadcast (fires on the gate's own candle-wick-touch
+signal, sent to every radar subscriber, independent of what any
+specific account's real exchange order does) -- it used to say
+"Position Opened," which in the common case (gate signal and live
+fill agree) reads fine, but when a live account's order gets
+exchange-canceled instead (exactly what happened today), that wording
+directly contradicts the live cancellation email's own "no position
+was ever opened." Reworded ARMED + its re-arm counterpart to "Entry
+Triggered" (true in both cases) and added a body line pointing readers
+at the real per-account "Real Fill Confirmed" email. Did NOT implement
+DeepSeek's suppression proposal (hide the broadcast when a live order
+cancels) -- confirmed a real architectural gap worse than described:
+the broadcast fires before a live account's real outcome is even known
+(separate, independently-ticked polling loop), so suppressing it would
+need either an indefinite delay or crossing the plan/account boundary
+Andy deliberately kept separate in two earlier rulings (09-26, 09-28).
+Checked Alt Matrix for the same gap -- it doesn't have one; its own
+entry email is always account-specific by design already.
+
+2 new tests, 3 existing assertions updated. Full site suite: 926
+passed. Real boot check green. Pushing to GitHub; Andy to trigger the
+Render deploy.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
