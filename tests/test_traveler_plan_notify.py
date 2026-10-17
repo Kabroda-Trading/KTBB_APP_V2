@@ -62,7 +62,7 @@ def test_lock_email_handles_missing_levels_without_crashing():
 
 def test_armed_email_format():
     subject, body = tpn.build_traveler_armed_email(_plan("FILLED"))
-    assert subject == "KABRODA - BTCUSDT LONG - Position Opened @ 49,900"
+    assert subject == "KABRODA - BTCUSDT LONG - Entry Triggered @ 49,900"
     assert "TRAVELER" not in body
     assert "DRY_RUN" not in body
     assert "simulation" not in body.lower()   # 2026-09-26: no longer a true claim at the plan level
@@ -70,6 +70,18 @@ def test_armed_email_format():
     assert "49,664.00" in body   # stop
     assert "50,300.00" in body   # target
     assert "Ref: #7" in body
+
+
+def test_armed_email_clarifies_it_is_a_gate_signal_not_a_confirmed_account_fill():
+    # 2026-10-17 real production incident: the old "Position Opened"
+    # wording directly contradicted a LIVE account's own cancellation
+    # email arriving minutes later for the same event. The reworded
+    # subject (above) fixes the contradiction; this body line is the
+    # second half of the fix -- pointing a reader at the actual
+    # per-account confirmation instead of reading this as one.
+    _, body = tpn.build_traveler_armed_email(_plan("FILLED"))
+    assert "not a confirmed fill on any specific account" in body
+    assert "Real Fill Confirmed" in body
 
 
 # ------------------------------------------------------------------ build_traveler_done_email
@@ -235,7 +247,7 @@ def test_real_fill_email_handles_missing_values_without_crashing():
 def test_dispatch_filled_to_armed():
     mail = tpn.notification_for_traveler_transition("WAITING_TOUCH", _plan("FILLED"))
     assert mail is not None
-    assert "Position Opened" in mail[0]
+    assert "Entry Triggered" in mail[0]
 
 
 def test_dispatch_tercile_skipped_to_done_family():
@@ -255,6 +267,22 @@ def test_dispatch_waiting_cross_to_waiting_touch_produces_no_email():
     # same "not everything gets emailed" philosophy as v2's own STOPPED/
     # REENTRY_ARMED transitions.
     assert tpn.notification_for_traveler_transition("WAITING_CROSS", _plan("WAITING_TOUCH")) is None
+
+
+# ------------------------------------------------------------------ build_traveler_rearm_armed_email
+# 2026-10-17: same "Entry Triggered," not "opened," wording fix as the
+# primary ARMED email, same reasoning -- no dedicated format test existed
+# for this builder before (only the date-tag one below), so this also
+# closes that coverage gap.
+
+def test_rearm_armed_email_format():
+    subject, body = tpn.build_traveler_rearm_armed_email(_plan("FILLED", rearm_fill_price=86200.0))
+    assert subject == "KABRODA - BTCUSDT LONG - Re-arm Entry Triggered @ 86,200"
+    assert "re-armed, entry triggered" in body
+    assert "86,200.00" in body
+    assert "not a confirmed fill on any specific account" in body
+    assert "Real Fill Confirmed" in body
+    assert "Ref: #7" in body
 
 
 # ------------------------------------------------------------------ session-date subject tag (2026-10-07, Andy directive 08:28 CT)

@@ -980,7 +980,7 @@ def test_waiting_touch_fill_sends_a_traveler_armed_email_via_loop(poll_env, monk
     poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": candles}, polls=1)
 
     assert len(sent) == 1
-    assert "Position Opened" in sent[0][0]
+    assert "Entry Triggered" in sent[0][0]
     assert "50,000" in sent[0][0] or "50000" in sent[0][0]   # the trigger, not the touching bar's own close
 
 

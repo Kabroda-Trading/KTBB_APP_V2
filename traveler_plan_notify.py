@@ -37,10 +37,26 @@
 #      same shape: levels + "watching for a cross either way."
 #   2. ARMED -- fires on the WAITING_TOUCH -> FILLED transition (the
 #      trigger touch fill, gate_traveler.py's own advance_waiting_touch())
-#      -- described as a plain "position opened," since this event now
-#      really can mean a real fill for a LIVE account, not only a
-#      simulation (no separate FILLED email here either, same anti-
-#      duplicate reasoning v2 used).
+#      -- worded as "Entry Triggered," NOT "Position Opened" (changed
+#      2026-10-17, real production incident -- see AGENT_LOG.md this
+#      date). This event is the GATE's own wick-touch signal, computed
+#      the instant a candle wicks the trigger -- it fires before, and
+#      independent of, whatever a LIVE account's real exchange order
+#      actually does. In the common case the two agree (the live order
+#      fills at roughly the same level) and the wording difference is
+#      invisible. But when they diverge -- e.g. a POST_ONLY entry gets
+#      exchange-canceled because price already moved through the level
+#      by the time the order arrived -- the old "Position Opened" wording
+#      directly CONTRADICTED the live account's own cancellation email
+#      ("no position was ever opened"), two emails about the same event
+#      landing minutes apart with opposite claims. "Entry Triggered" is
+#      true in both cases: a trigger genuinely was touched, regardless of
+#      what any specific account's order later did. The real per-account
+#      outcome is, and was already, a separate email -- build_traveler_
+#      real_fill_email() below for a confirmed fill, or the live engine's
+#      own cancellation email (executor_live_e1_engine.py) if it wasn't.
+#      No separate FILLED email here either, same anti-duplicate
+#      reasoning v2 used.
 #   3. DONE -- fires on WAITING_CROSS -> TERCILE_SKIPPED (a real cross
 #      happened, RSI zone excluded it) AND on WAITING_TOUCH -> DONE
 #      (opposite trigger broke first, or the 7-day journey cap passed with
@@ -111,19 +127,33 @@ def build_traveler_lock_email(plan: Dict[str, Any]) -> Tuple[str, str]:
 def build_traveler_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     """Fires on the trigger touch fill (WAITING_TOUCH -> FILLED) -- the
     same instant v2's own ARMED fired on its own resting-order fill.
-    Plan-level event (see module header) -- describes what happened, not
-    which specific account(s) it applies to; a real per-account fill/close
-    is what build_traveler_management_event_email() below reports."""
+    Plan-level event (see module header) -- describes the GATE's own
+    signal, not any specific account's confirmed outcome; a real
+    per-account fill is build_traveler_real_fill_email() below, and a
+    real per-account close is build_traveler_management_event_email().
+
+    2026-10-17: deliberately says "Entry Triggered," never "opened" or
+    "filled" -- this fires off a candle wick touch, before any live
+    account's real exchange order is known to have filled, been
+    rejected, or been canceled. Claiming "opened" here can directly
+    contradict a LIVE account's own cancellation email arriving minutes
+    later (real incident, AGENT_LOG.md this date) -- see this module's
+    own header for the full root cause."""
     symbol = _symbol_compact(plan.get("symbol", ""))
     direction = plan.get("direction") or "?"
     fill_price = plan.get("fill_price")
     stop = plan.get("stop_price")
     t1 = plan.get("t1_price")
-    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Position Opened @ {_fmt(fill_price, ',.0f')}"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Entry Triggered @ {_fmt(fill_price, ',.0f')}"
     body = (
-        f"{symbol} {direction} opened at {_fmt(fill_price)}.\n\n"
+        f"{symbol} {direction} entry triggered at {_fmt(fill_price)}.\n\n"
         f"  Stop:   {_fmt(stop)}\n"
         f"  Target: {_fmt(t1)}\n\n"
+        "This is the gate's own signal, not a confirmed fill on any "
+        "specific account. If you have a LIVE account tracking this "
+        "plan, watch for a separate 'Real Fill Confirmed' email -- that "
+        "one reflects what the exchange actually did, which can differ "
+        "(e.g. if the order was rejected or canceled before it filled).\n\n"
         f"  Ref: #{plan.get('id')}"
     )
     return subject, body
@@ -315,17 +345,26 @@ def build_traveler_rearm_armed_email(plan: Dict[str, Any]) -> Tuple[str, str]:
     REARM_FILLED) -- the rearm_status counterpart to build_traveler_armed_
     email() above, reading the rearm_* fields instead of the primary's own
     (already-closed) fill_price/stop_price -- stop/T1 are UNCHANGED from
-    the primary (frozen levels), only the fill price/timing are new."""
+    the primary (frozen levels), only the fill price/timing are new.
+
+    2026-10-17: same "Entry Triggered," not "opened," wording fix as the
+    primary ARMED email above, same reasoning -- see that function's own
+    docstring and this module's header."""
     symbol = _symbol_compact(plan.get("symbol", ""))
     direction = plan.get("direction") or "?"
     fill_price = plan.get("rearm_fill_price")
     stop = plan.get("stop_price")
     t1 = plan.get("t1_price")
-    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Re-arm Position Opened @ {_fmt(fill_price, ',.0f')}"
+    subject = f"KABRODA - {_date_tag(plan.get('date_key'))}{symbol} {direction} - Re-arm Entry Triggered @ {_fmt(fill_price, ',.0f')}"
     body = (
-        f"{symbol} {direction} re-armed and opened at {_fmt(fill_price)}.\n\n"
+        f"{symbol} {direction} re-armed, entry triggered at {_fmt(fill_price)}.\n\n"
         f"  Stop:   {_fmt(stop)}\n"
         f"  Target: {_fmt(t1)}\n\n"
+        "This is the gate's own signal, not a confirmed fill on any "
+        "specific account. If you have a LIVE account tracking this "
+        "plan, watch for a separate 'Real Fill Confirmed' email -- that "
+        "one reflects what the exchange actually did, which can differ "
+        "(e.g. if the order was rejected or canceled before it filled).\n\n"
         f"  Ref: #{plan.get('id')}"
     )
     return subject, body
