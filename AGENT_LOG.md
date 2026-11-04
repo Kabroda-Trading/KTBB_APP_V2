@@ -9479,3 +9479,16 @@ suite 1,037 passed. Site commit 4a5c004, pushed. Still not live -- no
 CMEConfig row, no real Tradovate credentials set yet.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (fourth entry, same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — two corrections to DeepSeek's fifteenth-entry work order (Brain repo), plus a real gap found and fixed while acting on it
+
+Andy relayed DeepSeek's MFFU account setup instructions directly in chat, including the real username, account name, and what appears to have been the real password (shown to me as a redacted `[YOUR_PASSWORD]` placeholder — I don't know what left Andy's machine before that redaction, so recommended he rotate the password as a precaution). Did not write any of it anywhere. This project's standing rule (confirmed explicitly by Andy earlier this session, logged in this file's twelfth entry) is credentials only ever go through the admin UI's encrypted per-account storage, never through chat — held the line here rather than relaying it into a file because the instruction came from DeepSeek instead of directly from Andy.
+
+**DeepSeek's `.env.local` instruction (`TRADOVATE_USER`/`TRADOVATE_PASS`/`TRADOVATE_ENV`/`TRADOVATE_ACCOUNT_NAME`) doesn't match the real code — checked, not assumed.** Grepped the whole repo: zero references to any of those env var names anywhere. The real `TradovateClient` gets credentials from the same encrypted `ExecutorAccount.api_key_encrypted`/`api_secret_encrypted` columns every other exchange account on this site already uses, decrypted at the call site — not env vars. Writing to `.env.local` would have been a no-op even setting the security concern aside.
+
+**Real gap found and fixed while tracing the above: `cme_executor.py`'s actual order-placement path (`_client_for()`) hardcoded `is_demo=False` with no account-level override at all.** MFFU's Rapid EOD evaluation trades against Tradovate's demo gateway (per DeepSeek's own entry), not live — so even with credentials entered correctly, the real trading path would have authenticated against the wrong Tradovate environment. Only the diagnostic `test-connection`/`tradovate-accounts` routes had a `?demo=` query override; the real path had nothing. Fixed: added a real `tradovate_is_demo` column on `ExecutorAccount`, wired through the admin UI (new "Demo environment" checkbox, Step 7), the `tradovate-account-info` route, `_serialize_account`, both diagnostic routes (query param now overrides the stored field, doesn't replace it), and `_client_for` itself. 4 new tests, full suite 1045 passed. Site commit `2be71e8`.
+
+**Not blocked on anything** — this was found and fixed in the course of acting on the work order, not a new hold. Waiting on Andy to enter credentials + check the new Demo checkbox + Look Up the real numeric account ID, all through the admin UI, then VERIFY AUTH. The actual 1-contract order placement (build-order step 10) stays Andy's own explicit action, per the original plan's own verification section — not something either agent fires autonomously once auth checks out.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
