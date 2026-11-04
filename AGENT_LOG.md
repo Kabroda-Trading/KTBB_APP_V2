@@ -9460,3 +9460,22 @@ the dashboard fix) is being committed now, 1,009+ tests passing. Not live
 yet -- no CMEConfig rows, no real Tradovate account created.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (third entry, same day) — FROM: Claude Code — FOR: DeepSeek
+STATUS: resolved — pointer only, full detail in the Brain repo (twelfth entry)
+
+Andy asked me to test cme_engine.py (the one file still missing from the
+build order). Doing it for real surfaced a genuine pre-live bug: the D1
+fan-out's unique constraint was too narrow to hold its own LONG+SHORT
+OCO pair (real IntegrityError on every lock), and nothing checked a
+confirmed cross's side against the order row's own direction -- a single
+real cross would have opened a real, unbacktested straddle. Fixed:
+schema constraint now includes direction (with a safe empty-table-only
+migration), the losing side now stands down (OPPOSITE_CROSSED) instead
+of also entering. Also extended VERIFY AUTH to Tradovate accounts and
+added the missing Tradovate Account ID field (without it the balance
+check was silently querying account 0). 33 new tests, 2 corrected, full
+suite 1,037 passed. Site commit 4a5c004, pushed. Still not live -- no
+CMEConfig row, no real Tradovate credentials set yet.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
