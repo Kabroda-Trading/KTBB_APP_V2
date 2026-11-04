@@ -95,6 +95,13 @@ class TradovateClient:
         self.base_url = DEMO_URL if is_demo else LIVE_URL
         self.access_token: Optional[str] = None
         self.token_expiry_epoch: float = 0.0
+        # 2026-11-04 -- found while diagnosing a real MFFU auth failure
+        # live: authenticate() printed Tradovate's real rejection reason to
+        # server stdout (Render logs, invisible from the admin UI or to
+        # whoever's actually troubleshooting) and returned a bare False,
+        # so _ensure_token()'s RuntimeError carried no detail at all.
+        # Keeping the last rejection reason here so it can be surfaced.
+        self.last_auth_error: Optional[str] = None
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -113,15 +120,20 @@ class TradovateClient:
         session = _get_session()
         try:
             async with session.post(url, json=payload) as resp:
+                status = resp.status
                 data = await resp.json()
         except Exception as e:
+            self.last_auth_error = f"request exception: {e}"
             print(f"[TRADOVATE] auth exception: {e}")
             return False
 
         token = data.get("accessToken") if isinstance(data, dict) else None
         if not token:
-            print(f"[TRADOVATE] auth rejected: {data.get('errorText') if isinstance(data, dict) else data}")
+            err = data.get("errorText") if isinstance(data, dict) else data
+            self.last_auth_error = f"HTTP {status}: {err}"
+            print(f"[TRADOVATE] auth rejected: {self.last_auth_error}")
             return False
+        self.last_auth_error = None
         self.access_token = token
         # Tradovate's own documented token lifetime is ~80 minutes; this
         # codebase renews well before that (same conservative-buffer
@@ -133,7 +145,8 @@ class TradovateClient:
         if not self.access_token or time.time() >= self.token_expiry_epoch - _TOKEN_RENEW_BUFFER_SECONDS:
             ok = await self.authenticate()
             if not ok and not self.access_token:
-                raise RuntimeError("Tradovate authentication failed and no prior token is available")
+                detail = f" -- {self.last_auth_error}" if self.last_auth_error else ""
+                raise RuntimeError(f"Tradovate authentication failed and no prior token is available{detail}")
 
     async def get_balance(self) -> Dict[str, Any]:
         """GET /cashBalance/getcashbalancesnapshot -- the one balance/
