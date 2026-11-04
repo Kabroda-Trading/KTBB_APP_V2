@@ -1990,19 +1990,43 @@ async def api_executor_test_connection(account_id: int, request: Request, db: Se
     if not api_key or not api_secret:
         return JSONResponse({"ok": False, "error": "No credentials set on this account yet."}, status_code=400)
 
-    import executor_bitunix_client
-    client = executor_bitunix_client.BitunixClient(api_key, api_secret)
-
     checks = {}
-    for name, coro in (
-        ("get_balance", client.get_balance()),
-        ("get_leverage_and_margin_mode", client.get_leverage_and_margin_mode("BTCUSDT")),
-        ("get_trading_pairs", client.get_trading_pairs("BTCUSDT")),
-    ):
-        try:
-            checks[name] = {"ok": True, "response": await coro}
-        except Exception as e:
-            checks[name] = {"ok": False, "error": str(e)}
+    if (account.exchange or "").strip().lower() == "tradovate":
+        # Tradovate: username/password reuse the same api_key/api_secret
+        # columns (documented in cme_tradovate_client.py's own header).
+        # Two independent read-only calls, same "don't hide a partial
+        # failure" shape as the Bitunix checks below. is_demo defaults to
+        # False -- this account is real Apex/Tradovate infra, not the
+        # public demo environment -- flip via ?demo=true if that
+        # assumption turns out wrong.
+        import cme_tradovate_client
+        is_demo = request.query_params.get("demo", "").strip().lower() in ("1", "true", "yes")
+        client = cme_tradovate_client.TradovateClient(
+            username=api_key, password=api_secret,
+            account_id=account.tradovate_account_id or 0,
+            account_name=account.tradovate_account_name or account.label,
+            is_demo=is_demo,
+        )
+        for name, coro in (
+            ("get_balance", client.get_balance()),
+            ("get_positions", client.get_positions()),
+        ):
+            try:
+                checks[name] = {"ok": True, "response": await coro}
+            except Exception as e:
+                checks[name] = {"ok": False, "error": str(e)}
+    else:
+        import executor_bitunix_client
+        client = executor_bitunix_client.BitunixClient(api_key, api_secret)
+        for name, coro in (
+            ("get_balance", client.get_balance()),
+            ("get_leverage_and_margin_mode", client.get_leverage_and_margin_mode("BTCUSDT")),
+            ("get_trading_pairs", client.get_trading_pairs("BTCUSDT")),
+        ):
+            try:
+                checks[name] = {"ok": True, "response": await coro}
+            except Exception as e:
+                checks[name] = {"ok": False, "error": str(e)}
 
     all_ok = all(c["ok"] for c in checks.values())
     _executor_accounts.write_audit(

@@ -210,3 +210,61 @@ def test_flatten_all_owner_succeeds_with_mocked_executor(env, monkeypatch):
     assert body["cancelled"] == [1]
     assert body["closed"] == [2]
     mock_flatten.assert_awaited_once()
+
+
+# ------------------------------------------------------------------ POST /api/executor/accounts/{id}/test-connection (Tradovate branch)
+
+def test_connection_routes_tradovate_accounts_to_the_tradovate_client(env, monkeypatch):
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                        json={"api_key": "fake-user", "api_secret": "fake-pass"})
+    assert resp.status_code == 200
+
+    async def _fake_balance(self):
+        return {"cashBalance": 48765.0}
+
+    async def _fake_positions(self):
+        return []
+
+    monkeypatch.setattr(tvc.TradovateClient, "get_balance", _fake_balance)
+    monkeypatch.setattr(tvc.TradovateClient, "get_positions", _fake_positions)
+
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["checks"]["get_balance"]["response"]["cashBalance"] == 48765.0
+    assert body["checks"]["get_positions"]["response"] == []
+
+
+def test_connection_reports_a_real_auth_failure_without_hiding_which_check_failed(env, monkeypatch):
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "bad-user", "api_secret": "bad-pass"})
+
+    async def _rejected(self):
+        raise RuntimeError("Tradovate authentication failed and no prior token is available")
+
+    monkeypatch.setattr(tvc.TradovateClient, "get_balance", _rejected)
+    monkeypatch.setattr(tvc.TradovateClient, "get_positions", _rejected)
+
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["checks"]["get_balance"]["ok"] is False
+    assert "authentication failed" in body["checks"]["get_balance"]["error"]
