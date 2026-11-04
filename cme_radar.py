@@ -1,0 +1,137 @@
+# cme_radar.py
+# ==============================================================================
+# CME RADAR -- read-only data source for the public and admin surfaces.
+# Mirrors alt_matrix_radar.py's own role, conventions, and honesty rule
+# exactly (report what's real, never fabricate a pre-lock guess) -- a
+# standalone module with zero import of traveler_radar.py, alt_matrix_
+# radar.py, or any Traveler/Alt Matrix table. Public view is a SYMBOL-LEVEL
+# summary (no account identity); admin view adds real per-account CMEOrder
+# rows, CMEConfig state, and recent CMETransition entries.
+# ==============================================================================
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from database import CMEPlan, CMEOrder, CMEConfig, CMETransition, ExecutorAccount
+
+SYMBOLS = ["MNQ", "MES"]
+_OPEN_MGMT_STATES = ("PENDING_ENTRY", "WAITING_RETEST", "FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
+
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+def _latest_plan(db: Session, symbol: str) -> Optional[CMEPlan]:
+    return (
+        db.query(CMEPlan)
+        .filter(CMEPlan.symbol == symbol)
+        .order_by(CMEPlan.lock_time.desc())
+        .first()
+    )
+
+
+def _open_orders_for_symbol(db: Session, symbol: str) -> List[CMEOrder]:
+    return (
+        db.query(CMEOrder)
+        .filter(CMEOrder.symbol == symbol, CMEOrder.management_state.in_(_OPEN_MGMT_STATES))
+        .all()
+    )
+
+
+def get_public_cme_snapshot(db: Session) -> Dict[str, Any]:
+    """Public, no login -- same openness precedent as /api/radar/traveler-
+    snapshot, /api/radar/alt-matrix-snapshot, and /api/gravity/scan.
+    A symbol with no lock yet today gets `plan: null`, never a fabricated
+    guess. `position` is a symbol-level summary, no account identity."""
+    out: Dict[str, Any] = {"ok": True, "symbols": {}}
+    for symbol in SYMBOLS:
+        plan = _latest_plan(db, symbol)
+        plan_dict = None
+        if plan is not None:
+            plan_dict = {
+                "id": plan.id, "date_key": plan.date_key, "lock_time": _iso(plan.lock_time),
+                "status": plan.status, "status_reason": plan.status_reason,
+                "box": plan.box, "reachability": plan.reachability,
+                "bo": plan.bo, "bd": plan.bd,
+            }
+
+        open_orders = _open_orders_for_symbol(db, symbol)
+        position = None
+        if open_orders:
+            o = open_orders[0]
+            position = {
+                "direction": o.direction,
+                "entry_fill_price": o.entry_fill_price,
+                "stop_price": o.sl_price_current,
+                "be_amended": o.be_amended,
+                "management_state": o.management_state,
+                "entry_fill_time": _iso(o.entry_fill_time),
+            }
+
+        out["symbols"][symbol] = {"plan": plan_dict, "position": position}
+    return out
+
+
+def _order_detail(o: CMEOrder) -> Dict[str, Any]:
+    return {
+        "id": o.id, "cme_plan_id": o.cme_plan_id, "account_id": o.account_id,
+        "mode": o.mode, "symbol": o.symbol, "direction": o.direction,
+        "contracts": o.contracts, "decision": o.decision, "decision_reason": o.decision_reason,
+        "risk_dollars_used": o.risk_dollars_used,
+        "entry_fill_price": o.entry_fill_price, "entry_fill_time": _iso(o.entry_fill_time),
+        "cross_confirmed_at": _iso(o.cross_confirmed_at),
+        "sl_price_initial": o.sl_price_initial, "sl_price_current": o.sl_price_current,
+        "be_amended": o.be_amended, "be_amended_at": _iso(o.be_amended_at), "be_price": o.be_price,
+        "management_state": o.management_state,
+        "exit_reason": o.exit_reason, "exit_price": o.exit_price, "exit_time": _iso(o.exit_time),
+        "realized_pnl_r": o.realized_pnl_r, "dollar_pnl": o.dollar_pnl, "receipt_id": o.receipt_id,
+    }
+
+
+def get_admin_cme_status(db: Session, recent_transitions_limit: int = 20) -> Dict[str, Any]:
+    """Admin-only (caller checks login) -- the fuller D1/D2/D3 picture,
+    same read-only, zero-decision-logic convention as alt_matrix_radar.py."""
+    out: Dict[str, Any] = {"ok": True, "symbols": {}, "configs": [], "recent_transitions": []}
+
+    for symbol in SYMBOLS:
+        plan = _latest_plan(db, symbol)
+        orders = (
+            db.query(CMEOrder)
+            .filter(CMEOrder.symbol == symbol, CMEOrder.decision.isnot(None))
+            .order_by(CMEOrder.id.desc())
+            .limit(10)
+            .all()
+        )
+        out["symbols"][symbol] = {
+            "plan": {
+                "id": plan.id, "status": plan.status, "status_reason": plan.status_reason,
+                "lock_time": _iso(plan.lock_time),
+            } if plan is not None else None,
+            "recent_orders": [_order_detail(o) for o in orders],
+        }
+
+    for cfg in db.query(CMEConfig).all():
+        account = db.query(ExecutorAccount).filter_by(id=cfg.account_id).first()
+        out["configs"].append({
+            "account_id": cfg.account_id,
+            "account_label": account.label if account is not None else None,
+            "account_mode": account.mode if account is not None else None,
+            "mnq_enabled": cfg.mnq_enabled, "mes_enabled": cfg.mes_enabled,
+            "daily_risk_budget_usd": cfg.daily_risk_budget_usd, "contracts_cap": cfg.contracts_cap,
+            "trailing_dd_limit_usd": cfg.trailing_dd_limit_usd, "profit_target_usd": cfg.profit_target_usd,
+            "high_water_mark_usd": account.high_water_mark_usd if account is not None else None,
+        })
+
+    for t in db.query(CMETransition).order_by(CMETransition.id.desc()).limit(recent_transitions_limit).all():
+        out["recent_transitions"].append({
+            "id": t.id, "cme_plan_id": t.cme_plan_id, "cme_order_id": t.cme_order_id,
+            "from_state": t.from_state, "to_state": t.to_state, "price": t.price,
+            "realized_pnl_r": t.realized_pnl_r, "created_at": _iso(t.created_at),
+        })
+
+    return out

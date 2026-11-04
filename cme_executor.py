@@ -1,0 +1,317 @@
+# cme_executor.py
+# ==============================================================================
+# CME EXECUTOR -- real Tradovate order placement for LIVE accounts.
+# Copies (never imports) alt_matrix_executor.py's/executor_live_e1_engine.py's
+# proven shapes (hang-safe polling discipline, "fail loud and halt, don't
+# guess" unprotected-position handling, two-table audit split) -- per the
+# Iron Wall, nothing here imports gate_traveler.py, traveler_plan_engine.py,
+# executor_live_e1_engine.py, executor_plan_builder.py, executor_engine.py,
+# mgmt_e1_stack.py, or any alt_matrix_* module. executor_accounts.py IS
+# imported directly -- generic, symbol/exchange-agnostic, zero Traveler
+# coupling (confirmed by direct read), same reuse Alt Matrix already made.
+#
+# D2 ENTRY SHAPE IS STRUCTURALLY BETTER THAN ALT MATRIX/TRAVELER'S, NOT A
+# DOWNGRADE: place_bracket_limit_order() submits the entry AND both
+# protective legs (stop + target) as ONE atomic Tradovate /order/placeoso
+# call. Unlike Bitunix (market entry, THEN a separate stop call, with a
+# real gap in between that ENTRY_FILLED_UNPROTECTED exists to catch), there
+# is structurally no unprotected-fill gap here -- Tradovate's own matching
+# engine hosts the stop/target the instant the entry itself fills. This
+# module still has an ENTRY_FILLED_UNPROTECTED state for the one real way
+# a gap could still occur (the bracket's own child legs fail to attach, or
+# this process crashes between order placement and recording the ids) --
+# never assumed impossible, just structurally rarer.
+#
+# AUDIT TRAIL -- two tables, two purposes, same split Alt Matrix uses:
+# CMETransition for every state change (exact fill price/fee/realized R);
+# ExecutorAuditLog (via executor_accounts.write_audit()) for the general
+# admin feed, with the CMEOrder id folded into `detail`, never passed as
+# executor_order_id (a different id sequence -- Traveler's own table).
+# ==============================================================================
+
+import asyncio
+import datetime
+import json
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+import executor_accounts
+import cme_signals
+from database import ExecutorAccount, CMEPlan, CMEOrder, CMETransition
+
+_CLOSE_CONFIRM_INTERVAL_SEC = 1.0
+_CLOSE_CONFIRM_ATTEMPTS = 10
+
+
+def _log_transition(
+    db: Session, order_row: CMEOrder, from_state: Optional[str], to_state: str,
+    price: Optional[float] = None, fee: Optional[float] = None,
+    realized_pnl_r: Optional[float] = None, detail: Optional[Dict[str, Any]] = None,
+) -> None:
+    db.add(CMETransition(
+        cme_plan_id=order_row.cme_plan_id, cme_order_id=order_row.id,
+        from_state=from_state, to_state=to_state, price=price, fee=fee,
+        realized_pnl_r=realized_pnl_r,
+        detail_json=json.dumps(detail, default=str) if detail else None,
+    ))
+
+
+def _audit(db: Session, event_type: str, message: str, account_id: int, order_row: CMEOrder, detail: Optional[Dict[str, Any]] = None) -> None:
+    merged_detail = dict(detail or {})
+    merged_detail["cme_order_id"] = order_row.id
+    executor_accounts.write_audit(db, event_type, message, account_id=account_id, actor="system", detail=merged_detail)
+
+
+def _order_dict_for_notify(db: Session, order_row: CMEOrder, account: ExecutorAccount) -> Dict[str, Any]:
+    plan = db.query(CMEPlan).filter_by(id=order_row.cme_plan_id).first()
+    return {
+        "id": order_row.id, "cme_plan_id": order_row.cme_plan_id,
+        "symbol": order_row.symbol, "direction": order_row.direction,
+        "account_id": account.id, "account_label": account.label,
+        "entry_fill_price": order_row.entry_fill_price, "sl_price_initial": order_row.sl_price_initial,
+        "contracts": order_row.contracts, "risk_dollars_used": order_row.risk_dollars_used,
+        "be_price": order_row.be_price, "exit_reason": order_row.exit_reason,
+        "exit_price": order_row.exit_price, "dollar_pnl": order_row.dollar_pnl,
+        "receipt_id": order_row.receipt_id,
+        "date_key": plan.date_key if plan is not None else None,
+    }
+
+
+def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_row: CMEOrder, **extra) -> None:
+    try:
+        import notify
+        import cme_notify
+        fn = getattr(cme_notify, builder)
+        order_dict = _order_dict_for_notify(db, order_row, account)
+        subject, body = fn(order_dict, **extra) if extra else fn(order_dict)
+        notify.send_account_email(subject, body, account.id)
+    except Exception as e:
+        print(f"|| CME EXECUTOR || {builder} notification failed for order {order_row.id}: {e}")
+
+
+def _notify_unprotected(db: Session, account: ExecutorAccount, order_row: CMEOrder, detail: str) -> None:
+    try:
+        import notify
+        notify.send_account_email(
+            f"KABRODA EXECUTOR ALERT -- unprotected open CME position ({order_row.symbol})",
+            f"cme_order_id={order_row.id}, account={account.id} ({account.label}), "
+            f"positionId={order_row.position_id}\n\n{detail}\n\n"
+            f"CHECK TRADOVATE DIRECTLY NOW and manually place whatever's missing "
+            f"(stop at {order_row.sl_price_initial}).",
+            account.id,
+        )
+    except Exception as e:
+        print(f"|| CME EXECUTOR || unprotected-position notification failed for order {order_row.id}: {e}")
+
+
+def _client_for(account: ExecutorAccount) -> "cme_tradovate_client.TradovateClient":
+    import cme_tradovate_client
+    username, password = executor_accounts.get_decrypted_credentials(account)
+    if not username or not password:
+        raise ValueError(f"account {account.id} has no Tradovate credentials set -- cannot place real orders")
+    return cme_tradovate_client.TradovateClient(
+        username=username, password=password,
+        account_id=account.tradovate_account_id, account_name=account.tradovate_account_name,
+        is_demo=False,
+    )
+
+
+async def place_resting_bracket(db: Session, account: ExecutorAccount, plan_row: CMEPlan, order_row: CMEOrder) -> None:
+    """Called once a confirmed cross has been detected for this plan
+    (order_row.cross_confirmed_at is already set by the caller). Places the
+    resting Limit entry with an atomic OSO bracket (stop + target) at the
+    trigger price -- the mechanic actually backtested (confirmed close,
+    THEN a passive fill on retest), never a Stop-Limit chase. Safely
+    resumable: if entry_exchange_order_id is already set, does nothing
+    (the watch loop calls this repeatedly until the row leaves
+    WAITING_RETEST)."""
+    if order_row.entry_exchange_order_id is not None:
+        return
+
+    client = _client_for(account)
+    trig = plan_row.bo if order_row.direction == "LONG" else plan_row.bd
+    stop = plan_row.stop_long if order_row.direction == "LONG" else plan_row.stop_short
+    target = plan_row.target_long if order_row.direction == "LONG" else plan_row.target_short
+    action = "Buy" if order_row.direction == "LONG" else "Sell"
+
+    resp = await client.place_bracket_limit_order(
+        symbol=order_row.symbol, action=action, qty=order_row.contracts,
+        limit_price=trig, stop_price=stop, target_price=target,
+    )
+    order_id = resp.get("orderId")
+    if "error" in resp or not order_id:
+        _log_transition(db, order_row, order_row.management_state, "CLOSED_ERROR", detail=resp)
+        order_row.management_state = "CLOSED_ERROR"
+        _audit(db, "ERROR", f"CME bracket placement failed for order {order_row.id}: {resp}", account.id, order_row, detail=resp)
+        return
+
+    order_row.entry_exchange_order_id = str(order_id)
+    order_row.sl_price_initial = stop
+    order_row.sl_price_current = stop
+    order_row.sl_set_at = datetime.datetime.utcnow()
+    _log_transition(db, order_row, order_row.management_state, "WAITING_RETEST", detail={"trigger": trig, "stop": stop, "target": target})
+    order_row.management_state = "WAITING_RETEST"
+    _audit(db, "ORDER_PLACED", f"CME resting bracket placed for order {order_row.id} at {trig} (stop {stop}, target {target})", account.id, order_row)
+
+
+async def check_retest_fill_and_confirm(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> None:
+    """For a WAITING_RETEST order, checks whether the resting bracket has
+    filled (a real open position now exists) -- no separate 'place the
+    stop' step needed, since the atomic bracket already attached it (see
+    module header). On confirmed fill, transitions to FILLED and notifies.
+    Leaves the row untouched if still resting -- the caller (cme_engine.py)
+    is responsible for cancelling on a NO_RETEST timeout."""
+    client = _client_for(account)
+    try:
+        positions = await client.get_positions()
+    except Exception as e:
+        _audit(db, "ERROR", f"get_positions failed while confirming fill for CME order {order_row.id}: {e}", account.id, order_row)
+        return
+
+    matches = [p for p in positions if p.get("contractId") == order_row.symbol or p.get("symbol") == order_row.symbol]
+    if not matches:
+        return   # still resting -- recheck next tick
+
+    position = matches[0]
+    order_row.position_id = str(position.get("id") or position.get("positionId") or "")
+    order_row.entry_fill_price = float(position.get("netPrice") or position.get("avgOpenPrice") or 0.0) or order_row.entry_fill_price
+    order_row.entry_fill_time = datetime.datetime.utcnow()
+    _log_transition(db, order_row, "WAITING_RETEST", "FILLED", price=order_row.entry_fill_price)
+    order_row.management_state = "FILLED"
+    _audit(db, "ORDER_PLACED", f"CME order {order_row.id} entry filled at {order_row.entry_fill_price} (bracket stop/target already exchange-hosted)", account.id, order_row)
+    _notify_account(db, account, "build_cme_entry_email", order_row)
+
+
+async def cancel_no_retest(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> None:
+    """The retest window elapsed with no fill -- cancel the resting
+    bracket and close the row as NO_RETEST (never entered, never a trade).
+    Mirrors the stand-down path audit_cme_universe_comparison.py's own
+    backtest counts explicitly as a real outcome (stand_down_no_retest),
+    not an error."""
+    client = _client_for(account)
+    if order_row.entry_exchange_order_id:
+        try:
+            await client.cancel_order(int(order_row.entry_exchange_order_id))
+        except Exception as e:
+            _audit(db, "ERROR", f"cancel_order failed for CME order {order_row.id} on NO_RETEST timeout: {e}", account.id, order_row)
+            return   # retry next tick -- never assume cancelled on a failed call
+
+    _log_transition(db, order_row, order_row.management_state, "NO_RETEST")
+    order_row.management_state = "NO_RETEST"
+    order_row.closed_at = datetime.datetime.utcnow()
+    _audit(db, "ORDER_PLACED", f"CME order {order_row.id} resting bracket cancelled -- no retest within the window, standing down", account.id, order_row)
+
+
+async def amend_to_breakeven(db: Session, account: ExecutorAccount, order_row: CMEOrder, stop_order_id: int, be_price: float) -> bool:
+    """Amends the live exchange stop leg to breakeven (+0.1x box). Returns
+    False (never raises) on any failure -- the caller logs/alerts and
+    leaves be_amended False so the next tick retries; never marks the row
+    amended without a successful call (there is no cheap confirm-read here
+    the way Bitunix's get_pending_tp_sl_order() provides -- flagged as a
+    live-API gap to close during the 1-Micro Smoke Test, same as this
+    module's other NOT YET LIVE-VERIFIED items in cme_tradovate_client.py)."""
+    client = _client_for(account)
+    ok = await client.amend_stop_to_breakeven(stop_order_id, be_price, order_row.contracts)
+    if not ok:
+        _audit(db, "ERROR", f"breakeven amendment failed for CME order {order_row.id} (stop_order_id={stop_order_id})", account.id, order_row)
+        return False
+
+    order_row.be_amended = True
+    order_row.be_amended_at = datetime.datetime.utcnow()
+    order_row.be_price = be_price
+    order_row.sl_price_current = be_price
+    _log_transition(db, order_row, "FILLED", "RATCHETED", price=be_price)
+    order_row.management_state = "RATCHETED"
+    _audit(db, "STOP_AMENDED", f"CME order {order_row.id} stop amended to breakeven ({be_price})", account.id, order_row)
+    _notify_account(db, account, "build_cme_breakeven_email", order_row)
+    return True
+
+
+async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrder, exit_reason: str) -> None:
+    """Closes the position at market -- used for the 16:00 ET mandatory
+    flush and emergency_flatten(). Exit price is APPROXIMATED at the last
+    known live price (same Andy-accepted tradeoff Alt Matrix/Traveler's own
+    contingency closes use) -- confirmed closed via a bounded re-poll of
+    get_positions(), never assumed on the call succeeding."""
+    client = _client_for(account)
+    try:
+        await client.emergency_market_close(order_row.symbol, order_row.contracts, order_row.direction)
+    except Exception as e:
+        _audit(db, "ERROR", f"market close failed for CME order {order_row.id} ({exit_reason}): {e}", account.id, order_row)
+        return
+
+    still_open = True
+    for _ in range(_CLOSE_CONFIRM_ATTEMPTS):
+        await asyncio.sleep(_CLOSE_CONFIRM_INTERVAL_SEC)
+        try:
+            positions = await client.get_positions()
+        except Exception:
+            continue
+        still_open = any(p.get("symbol") == order_row.symbol for p in positions)
+        if not still_open:
+            break
+
+    if still_open:
+        _audit(db, "ERROR", f"market close reported for CME order {order_row.id} ({exit_reason}) but a position still exists -- CHECK TRADOVATE DIRECTLY", account.id, order_row)
+        return
+
+    from_state = order_row.management_state
+    order_row.exit_reason = exit_reason
+    order_row.exit_price = order_row.entry_fill_price   # approximated -- no reliable market-close fill price, same convention as Alt Matrix
+    order_row.exit_time = datetime.datetime.utcnow()
+    order_row.closed_at = order_row.exit_time
+    order_row.management_state = f"CLOSED_{exit_reason}"
+    if order_row.box_at_entry:
+        sgn = 1 if order_row.direction == "LONG" else -1
+        order_row.realized_pnl_r = sgn * (order_row.exit_price - order_row.entry_fill_price) / order_row.box_at_entry
+    _log_transition(db, order_row, from_state, order_row.management_state, price=order_row.exit_price,
+                     realized_pnl_r=order_row.realized_pnl_r, detail={"approximated": True})
+    _audit(db, "POSITION_CLOSED", f"CME order {order_row.id} closed: {exit_reason} at ~{order_row.exit_price} (approximated)", account.id, order_row)
+    _notify_account(db, account, "build_cme_exit_email", order_row)
+
+
+async def emergency_flatten(db: Session, account: ExecutorAccount) -> Dict[str, Any]:
+    """Fleet Emergency Flatten -- NEW functionality, nothing like this
+    exists anywhere else in the codebase (confirmed via grep, 2026-11-04;
+    the existing kill switch only ever blocks NEW orders, never touches an
+    existing position). Cancels every open order and market-closes every
+    open position for this account, independent of the mode-gated kill
+    switch. Returns a summary dict; never raises -- a failure on one leg
+    must not stop attempts on the rest."""
+    client = _client_for(account)
+    cancelled, closed, errors = [], [], []
+
+    open_orders = db.query(CMEOrder).filter(
+        CMEOrder.account_id == account.id,
+        CMEOrder.management_state.in_(("WAITING_RETEST",)),
+    ).all()
+    for order_row in open_orders:
+        try:
+            if order_row.entry_exchange_order_id:
+                await client.cancel_order(int(order_row.entry_exchange_order_id))
+            order_row.management_state = "CLOSED_MANUAL"
+            order_row.closed_at = datetime.datetime.utcnow()
+            _log_transition(db, order_row, "WAITING_RETEST", "CLOSED_MANUAL", detail={"reason": "emergency_flatten"})
+            cancelled.append(order_row.id)
+        except Exception as e:
+            errors.append({"order_id": order_row.id, "step": "cancel", "error": str(e)})
+
+    open_positions = db.query(CMEOrder).filter(
+        CMEOrder.account_id == account.id,
+        CMEOrder.management_state.in_(("FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")),
+    ).all()
+    for order_row in open_positions:
+        try:
+            await market_close(db, account, order_row, exit_reason="MANUAL")
+            closed.append(order_row.id)
+        except Exception as e:
+            errors.append({"order_id": order_row.id, "step": "close", "error": str(e)})
+
+    executor_accounts.write_audit(
+        db, "KILL_SWITCH_ENGAGED" if not errors else "ERROR",
+        f"CME emergency_flatten for account {account.id}: cancelled={cancelled}, closed={closed}, errors={errors}",
+        account_id=account.id, actor="system",
+        detail={"cancelled": cancelled, "closed": closed, "errors": errors},
+    )
+    return {"cancelled": cancelled, "closed": closed, "errors": errors}

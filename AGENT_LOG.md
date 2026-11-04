@@ -9407,3 +9407,56 @@ passed. Real boot check green. Pushing to GitHub; Andy to trigger the
 Render deploy.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 — FROM: Claude Code — FOR: DeepSeek
+STATUS: open — CME Micro Futures build in progress, real money not touched yet
+
+Building the CME Micro Futures (Tradovate) subsystem per the Brain repo's
+turnkey work order, mirroring Alt Matrix's proven file-by-file pattern. New
+additive-only files: cme_clock.py, cme_signals.py, cme_risk.py,
+cme_tradovate_client.py, cme_executor.py, cme_engine.py, cme_notify.py,
+cme_radar.py, cme_market.py. New DB tables (CMEPlan/Order/Transition/Config)
++ additive ExecutorAccount columns. main.py wired (2 new background tasks,
+4 new routes). templates/executor_admin.html got a new CME config step.
+
+Also fixed, independently, the confirmed /api/dashboard/overview and
+/api/dashboard/mas-history cross-user P&L leak (every ExecutorOrder-sourced
+figure now scopes to the logged-in user's own accounts unless admin) --
+real two-user regression test added.
+
+Found and fixed four previously undisclosed bugs in the Brain repo's own
+reference files while porting the D1 lock math (not trusted from a
+description -- verified against 5 real historical sessions): the TPO value
+area needs 1-minute bars with a dynamic row size and pairwise expansion,
+not the 5-minute/fixed-tick/single-row version either "reference" engine
+used; the stop rule is symbol-specific (VA-boundary for NQ, 1.0x box for
+ES); the live daemon's breakeven ratchet was dead code, never called; its
+EST conversion had no DST awareness. Full detail: Kabroda AI Brain repo
+AGENT_LOG.md, 2026-11-04 (fifth entry).
+
+One real gap before this can run live: Tradovate's Market Data API has no
+confirmed response shape anywhere -- cme_market.py raises
+NotImplementedError rather than guess at one. Full pytest suite green
+(994+ passed), clean TestClient boot check. Not deployed -- still mid-build.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (second entry, same day) — FROM: Claude Code — FOR: DeepSeek
+STATUS: open — pointer only, full detail lives in the Brain repo
+
+DeepSeek confirmed the four bug fixes above and filed a Tradovate Market
+Data WebSocket spec to close the cme_market.py gap (Brain repo AGENT_LOG,
+sixth entry). Checked it against Tradovate's own official docs before
+building anything against it: most of it is correct (dedicated MD socket,
+mdAccessToken split, md/getChart request shape, bar fields), but the
+subscribe-ack response schema was wrong -- the real ack carries only
+historicalId/realtimeId, no inline bars; bar data streams as separate
+messages. Corrected in the Brain repo (AGENT_LOG, seventh entry, commit
+fa79bc3). cme_market.py still raises NotImplementedError -- not changed,
+pending either a second source or a live sandbox test.
+
+Site-repo CME build (schema, 9 cme_*.py modules, main.py wiring, admin UI,
+the dashboard fix) is being committed now, 1,009+ tests passing. Not live
+yet -- no CMEConfig rows, no real Tradovate account created.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

@@ -536,6 +536,20 @@ def init_db():
         except Exception:
             pass
 
+    # CME Micro Futures via Tradovate (2026-11-04) -- additive ExecutorAccount
+    # columns, same nullable/code-side-default pattern as gate_profile/
+    # mgmt_profile above. See ExecutorAccount's own comment block for why.
+    for _col in [
+        "market_type VARCHAR", "account_category VARCHAR",
+        "trailing_drawdown_limit_usd FLOAT", "high_water_mark_usd FLOAT",
+        "tradovate_account_id INTEGER", "tradovate_account_name VARCHAR",
+    ]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_accounts ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
     # docstring above for what each column is and why) ---
     for _col in [
@@ -2423,6 +2437,20 @@ class ExecutorAccount(Base):
     # and tested end to end now rather than deferred to Stage 2.
     assumed_balance_usd = Column(Float, nullable=True)
 
+    # 2026-11-04 (CME Micro Futures via Tradovate, CC_INTERFACE.md Brain repo
+    # §8C) -- additive-only columns on the shared account table, same pattern
+    # as gate_profile/mgmt_profile above. `exchange` already accepts any
+    # string (no validation tuple exists for it) so "tradovate" needs no
+    # schema change there. NOT a new gate_profile/mgmt_profile value -- CME,
+    # like Alt Matrix before it, stays fully outside that mechanism and gets
+    # its own CMEConfig table instead (see that class's own docstring).
+    market_type = Column(String, nullable=True, default="CRYPTO_PERP")   # CRYPTO_PERP (default) | CME_FUTURES
+    account_category = Column(String, nullable=True, default="PERSONAL")  # PERSONAL | PROP_EVALUATION | PROP_FUNDED
+    trailing_drawdown_limit_usd = Column(Float, nullable=True)   # Apex-style trailing DD floor, e.g. 2000.0
+    high_water_mark_usd = Column(Float, nullable=True)           # running peak equity, cme_risk.py's own write path
+    tradovate_account_id = Column(Integer, nullable=True)
+    tradovate_account_name = Column(String, nullable=True)       # e.g. "APEX6918900000001" -- not a secret, stored plain
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -3159,6 +3187,175 @@ class AltMatrixConfig(Base):
     btc_margin_reserve_usd = Column(Float, nullable=True)
     symbol_priority = Column(String, nullable=False, default="SOL,ETH")
     catchup_window_seconds = Column(Integer, nullable=False, default=900)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# ---------------------------------------------------------
+# CME MICRO FUTURES VIA TRADOVATE (2026-11-04) -- a FOURTH fully isolated
+# subsystem, mirroring Alt Matrix's own four-table shape immediately above
+# (same no-ForeignKey, plain-Integer-id-with-a-comment convention; same
+# provisioning via pure SQLAlchemy ORM classes + create_all(), zero raw DDL).
+# Genuine simplification versus Alt Matrix: CME trades a completely separate
+# broker/account (Tradovate/Apex) with zero shared margin pool with Bitunix,
+# so there is no analogous "read-only portfolio module that touches another
+# subsystem's table" here -- cme_risk.py never reads ExecutorOrder/
+# AltMatrixOrder/TravelerPlan at all. See CMEConfig below for the one
+# genuinely new risk concept this subsystem needed that Alt Matrix never did
+# (trailing-drawdown-from-high-water-mark, the Apex evaluation's own rule).
+# ---------------------------------------------------------
+class CMEPlan(Base):
+    """One row per CME session lock attempt (one per symbol per trading day),
+    mirroring AltMatrixPlan's shape. Unlike AltMatrixPlan (a row only exists
+    once a real D1 signal fires), a CMEPlan row is created at EVERY lock
+    attempt, reachable or not -- same "every lock attempt gets a row, win or
+    stand-down" convention SessionLock/TravelerPlan use for BTC -- because
+    the reachability stand-down itself is a decision worth a durable audit
+    row, not just a log line."""
+    __tablename__ = "cme_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)   # "MNQ" | "MES"
+    date_key = Column(String, index=True, nullable=False)  # e.g. "2026-11-04"
+    lock_time = Column(DateTime, nullable=False)            # the 10:00 ET lock instant, stored as UTC
+
+    r30h = Column(Float, nullable=True)
+    r30l = Column(Float, nullable=True)
+    poc = Column(Float, nullable=True)
+    vah = Column(Float, nullable=True)
+    val = Column(Float, nullable=True)
+    box = Column(Float, nullable=True)
+    atr14 = Column(Float, nullable=True)
+    reachability = Column(Float, nullable=True)
+
+    # bo/bd = poc +/- 0.5*box (CC_INTERFACE Part-0 correction -- NOT vah/val
+    # directly; see cme_signals.py's own header for the full discrepancy
+    # this fixes, verified against reconstruct_locks_cme_symbol.py, the
+    # actual script that generated the backtest's own locks_cme_*.csv).
+    bo = Column(Float, nullable=True)
+    bd = Column(Float, nullable=True)
+    stop_long = Column(Float, nullable=True)
+    stop_short = Column(Float, nullable=True)
+    target_long = Column(Float, nullable=True)
+    target_short = Column(Float, nullable=True)
+    be_trigger_long = Column(Float, nullable=True)
+    be_trigger_short = Column(Float, nullable=True)
+    be_stop_long = Column(Float, nullable=True)
+    be_stop_short = Column(Float, nullable=True)
+
+    # ARMED | STAND_DOWN_UNREACHABLE | WAITING_CROSS | WAITING_RETEST |
+    # NO_RETEST | DONE -- see cme_signals.py's own docstring for exactly
+    # when each fires.
+    status = Column(String, nullable=False, default="ARMED")
+    status_reason = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "date_key", name="uq_cme_plan_symbol_date"),
+    )
+
+
+class CMEOrder(Base):
+    """One row per (plan, account) -- the CME equivalent of AltMatrixOrder/
+    ExecutorOrder. Contract-based fields (contracts, point_multiplier)
+    instead of qty/leverage -- CME futures have no leverage/liquidation
+    concept the way a crypto margin position does; margin is a fixed
+    per-contract exchange/broker requirement, not computed here."""
+    __tablename__ = "cme_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cme_plan_id = Column(Integer, nullable=False, index=True)
+    account_id = Column(Integer, nullable=False, index=True)
+    mode = Column(String, nullable=False)   # "DRY_RUN" | "LIVE"
+    symbol = Column(String, nullable=False)
+    direction = Column(String, nullable=False)   # LONG | SHORT
+
+    contracts = Column(Integer, nullable=True)
+    point_multiplier = Column(Float, nullable=True)   # $2.00/pt MNQ, $5.00/pt MES
+    risk_dollars_used = Column(Float, nullable=True)
+    box_at_entry = Column(Float, nullable=True)
+
+    decision = Column(String, nullable=True)   # "WOULD_PLACE" | "REJECTED" | "TRAILING_DD_SKIPPED"
+    decision_reason = Column(String, nullable=True)
+
+    # Entry -- the confirmed-close + bounded-retest-fill mechanic (Part-0
+    # finding 4), placed as an exchange-native atomic OSO bracket
+    # (/order/placeoso) once the retest actually fills.
+    entry_exchange_order_id = Column(String, nullable=True)
+    entry_status = Column(String, nullable=True)
+    entry_fill_price = Column(Float, nullable=True)
+    entry_fill_time = Column(DateTime, nullable=True)
+    cross_confirmed_at = Column(DateTime, nullable=True)   # the confirmed 5m close beyond bo/bd, distinct from the later retest fill
+
+    position_id = Column(String, nullable=True)
+    sl_exchange_order_id = Column(String, nullable=True)
+    tp_exchange_order_id = Column(String, nullable=True)
+    sl_price_initial = Column(Float, nullable=True)
+    sl_price_current = Column(Float, nullable=True)
+    sl_set_at = Column(DateTime, nullable=True)
+    be_amended = Column(Boolean, nullable=False, default=False)
+    be_amended_at = Column(DateTime, nullable=True)
+    be_price = Column(Float, nullable=True)
+
+    # PENDING_ENTRY | WAITING_RETEST | NO_RETEST | FILLED | RATCHETED |
+    # CLOSED_STOP | CLOSED_BE_STOP | CLOSED_TARGET | CLOSED_TIME_FLUSH |
+    # CLOSED_MANUAL | CLOSED_ERROR | ENTRY_FILLED_UNPROTECTED
+    management_state = Column(String, nullable=False, default="PENDING_ENTRY")
+    exit_reason = Column(String, nullable=True)
+    exit_price = Column(Float, nullable=True)
+    exit_time = Column(DateTime, nullable=True)
+    entry_fee_usd = Column(Float, nullable=True)
+    exit_fee_usd = Column(Float, nullable=True)
+    realized_pnl_r = Column(Float, nullable=True)
+    dollar_pnl = Column(Float, nullable=True)
+    receipt_id = Column(String, nullable=True, unique=True, index=True)   # printable Trade Execution Receipt id
+    closed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("cme_plan_id", "account_id", name="uq_cme_order_plan_account"),
+    )
+
+
+class CMETransition(Base):
+    """Append-only transition log, mirroring AltMatrixTransition exactly."""
+    __tablename__ = "cme_transitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cme_plan_id = Column(Integer, nullable=True, index=True)
+    cme_order_id = Column(Integer, nullable=True, index=True)
+    from_state = Column(String, nullable=True)
+    to_state = Column(String, nullable=False)
+    price = Column(Float, nullable=True)
+    fee = Column(Float, nullable=True)
+    realized_pnl_r = Column(Float, nullable=True)
+    detail_json = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class CMEConfig(Base):
+    """One row per CME-enabled ExecutorAccount. trailing_dd_limit_usd/
+    profit_target_usd mirror the Apex evaluation's own rule -- the one
+    genuinely new risk concept this subsystem needed that Alt Matrix never
+    did (margin-floor/position-count/total-risk-pct, not a trailing
+    drawdown from a running high-water mark). cme_risk.py is the only
+    module that reads/writes these against ExecutorAccount.high_water_
+    mark_usd."""
+    __tablename__ = "cme_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, nullable=False, unique=True, index=True)
+    mnq_enabled = Column(Boolean, nullable=False, default=True)
+    mes_enabled = Column(Boolean, nullable=False, default=True)
+    daily_risk_budget_usd = Column(Float, nullable=False, default=350.0)
+    contracts_cap = Column(Integer, nullable=False, default=3)
+    trailing_dd_limit_usd = Column(Float, nullable=False, default=2000.0)
+    profit_target_usd = Column(Float, nullable=False, default=3000.0)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

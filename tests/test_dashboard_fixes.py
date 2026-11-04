@@ -223,3 +223,123 @@ def test_api_dashboard_mas_history_prefers_live_order_over_dry_run(basic_client)
 
 # test_api_dashboard_jewel removed 2026-08-30 -- tested /api/dashboard/jewel,
 # already removed from main.py (JewelSnapshotLog's only writer is archived).
+
+
+# ------------------------------------------------------------------ P0 fix (2026-11-04): per-user scoping
+#
+# Direct regression test for the confirmed bug (AGENT_LOG 2026-11-01 16:30
+# CT, independently re-verified against the real route code before fixing,
+# not taken on the report's word): neither route filtered ExecutorOrder by
+# account_id/user_id, so a logged-in user's win_rate/net_r/pnl_series mixed
+# in every other user's real-money P&L. A SEPARATE, unrelated second user
+# (own account, own plan, own order) is added here rather than into the
+# module-scoped setup_test_db fixture above, specifically so it does NOT
+# change total_sessions/fill_rate for the existing tests (those stay
+# deliberately UNSCOPED -- shared gate activity, not money, see the
+# route's own new comment).
+
+@pytest.fixture
+def other_user_with_own_order(basic_client):
+    # Captures basic_fix's CURRENT numbers before other_fix's data exists --
+    # deliberately not a hardcoded absolute value, since this module's
+    # shared DB accumulates permanent rows from earlier tests in this same
+    # file (e.g. test_api_dashboard_mas_history_prefers_live_order_over_
+    # dry_run adds two more of basic_fix's own orders). Proving "identical
+    # before and after other_fix's unrelated data exists" is the real
+    # regression guard for the leak this fixes, and it stays correct
+    # regardless of what ran earlier in this module.
+    before = basic_client.get("/api/dashboard/overview").json()
+
+    db = SessionLocal()
+    other_user = UserModel(
+        email="other_fix@kabroda.com", password_hash=auth.hash_password("otherpass123"),
+        username="otherfix", tier="basic", is_admin=False, subscription_status="active",
+    )
+    db.add(other_user)
+    db.commit()
+    other_account = ea.create_account(db, user_id=other_user.id, label="other_fix_acct")
+    db.commit()
+
+    other_plan = TravelerPlan(symbol="BTC/USDT", date_key="2026-09-25", session_id="us_ny_futures",
+                               status="FILLED", direction="LONG",
+                               breakout_trigger=96000.0, breakdown_trigger=95000.0,
+                               stop_price=95000.0, t1_price=98000.0, fill_price=96000.0)
+    db.add(other_plan)
+    db.commit()
+    other_order = ExecutorOrder(
+        trade_plan_id=other_plan.id, traveler_plan_id=other_plan.id, account_id=other_account.id, mode="LIVE",
+        symbol="BTC/USDT", direction="LONG", entry_price=96000.0, stop_price=95000.0, t1_price=98000.0,
+        qty=0.01, risk_dollars_used=100.0, decision="WOULD_PLACE", management_state="CLOSED_T1",
+        gate_profile_used="GATE_TRAVELER", mgmt_profile_used="MGMT_E1_STACK",
+        exit_reason="T1", exit_price=98000.0, realized_pnl_r=5.0,   # deliberately large, so a leak is obvious
+    )
+    db.add(other_order)
+    db.commit()
+    other_id = other_user.id
+    other_account_id = other_account.id
+    db.close()
+
+    client = TestClient(app)
+    client.post("/login", data={"email": "other_fix@kabroda.com", "password": "otherpass123"})
+    yield {"client": client, "user_id": other_id, "basic_before": before}
+
+    db = SessionLocal()
+    db.query(ExecutorOrder).filter_by(account_id=other_account_id).delete()
+    db.query(TravelerPlan).filter_by(date_key="2026-09-25").delete()
+    db.query(UserModel).filter_by(email="other_fix@kabroda.com").delete()
+    db.commit()
+    db.close()
+
+
+def test_overview_does_not_leak_another_users_pnl_into_a_basic_users_own_numbers(basic_client, admin_client, other_user_with_own_order):
+    before = other_user_with_own_order["basic_before"]
+
+    # basic_fix's own win_rate/net_r/executor_closed_trades must be
+    # COMPLETELY UNCHANGED by other_fix's separate +5.0R order on a
+    # different account -- this is the direct regression guard for the
+    # confirmed leak (previously: these three summed across EVERY account
+    # in the database with zero filtering).
+    basic_resp = basic_client.get("/api/dashboard/overview").json()
+    assert basic_resp["net_r"] == before["net_r"]
+    assert basic_resp["win_rate"] == before["win_rate"]
+    assert basic_resp["executor_closed_trades"] == before["executor_closed_trades"]
+
+    # other_fix sees ONLY their own one order -- not basic_fix's any.
+    other_resp = other_user_with_own_order["client"].get("/api/dashboard/overview").json()
+    assert other_resp["net_r"] == 5.0
+    assert other_resp["win_rate"] == 100.0
+    assert other_resp["executor_closed_trades"] == 1
+
+    # Admin sees the combined total across both real users -- the one view
+    # where seeing everyone's numbers together is the intended behavior.
+    admin_resp = admin_client.get("/api/dashboard/overview").json()
+    assert admin_resp["executor_closed_trades"] == before["executor_closed_trades"] + 1
+    assert admin_resp["net_r"] == pytest.approx(before["net_r"] + 5.0)
+
+    # total_sessions/fill_rate are deliberately NOT user-scoped (shared
+    # gate activity) -- adding other_fix's own plan DOES raise the shared
+    # total for every viewer, including basic_fix, same as it should (this
+    # is correct, not a leak -- the session/fill-rate KPIs describe the
+    # gate's own activity, never any one user's money).
+    assert basic_resp["total_sessions"] == before["total_sessions"] + 1
+    assert other_resp["total_sessions"] == before["total_sessions"] + 1
+
+
+def test_mas_history_does_not_leak_another_users_trade_detail(basic_client, other_user_with_own_order):
+    # pnl_series length should match basic_fix's own resolved-order count,
+    # captured by the fixture BEFORE other_fix's order existed.
+    before_closed_trades = other_user_with_own_order["basic_before"]["executor_closed_trades"]
+
+    basic_resp = basic_client.get("/api/dashboard/mas-history").json()
+    basic_dates = {t["date_key"] for t in basic_resp["trades"]}
+    assert "2026-09-25" in basic_dates   # the shared plan row is still listed (unscoped)...
+    other_users_row = next(t for t in basic_resp["trades"] if t["date_key"] == "2026-09-25")
+    assert other_users_row["exit_reason"] is None   # ...but its real trade DETAIL must not leak through
+    assert other_users_row["realized_pnl"] is None
+    assert len(basic_resp["pnl_series"]) == before_closed_trades   # only basic_fix's own resolved orders, unaffected by other_fix's
+
+    other_resp = other_user_with_own_order["client"].get("/api/dashboard/mas-history").json()
+    assert len(other_resp["pnl_series"]) == 1
+    own_row = next(t for t in other_resp["trades"] if t["date_key"] == "2026-09-25")
+    assert own_row["exit_reason"] == "T1"
+    assert own_row["realized_pnl"] == "+5.0000R"

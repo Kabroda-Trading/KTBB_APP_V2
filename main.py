@@ -42,6 +42,8 @@ import traveler_plan_engine
 import executor_live_e1_engine
 import alt_matrix_engine
 import alt_matrix_radar
+import cme_engine
+import cme_radar
 import metasignals_triage
 import metasignals_paper_engine
 import metasignals_watcher
@@ -741,6 +743,17 @@ async def lifespan(app: FastAPI):
     # paper positions that already exist. Zero real capital at risk no
     # matter what this loop does; it never touches an ExecutorAccount.
     app.state.metasignals_watch_task = asyncio.create_task(metasignals_watcher.run_metasignals_watch_loop())
+    # CME Micro Futures via Tradovate (2026-11-04) -- a FOURTH, fully
+    # isolated subsystem (see cme_engine.py's own header for the Iron Wall
+    # and the deliberate session/watch-loop split, different from Alt
+    # Matrix's own). Safe to boot now with zero CMEConfig rows configured:
+    # both loops simply find nothing enabled and do nothing each tick.
+    # cme_market.py's fetch functions raise NotImplementedError until
+    # Tradovate's real Market Data API is confirmed live -- the watch loop
+    # catches that per-tick and keeps running harmlessly until that gap is
+    # closed (see that module's own header).
+    app.state.cme_session_task = asyncio.create_task(cme_engine.run_cme_session_loop())
+    app.state.cme_watch_task   = asyncio.create_task(cme_engine.run_cme_watch_loop())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
     # weekly_task (run_weekly_scheduler) removed 2026-09-24 -- see that
@@ -770,6 +783,8 @@ async def lifespan(app: FastAPI):
     app.state.alt_matrix_signal_task.cancel()
     app.state.alt_matrix_watch_task.cancel()
     app.state.metasignals_watch_task.cancel()
+    app.state.cme_session_task.cancel()
+    app.state.cme_watch_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -1072,6 +1087,18 @@ async def api_radar_alt_matrix_snapshot(db: Session = Depends(get_db)):
         return JSONResponse(alt_matrix_radar.get_public_alt_matrix_snapshot(db))
     except Exception as e:
         print(f"[RADAR] alt-matrix-snapshot failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "symbols": {}})
+
+
+@app.get("/api/radar/cme-snapshot")
+async def api_radar_cme_snapshot(db: Session = Depends(get_db)):
+    """CME's own public radar feed, mirroring the Alt Matrix route above
+    exactly. Pure DB reads via cme_radar.py, zero import of/call into any
+    other subsystem's module or table."""
+    try:
+        return JSONResponse(cme_radar.get_public_cme_snapshot(db))
+    except Exception as e:
+        print(f"[RADAR] cme-snapshot failed: {e}")
         return JSONResponse({"ok": False, "error": str(e), "symbols": {}})
 
 
@@ -1671,6 +1698,7 @@ from database import (
     ExecutorAccount as _ExecutorAccount, ExecutorOrder as _ExecutorOrder,
     ExecutorAuditLog as _ExecutorAuditLog, ExecutorGlobalConfig as _ExecutorGlobalConfig,
     ExecutorSizingPolicy as _ExecutorSizingPolicy, AltMatrixConfig as _AltMatrixConfig,
+    CMEConfig as _CMEConfig,
 )
 import executor_accounts as _executor_accounts
 import executor_control as _executor_control
@@ -1728,6 +1756,19 @@ class AltMatrixConfigRequest(BaseModel):
     is applied."""
     sol_enabled: Optional[bool] = None
     eth_enabled: Optional[bool] = None
+
+
+class CMEConfigRequest(BaseModel):
+    """Same independent-field, omitted-leaves-unchanged convention as
+    AltMatrixConfigRequest above. On first touch for an account with no
+    CMEConfig row yet, the row is created with the schema's own defaults
+    before any provided override is applied."""
+    mnq_enabled: Optional[bool] = None
+    mes_enabled: Optional[bool] = None
+    daily_risk_budget_usd: Optional[float] = None
+    contracts_cap: Optional[int] = None
+    trailing_dd_limit_usd: Optional[float] = None
+    profit_target_usd: Optional[float] = None
 
 
 class ExecutorModeChangeRequest(BaseModel):
@@ -1848,6 +1889,20 @@ async def api_admin_alt_matrix_status(request: Request, db: Session = Depends(ge
         return JSONResponse(alt_matrix_radar.get_admin_alt_matrix_status(db))
     except Exception as e:
         print(f"[ADMIN] alt-matrix-status failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@app.get("/api/admin/cme-status")
+async def api_admin_cme_status(request: Request, db: Session = Depends(get_db)):
+    """CME's own admin status surface, mirroring the Alt Matrix route
+    above exactly -- admin-only, pure DB reads via cme_radar.py."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    try:
+        return JSONResponse(cme_radar.get_admin_cme_status(db))
+    except Exception as e:
+        print(f"[ADMIN] cme-status failed: {e}")
         return JSONResponse({"ok": False, "error": str(e)})
 
 
@@ -2059,6 +2114,86 @@ async def api_executor_set_alt_matrix_config(account_id: int, request: Request, 
     return JSONResponse({"ok": True, "config": {
         "account_id": cfg.account_id, "sol_enabled": cfg.sol_enabled, "eth_enabled": cfg.eth_enabled,
     }})
+
+
+def _cme_config_dict(cfg: Optional["_CMEConfig"], account_id: int) -> Dict[str, Any]:
+    defaults = {"mnq_enabled": True, "mes_enabled": True, "daily_risk_budget_usd": 350.0,
+                "contracts_cap": 3, "trailing_dd_limit_usd": 2000.0, "profit_target_usd": 3000.0}
+    if cfg is None:
+        return {"account_id": account_id, **defaults}
+    return {
+        "account_id": cfg.account_id, "mnq_enabled": cfg.mnq_enabled, "mes_enabled": cfg.mes_enabled,
+        "daily_risk_budget_usd": cfg.daily_risk_budget_usd, "contracts_cap": cfg.contracts_cap,
+        "trailing_dd_limit_usd": cfg.trailing_dd_limit_usd, "profit_target_usd": cfg.profit_target_usd,
+    }
+
+
+@app.get("/api/executor/accounts/{account_id}/cme-config")
+async def api_executor_get_cme_config(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """Read counterpart to the POST route below -- same ownership check and
+    same no-side-effect-on-read convention as the Alt Matrix config GET
+    route above."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    cfg = db.query(_CMEConfig).filter_by(account_id=account_id).first()
+    return JSONResponse({"ok": True, "config": _cme_config_dict(cfg, account_id)})
+
+
+@app.post("/api/executor/accounts/{account_id}/cme-config")
+async def api_executor_set_cme_config(account_id: int, request: Request, body: CMEConfigRequest, db: Session = Depends(get_db)):
+    """CME's own per-account enable/sizing/drawdown config, mirroring the
+    Alt Matrix config route's lazy-init-on-write idiom exactly."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    cfg = db.query(_CMEConfig).filter_by(account_id=account_id).first()
+    if cfg is None:
+        cfg = _CMEConfig(account_id=account_id)
+        db.add(cfg)
+        db.flush()
+    for field in ("mnq_enabled", "mes_enabled", "daily_risk_budget_usd", "contracts_cap", "trailing_dd_limit_usd", "profit_target_usd"):
+        value = getattr(body, field)
+        if value is not None:
+            setattr(cfg, field, value)
+    db.commit()
+    return JSONResponse({"ok": True, "config": _cme_config_dict(cfg, account_id)})
+
+
+@app.post("/api/tradovate/flatten_all")
+async def api_tradovate_flatten_all(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """Fleet Emergency Flatten -- NEW functionality, no analog anywhere
+    else in this codebase (the existing per-account/global kill switch only
+    ever blocks NEW orders, never touches an existing position -- see
+    cme_executor.py::emergency_flatten()'s own header). Same ownership-
+    based auth as every other account mutation route -- deliberately NOT
+    a fleet-wide admin action from this one route (CC_INTERFACE §8E's own
+    'Fleet' framing is about the dashboard button covering every account
+    the logged-in user can see; each account's flatten is still scoped to
+    that one account, same mutual-isolation rule as everything else on the
+    executor domain)."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    import cme_executor
+    try:
+        result = await cme_executor.emergency_flatten(db, account)
+        db.commit()
+        return JSONResponse({"ok": True, **result})
+    except Exception as e:
+        db.rollback()
+        print(f"[CME] emergency flatten failed for account {account_id}: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.post("/api/executor/accounts/{account_id}/assumed-balance")
@@ -3173,6 +3308,32 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         from sqlalchemy import func
         from database import TravelerPlan as _TravelerPlan
 
+        # P0 fix (2026-11-04, confirmed bug flagged in AGENT_LOG 2026-11-01
+        # 16:30 CT -- independently re-verified against this exact code
+        # before fixing, not taken on the report's word): every
+        # ExecutorOrder-sourced figure below used to sum across EVERY
+        # account/user in the database with zero filtering, so any logged-
+        # in user saw every other user's real money P&L mixed into their
+        # own numbers. TravelerPlan's own session/fill-rate stats just
+        # below are deliberately left UNSCOPED -- they describe the gate's
+        # own shared activity (how many sessions armed/filled), not any
+        # one user's money, same as the public radar shows the same gate
+        # state to everyone. Admins still see the system-wide total (the
+        # same "no bypass except is_admin" pattern used everywhere else on
+        # the executor domain); a non-admin user with zero ExecutorAccount
+        # rows correctly gets zero/empty numbers below, not an error.
+        if ctx.get("is_admin"):
+            user_account_ids = None
+        else:
+            user_account_ids = [
+                a_id for (a_id,) in db.query(_ExecutorAccount.id).filter(
+                    _ExecutorAccount.user_id == ctx["user"].id
+                ).all()
+            ]
+
+        def _scope_to_user(query):
+            return query if user_account_ids is None else query.filter(_ExecutorOrder.account_id.in_(user_account_ids))
+
         total = db.query(func.count(_TravelerPlan.id)).filter(
             _TravelerPlan.symbol == "BTC/USDT").scalar() or 0
         filled = db.query(func.count(_TravelerPlan.id)).filter(
@@ -3186,10 +3347,10 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         # win/loss COUNT -- same "stops aren't a clean +-1R" reasoning
         # CLAUDE.md rule 5 already established for the retired CampaignLog
         # version of this KPI.
-        resolved_r = [r for (r,) in db.query(_ExecutorOrder.realized_pnl_r).filter(
+        resolved_r = [r for (r,) in _scope_to_user(db.query(_ExecutorOrder.realized_pnl_r).filter(
             _ExecutorOrder.traveler_plan_id.isnot(None),
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        ).all()]
+        )).all()]
         win_rate = round(sum(1 for r in resolved_r if r > 0) / len(resolved_r) * 100, 1) if resolved_r else 0.0
         net_r = round(sum(resolved_r), 4)
 
@@ -3199,13 +3360,13 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         # (every real ExecutorOrder, any lineage) are shown separately,
         # never merged, same principle the pre-retirement CampaignLog/
         # executor split already established.
-        executor_r_raw = db.query(func.sum(_ExecutorOrder.realized_pnl_r)).filter(
+        executor_r_raw = _scope_to_user(db.query(func.sum(_ExecutorOrder.realized_pnl_r)).filter(
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        ).scalar()
+        )).scalar()
         executor_realized_pnl_r = round(float(executor_r_raw or 0.0), 4)
-        executor_closed_trades = db.query(func.count(_ExecutorOrder.id)).filter(
+        executor_closed_trades = _scope_to_user(db.query(func.count(_ExecutorOrder.id)).filter(
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        ).scalar() or 0
+        )).scalar() or 0
         # spend_7d/cache_hit_rate (AgentRunLog-sourced) removed 2026-09-24 --
         # AgentRunLog's only writer, agent_core._call_agent(), has had zero
         # live callers since the 6-agent CrewAI crew was retired 2026-08-17;
@@ -3253,6 +3414,24 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         from sqlalchemy import func
         from database import TravelerPlan as _TravelerPlan
 
+        # P0 fix (2026-11-04) -- same bug, same scoping fix, same reasoning
+        # as /api/dashboard/overview above: status_counts (TravelerPlan-
+        # only) stays unscoped (shared gate activity, not money); every
+        # ExecutorOrder-sourced figure below (pnl_series, each trade's own
+        # realized_pnl) is now scoped to the logged-in user's own accounts
+        # unless they're an admin.
+        if ctx.get("is_admin"):
+            user_account_ids = None
+        else:
+            user_account_ids = [
+                a_id for (a_id,) in db.query(_ExecutorAccount.id).filter(
+                    _ExecutorAccount.user_id == ctx["user"].id
+                ).all()
+            ]
+
+        def _scope_to_user(query):
+            return query if user_account_ids is None else query.filter(_ExecutorOrder.account_id.in_(user_account_ids))
+
         status_rows = db.query(_TravelerPlan.status, func.count(_TravelerPlan.id)).filter(
             _TravelerPlan.symbol == "BTC/USDT").group_by(_TravelerPlan.status).all()
         status_counts = {row[0]: row[1] for row in status_rows}
@@ -3261,10 +3440,10 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         # order, ordered by exit time -- real realized_pnl_r sum, not a
         # hardcoded +-1.0, same principle the retired CampaignLog version
         # of this KPI already established.
-        closed_orders = db.query(_ExecutorOrder.exit_time, _ExecutorOrder.realized_pnl_r).filter(
+        closed_orders = _scope_to_user(db.query(_ExecutorOrder.exit_time, _ExecutorOrder.realized_pnl_r).filter(
             _ExecutorOrder.traveler_plan_id.isnot(None),
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        ).order_by(_ExecutorOrder.exit_time).all()
+        )).order_by(_ExecutorOrder.exit_time).all()
         cumulative = 0.0
         pnl_series = []
         for exit_time, r in closed_orders:
@@ -3283,9 +3462,9 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
         # mirroring the admin traveler-plan-status route's own selection
         # without an extra query per row.
         order_by_plan = {}
-        for o in db.query(_ExecutorOrder).filter(
+        for o in _scope_to_user(db.query(_ExecutorOrder).filter(
             _ExecutorOrder.traveler_plan_id.in_(plan_ids)
-        ).order_by(_ExecutorOrder.id.desc()).all():
+        )).order_by(_ExecutorOrder.id.desc()).all():
             existing = order_by_plan.get(o.traveler_plan_id)
             if existing is None or (o.mode == "LIVE" and existing.mode != "LIVE"):
                 order_by_plan[o.traveler_plan_id] = o
