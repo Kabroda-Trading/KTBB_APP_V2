@@ -206,6 +206,15 @@ async def _advance_pending_order(db: Session, order_row: CMEOrder) -> None:
         cross = cme_signals.check_cross(bars_5m, plan.bo, plan.bd)
         if cross is None:
             return   # still waiting within the cross window -- caller enforces the window via plan age, not here
+        if cross["side"] != order_row.direction:
+            # The OTHER side crossed first (the fan-out creates one
+            # PENDING_ENTRY row per direction, an OCO-style pair) -- this
+            # row can never be the first to fire this plan. Found
+            # 2026-11-04: without this check, a single confirmed cross
+            # placed a REAL bracket on BOTH rows, opening an unbacktested
+            # straddle. Stand this side down permanently instead.
+            cme_executor.stand_down_opposite_side(db, order_row, winning_side=cross["side"])
+            return
         order_row.cross_confirmed_at = datetime.datetime.utcnow()
         await cme_executor.place_resting_bracket(db, account, plan, order_row)
         return

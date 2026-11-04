@@ -155,6 +155,19 @@ async def place_resting_bracket(db: Session, account: ExecutorAccount, plan_row:
     _audit(db, "ORDER_PLACED", f"CME resting bracket placed for order {order_row.id} at {trig} (stop {stop}, target {target})", account.id, order_row)
 
 
+def stand_down_opposite_side(db: Session, order_row: CMEOrder, winning_side: str) -> None:
+    """The D1 fan-out creates one PENDING_ENTRY row per direction per
+    account per plan (an OCO-style pair) -- once ONE side's trigger is
+    confirmed first, the other side can never be the first to fire this
+    plan, so it stands down permanently rather than keep polling. Pure DB
+    state change, no exchange call -- found and fixed 2026-11-04 writing
+    tests/test_cme_engine.py (the original code let BOTH sides place a
+    real bracket off a single confirmed cross)."""
+    _log_transition(db, order_row, order_row.management_state, "OPPOSITE_CROSSED",
+                     detail={"winning_side": winning_side})
+    order_row.management_state = "OPPOSITE_CROSSED"
+
+
 async def check_retest_fill_and_confirm(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> None:
     """For a WAITING_RETEST order, checks whether the resting bracket has
     filled (a real open position now exists) -- no separate 'place the

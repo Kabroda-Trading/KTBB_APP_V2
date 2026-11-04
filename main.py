@@ -1771,6 +1771,17 @@ class CMEConfigRequest(BaseModel):
     profit_target_usd: Optional[float] = None
 
 
+class TradovateAccountInfoRequest(BaseModel):
+    """The two fields cme_tradovate_client.TradovateClient needs beyond
+    username/password: the real numeric Tradovate accountId (required --
+    get_balance()/get_positions() both filter on it; left unset it
+    silently queries/filters on 0, which looks like a false "zero
+    balance, no positions" success rather than a real error) and the
+    display name shown on notifications."""
+    tradovate_account_id: int
+    tradovate_account_name: Optional[str] = None
+
+
 class ExecutorModeChangeRequest(BaseModel):
     mode: str
     confirm: Optional[str] = None
@@ -1858,6 +1869,8 @@ def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, An
         "kill_switch_reason": account.kill_switch_reason,
         "margin_mode": account.margin_mode, "leverage_baseline": account.leverage_baseline,
         "assumed_balance_usd": account.assumed_balance_usd,
+        "tradovate_account_id": account.tradovate_account_id,
+        "tradovate_account_name": account.tradovate_account_name,
         "has_credentials": bool(account.api_key_encrypted),
         "credential_set_at": account.credential_set_at.isoformat() if account.credential_set_at else None,
         # Phase 2 (2026-09-15): the RESOLVED profile (gate_profile_of()/
@@ -2239,6 +2252,32 @@ async def api_executor_set_assumed_balance(account_id: int, request: Request, bo
     except ValueError as e:
         db.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    db.commit()
+    return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
+
+
+@app.post("/api/executor/accounts/{account_id}/tradovate-account-info")
+async def api_executor_set_tradovate_account_info(account_id: int, request: Request, body: TradovateAccountInfoRequest, db: Session = Depends(get_db)):
+    """Sets the real Tradovate accountId cme_tradovate_client.py's
+    get_balance()/get_positions() filter on. Without this, VERIFY AUTH's
+    balance check silently targets accountId=0 -- looks like a clean
+    "zero balance" pass, not the real error it should be."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    account.tradovate_account_id = body.tradovate_account_id
+    if body.tradovate_account_name is not None:
+        account.tradovate_account_name = body.tradovate_account_name
+    _executor_accounts.write_audit(
+        db, "ACCOUNT_UPDATED",
+        f"Tradovate account info set for account {account.id}: id={body.tradovate_account_id}",
+        account_id=account.id, actor=ctx.get("email") or "unknown",
+        detail={"tradovate_account_id": body.tradovate_account_id, "tradovate_account_name": body.tradovate_account_name},
+    )
     db.commit()
     return JSONResponse({"ok": True, "account": _serialize_account(account, db)})
 

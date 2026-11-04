@@ -550,6 +550,40 @@ def init_db():
         except Exception:
             pass
 
+    # cme_orders unique-constraint fix (2026-11-04) -- the original
+    # constraint (cme_plan_id, account_id) was too narrow: the D1 fan-out
+    # legitimately writes TWO rows per account per plan (one per
+    # direction). SQLite can't ALTER a constraint directly, so if a table
+    # already exists with the old 2-column constraint, drop and let
+    # create_all() above recreate it with the corrected 3-column one --
+    # safe ONLY while the table is empty, which it always has been so far
+    # (gated behind cme_market.py's still-open NotImplementedError and,
+    # before that, zero CMEConfig rows ever existing). Never drops a
+    # non-empty table -- that would be a real data-loss risk instead of a
+    # schema fix, so it logs and leaves it alone for a human to handle.
+    try:
+        with engine.connect() as conn:
+            idx_rows = conn.execute(text("PRAGMA index_list('cme_orders')")).fetchall()
+            has_old_constraint = False
+            for row in idx_rows:
+                idx_name, is_unique = row[1], row[2]
+                if not is_unique:
+                    continue
+                cols = {r[2] for r in conn.execute(text(f"PRAGMA index_info('{idx_name}')")).fetchall()}
+                if cols == {"cme_plan_id", "account_id"}:
+                    has_old_constraint = True
+                    break
+            if has_old_constraint:
+                count = conn.execute(text("SELECT COUNT(*) FROM cme_orders")).scalar()
+                if count == 0:
+                    conn.execute(text("DROP TABLE cme_orders"))
+                    conn.commit()
+                    Base.metadata.create_all(bind=engine)
+                else:
+                    print(f"WARNING: cme_orders has the old 2-column unique constraint but holds {count} row(s) -- cannot auto-migrate, needs manual review before CME can run")
+    except Exception as e:
+        print(f"cme_orders constraint migration check failed: {e}")
+
     # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
     # docstring above for what each column is and why) ---
     for _col in [
@@ -3300,9 +3334,16 @@ class CMEOrder(Base):
     be_amended_at = Column(DateTime, nullable=True)
     be_price = Column(Float, nullable=True)
 
-    # PENDING_ENTRY | WAITING_RETEST | NO_RETEST | FILLED | RATCHETED |
-    # CLOSED_STOP | CLOSED_BE_STOP | CLOSED_TARGET | CLOSED_TIME_FLUSH |
-    # CLOSED_MANUAL | CLOSED_ERROR | ENTRY_FILLED_UNPROTECTED
+    # PENDING_ENTRY | WAITING_RETEST | NO_RETEST | OPPOSITE_CROSSED | FILLED |
+    # RATCHETED | CLOSED_STOP | CLOSED_BE_STOP | CLOSED_TARGET |
+    # CLOSED_TIME_FLUSH | CLOSED_MANUAL | CLOSED_ERROR |
+    # ENTRY_FILLED_UNPROTECTED
+    # OPPOSITE_CROSSED (added 2026-11-04): the D1 fan-out creates one
+    # PENDING_ENTRY row per direction (LONG+SHORT) per account per plan --
+    # a legitimate OCO-style pair, only one of which can ever actually
+    # fire. Once the OTHER side's trigger confirms first, this row stands
+    # down permanently rather than keep polling for a cross on a side that
+    # can no longer be the first one to fire this plan.
     management_state = Column(String, nullable=False, default="PENDING_ENTRY")
     exit_reason = Column(String, nullable=True)
     exit_price = Column(Float, nullable=True)
@@ -3318,7 +3359,14 @@ class CMEOrder(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("cme_plan_id", "account_id", name="uq_cme_order_plan_account"),
+        # Includes direction (not just plan+account) -- the D1 fan-out
+        # legitimately creates two rows per account per plan, one per
+        # direction (an OCO-style pair). The original 2-column constraint
+        # (plan+account only) made the second direction's insert collide
+        # with the first's -- found 2026-11-04 writing
+        # tests/test_cme_engine.py against a real DB; see init_db()'s own
+        # migration for the already-empty-table fix-up this needed.
+        UniqueConstraint("cme_plan_id", "account_id", "direction", name="uq_cme_order_plan_account_direction"),
     )
 
 

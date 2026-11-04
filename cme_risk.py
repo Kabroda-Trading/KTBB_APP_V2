@@ -30,8 +30,21 @@ import cme_signals
 OTHER_SYMBOL = {"MNQ": "MES", "MES": "MNQ"}
 
 _OPEN_CME_STATES = (
-    "PENDING_ENTRY", "WAITING_RETEST", "FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED",
+    "WAITING_RETEST", "FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED",
 )
+# PENDING_ENTRY is deliberately NOT "open" -- cme_engine.py's own D1 fan-out
+# creates TWO PENDING_ENTRY rows per account per plan (one per direction, a
+# legitimate OCO-style pair -- only one can ever actually fire). Checked
+# 2026-11-04 whether treating PENDING_ENTRY as open here could make the
+# SECOND direction processed in that same fan-out loop see its own
+# uncommitted sibling row and self-reject as ALREADY_OPEN_ON_SYMBOL_TODAY --
+# NOT reproducible as a live bug today: database.py's SessionLocal is
+# autoflush=False and the loop's one db.flush() call sits after both
+# directions are added, so the sibling genuinely isn't query-visible yet.
+# Changed anyway as a defensive correctness fix, not a reproduced-bug fix:
+# "open" should mean a row that has actually progressed toward or into a live
+# position, matching the business rule's own "once a symbol has
+# triggered" wording for the $175/$350 budget split below.
 
 
 def update_high_water_mark(account: ExecutorAccount, current_equity: float) -> float:

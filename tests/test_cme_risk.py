@@ -181,9 +181,17 @@ def test_can_open_new_position_admits_a_clean_candidate(db):
 
 
 def test_can_open_new_position_rejects_if_already_open_on_symbol_today(db):
+    # WAITING_RETEST, not PENDING_ENTRY -- PENDING_ENTRY is deliberately
+    # NOT "open" (see _OPEN_CME_STATES's own comment, 2026-11-04): the D1
+    # fan-out creates a PENDING_ENTRY row for BOTH directions as a
+    # legitimate OCO-style pair, and treating that as "already open"
+    # made the second direction self-reject against its own sibling.
+    # WAITING_RETEST (a cross already confirmed, bracket already
+    # resting) is the correct state for what this test is actually
+    # checking -- a real, already-in-progress trade on this symbol today.
     account = _ready_account(db)
     plan = _plan(db, symbol="MNQ", date_key="2026-11-04")
-    _order(db, plan, account, symbol="MNQ", management_state="PENDING_ENTRY")
+    _order(db, plan, account, symbol="MNQ", management_state="WAITING_RETEST")
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=50000.0,
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,

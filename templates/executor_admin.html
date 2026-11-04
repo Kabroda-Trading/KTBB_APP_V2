@@ -520,6 +520,13 @@ async function loadAccounts() {
                     <button class="btn btn-ok" onclick="saveCmeConfig(${a.id})" style="align-self:flex-end;">SAVE</button>
                 </div>
                 <p class="empty" id="cmeSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
+                <p class="empty" style="padding:8px 0 4px;">Required before VERIFY AUTH's balance check means anything -- without the real Tradovate account ID, that check silently queries account 0 instead of yours.</p>
+                <div class="risk-form">
+                    <label>Tradovate Account ID (numeric, from Tradovate Web -> Account Settings)<input type="number" step="1" id="cmeTvAccountId-${a.id}"></label>
+                    <label>Tradovate Account Name (optional, e.g. APEX12345)<input type="text" id="cmeTvAccountName-${a.id}"></label>
+                    <button class="btn btn-ok" onclick="saveTradovateAccountInfo(${a.id})" style="align-self:flex-end;">SAVE</button>
+                </div>
+                <p class="empty" id="cmeTvAccountInfoResult-${a.id}" style="margin-top:6px; display:none;"></p>
             </div>
 
             <details style="margin-top:10px;">
@@ -555,6 +562,8 @@ async function loadAccounts() {
         renderGoLiveSection(a.id, a);
         loadAltMatrixConfig(a.id);
         loadCmeConfig(a.id);
+        document.getElementById(`cmeTvAccountId-${a.id}`).value = a.tradovate_account_id ?? "";
+        document.getElementById(`cmeTvAccountName-${a.id}`).value = a.tradovate_account_name ?? "";
     }
 }
 
@@ -615,6 +624,29 @@ async function saveCmeConfig(accountId) {
         return;
     }
     resultEl.textContent = `Saved: MNQ ${resp.config.mnq_enabled ? "enabled" : "disabled"}, MES ${resp.config.mes_enabled ? "enabled" : "disabled"}, cap ${resp.config.contracts_cap}, trailing DD $${resp.config.trailing_dd_limit_usd}.`;
+    resultEl.style.color = "#6ee7b7";
+}
+
+async function saveTradovateAccountInfo(accountId) {
+    const idField = document.getElementById(`cmeTvAccountId-${accountId}`);
+    const nameField = document.getElementById(`cmeTvAccountName-${accountId}`);
+    const tradovate_account_id = parseInt(idField.value);
+    const resultEl = document.getElementById(`cmeTvAccountInfoResult-${accountId}`);
+    resultEl.style.display = "block";
+    if (!tradovate_account_id) {
+        resultEl.textContent = "Enter the numeric Tradovate account ID first.";
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    const resp = await api(`/api/executor/accounts/${accountId}/tradovate-account-info`, {
+        method: "POST", body: JSON.stringify({ tradovate_account_id, tradovate_account_name: nameField.value.trim() || null }),
+    });
+    if (!resp.ok) {
+        resultEl.textContent = resp.error || "failed to save Tradovate account info";
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.textContent = `Saved: account ID ${resp.account.tradovate_account_id}.`;
     resultEl.style.color = "#6ee7b7";
 }
 

@@ -212,6 +212,63 @@ def test_flatten_all_owner_succeeds_with_mocked_executor(env, monkeypatch):
     mock_flatten.assert_awaited_once()
 
 
+# ------------------------------------------------------------------ POST /api/executor/accounts/{id}/tradovate-account-info
+
+def test_set_tradovate_account_info_persists_and_is_used_by_verify_auth(env, monkeypatch):
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",
+                        json={"tradovate_account_id": 987654, "tradovate_account_name": "APEX987654"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["account"]["tradovate_account_id"] == 987654
+    assert body["account"]["tradovate_account_name"] == "APEX987654"
+
+    db.refresh(account)
+    assert account.tradovate_account_id == 987654
+    assert account.tradovate_account_name == "APEX987654"
+
+    seen_account_ids = []
+
+    def _spy_init(self, username, password, account_id, account_name, is_demo=False):
+        seen_account_ids.append(account_id)
+        self.username, self.password, self.account_id, self.account_name, self.is_demo = (
+            username, password, account_id, account_name, is_demo)
+
+    monkeypatch.setattr(tvc.TradovateClient, "__init__", _spy_init)
+    monkeypatch.setattr(tvc.TradovateClient, "get_balance", lambda self: _async_ok({"cashBalance": 1.0}))
+    monkeypatch.setattr(tvc.TradovateClient, "get_positions", lambda self: _async_ok([]))
+
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "u", "api_secret": "p"})
+    client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert seen_account_ids == [987654]   # not 0 -- the whole point of this route
+
+
+def test_set_tradovate_account_info_non_owner_gets_403(env):
+    client = _login("cme_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",
+                        json={"tradovate_account_id": 1})
+    assert resp.status_code == 403
+
+
+def test_set_tradovate_account_info_requires_an_id(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info", json={})
+    assert resp.status_code == 422   # tradovate_account_id is required, not optional
+
+
+async def _async_ok(value):
+    return value
+
+
 # ------------------------------------------------------------------ POST /api/executor/accounts/{id}/test-connection (Tradovate branch)
 
 def test_connection_routes_tradovate_accounts_to_the_tradovate_client(env, monkeypatch):
