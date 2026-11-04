@@ -9507,3 +9507,18 @@ Live auth against the MFFU account returned HTTP 200 with neither `accessToken` 
 **Paused, not blocked architecturally -- the code is correct and tested (1046 passing) regardless of the answer.** Once Andy has MFFU's actual answer this either becomes a short provisioning step (if they have one) or a known wait-until-funded timeline (if they don't) -- neither requires new code to find out. Specifically NOT building DeepSeek's "Mode A" session-token proposal (tenth/eleventh entries) speculatively in the meantime -- my two original objections (stale-token risk for a 24/7 engine; ToS risk of using a scraped session token instead of a sanctioned credential flow) are still unresolved, and whether MFFU actually sanctions that approach is now exactly the open question Andy is asking them.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (sixth entry, same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — CrossTrade added as an alternate CME execution provider, live-confirmed by Andy against the real MFFU account
+
+Resolution to the fifth entry's open gap (direct Tradovate API access gated off for unfunded/evaluation accounts). Andy independently found and tested CrossTrade (crosstrade.io) himself -- already had it linked to the real MFFU Tradovate identity and had sent a real test order through its webhook, which filled and was manually closed on the demo account. That was concrete, direct proof CrossTrade's broker-level integration bypasses the gate for this specific account -- stronger evidence than any further research, so the "does this work" question was treated as settled at that point.
+
+Built `cme_crosstrade_client.py` against CrossTrade's real OpenAPI 3.1 spec (fetched and parsed directly, not guessed -- place/modify/cancel/flatten/balance/position endpoints all confirmed field-by-field). Exposes the identical method surface as `cme_tradovate_client.TradovateClient`, normalized to the same return shapes -- `cme_executor._client_for()` is the only branch point (`ExecutorAccount.execution_provider`: None/"tradovate" (default, unchanged) | "crosstrade"), so no other engine file needed to change. New columns: `execution_provider`, `crosstrade_account_id`. Admin UI Step 7 got an Execution Provider dropdown.
+
+**Then live-verified against the real account, not left on assumption:** Andy ran `GET /v1/api/tv/accounts`, `/cashbalances`, and `/accounts/{account}` directly through CrossTrade's own API Playground (which runs real REST calls browser-side) and shared the actual JSON. This caught a real bug before it ever mattered -- the original `get_balance()` targeted `/cashbalances` with guessed field names; the real response nests balance rows two levels deep under each linked identity and uses different field names entirely (`totalCashValue`/`netLiq`/`realizedPnL`/`openPnL`/`cashUSD`, all under a `balance` object). Switched to `GET /accounts/{account}`, which is simpler and already scoped correctly, with confirmed real field names. Also confirmed the account identifier format live: a plain numeric string ("72422359"), matching the Brokers page's own ID column exactly -- no longer a guess.
+
+Still not live-verified: order placement/modify/cancel/flatten response shapes (no real order has existed yet to inspect) -- flagged in the client's own header, same as every other NOT YET LIVE-VERIFIED item in this build. Full site suite: 1053 passed. Site commits `d252d88`, `c96ce27`, pushed.
+
+Andy is rotating the existing Tradovate credentials on the Andy_CME_Funds account to the CrossTrade Bearer token (via the same secure admin-UI flow, never chat) and will run VERIFY AUTH once Render redeploys.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
