@@ -661,7 +661,14 @@ async function saveTradovateAccountInfo(accountId) {
 async function lookUpTradovateAccounts(accountId) {
     const box = document.getElementById(`cmeTvAccountLookupResults-${accountId}`);
     box.innerHTML = `<p class="empty">Looking up...</p>`;
-    const resp = await api(`/api/executor/accounts/${accountId}/tradovate-accounts`);
+    // Reads the checkbox's CURRENT state, not whatever was last saved --
+    // otherwise this is a chicken-and-egg trap: SAVE refuses to persist
+    // anything without a valid account ID, but the whole point of LOOK UP
+    // is to discover that ID in the first place. The ?demo= query param
+    // overrides the stored account field server-side (main.py's
+    // _resolve_tradovate_is_demo()), so this works before anything is saved.
+    const isDemo = document.getElementById(`cmeTvIsDemo-${accountId}`).checked;
+    const resp = await api(`/api/executor/accounts/${accountId}/tradovate-accounts?demo=${isDemo}`);
     if (!resp.ok) {
         box.innerHTML = `<p class="empty" style="color:#fca5a5;">${escapeHtml(resp.error || "lookup failed")}</p>`;
         return;

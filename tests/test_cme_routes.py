@@ -394,6 +394,38 @@ def test_lookup_tradovate_accounts_returns_id_and_name_for_each_account(env, mon
     ]
 
 
+def test_lookup_tradovate_accounts_demo_query_param_works_before_anything_is_saved(env, monkeypatch):
+    """2026-11-04 -- real UX bug found live: SAVE refuses to persist
+    tradovate_is_demo without a valid numeric account ID already present,
+    but LOOK UP is the only way to discover that ID -- a chicken-and-egg
+    trap for a brand-new account with no stored tradovate_is_demo at all.
+    The admin UI's LOOK UP button now sends the checkbox's live state as
+    ?demo=, which must work even though nothing has been saved yet."""
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+    assert account.tradovate_is_demo is None   # nothing saved yet -- the real scenario
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "u", "api_secret": "p"})
+
+    seen_is_demo = []
+
+    def _spy_init(self, username, password, account_id, account_name, is_demo=False):
+        seen_is_demo.append(is_demo)
+
+    monkeypatch.setattr(tvc.TradovateClient, "__init__", _spy_init)
+    monkeypatch.setattr(tvc.TradovateClient, "list_accounts", lambda self: _async_ok([]))
+
+    resp = client.get(f"/api/executor/accounts/{env['account_id']}/tradovate-accounts?demo=true")
+    assert resp.status_code == 200
+    assert seen_is_demo == [True]   # query override worked despite no stored value
+
+
 def test_lookup_tradovate_accounts_requires_credentials_first(env):
     db = env["db"]
     account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
