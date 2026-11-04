@@ -54,18 +54,29 @@
 #   GET /cashbalances, GET /accounts/{account}/positions,
 #   GET /accounts/{account}/orders, GET /accounts/{account}/orders/{id}.
 #
+# CONFIRMED LIVE 2026-11-04 (real response, not a guess -- Andy ran it
+# through CrossTrade's own API Playground against the real MFFU account):
+#   GET /accounts/{account} -- {data: {accountId, environment, userId,
+#   name, balance: {totalCashValue, totalPnL, netLiq, openPnL, realizedPnL,
+#   cashUSD, ...}}}. get_balance() is built against this exact shape.
+#   GET /accounts -- {data: [{accountId, environment, userId, name,
+#   accountType, active, archived, ...}]} -- confirmed accountId "72422359"
+#   for the real MFFU account matches the Brokers page's own "ID" column.
+#
 # **NOT YET LIVE-VERIFIED -- flagged, not presented as certain**: the spec
-# types every response body as a bare `{success: bool, data: object|array}`
-# with no per-field schema (CrossTrade proxies Tradovate's own data through
-# unmodified -- "Positions, orders, and fills are shared REST resources on
-# both platforms" -- but the exact field names inside `data` are the
-# live-Tradovate-native ones CrossTrade doesn't redocument). The field names
-# assumed below (cashBalance/totalCashValue/realizedPnL/openPnL for balance;
-# contractId/symbol/id/positionId/netPrice/avgOpenPrice for positions;
-# orderId for a placed order) are the SAME ones cme_tradovate_client.py
-# already uses against raw Tradovate -- a reasonable assumption given
-# CrossTrade's own "shared resources" claim, but confirm on the first real
-# call, same as every other NOT YET LIVE-VERIFIED item in this build.
+# types the remaining response bodies as a bare `{success: bool, data:
+# object|array}` with no per-field schema (CrossTrade proxies Tradovate's
+# own data through unmodified -- "Positions, orders, and fills are shared
+# REST resources on both platforms" -- but the exact field names inside
+# `data` for positions/orders/a placed order are the live-Tradovate-native
+# ones CrossTrade doesn't redocument, and no position/order has existed yet
+# to confirm against). The field names assumed below (contractId/symbol/
+# id/positionId/netPrice/avgOpenPrice for positions; orderId for a placed
+# order) are the SAME ones cme_tradovate_client.py already uses against raw
+# Tradovate -- a reasonable assumption given CrossTrade's own "shared
+# resources" claim and balance's confirmed accuracy above, but confirm on
+# the first real position/order, same as every other NOT YET LIVE-VERIFIED
+# item in this build.
 # ==============================================================================
 
 from __future__ import annotations
@@ -110,12 +121,18 @@ class CrossTradeClient:
         }
 
     async def get_balance(self) -> Dict[str, Any]:
-        """GET /cashbalances -- filters client-side to this account, same
-        pattern as TradovateClient.get_positions(). Raises on any
-        unexpected response shape rather than returning a partial/zeroed
-        dict -- cme_risk.py's trailing-drawdown check must never silently
-        treat a failed query as zero equity."""
-        url = f"{BASE_URL}/cashbalances"
+        """GET /accounts/{account} -- CONFIRMED LIVE 2026-11-04 against the
+        real MFFU account via CrossTrade's own API Playground (not a
+        guess): returns `{data: {..., balance: {totalCashValue, netLiq,
+        realizedPnL, openPnL, cashUSD, ...}}}`, already scoped to exactly
+        this account. Deliberately NOT /cashbalances -- that endpoint
+        nests balance rows two levels deep (one array per linked Tradovate
+        identity/login, each with its OWN nested array of account rows),
+        confirmed live the same session; this endpoint is flat and simpler.
+        Raises on any unexpected response shape rather than returning a
+        partial/zeroed dict -- cme_risk.py's trailing-drawdown check must
+        never silently treat a failed query as zero equity."""
+        url = f"{BASE_URL}/accounts/{self.crosstrade_account_id}"
         session = _get_session()
         async with session.get(url, headers=self._headers()) as resp:
             if resp.status != 200:
@@ -123,19 +140,14 @@ class CrossTradeClient:
             body = await resp.json()
         if not body.get("success", True):
             raise RuntimeError(f"CrossTrade balance query reported failure: {body}")
-        rows = body.get("data") or []
-        match = next((r for r in rows if str(r.get("accountId")) == str(self.crosstrade_account_id)
-                      or r.get("accountSpec") == self.crosstrade_account_id
-                      or r.get("name") == self.crosstrade_account_id), None)
-        if match is None and len(rows) == 1:
-            match = rows[0]   # a single-account response -- no ambiguity even without a matching key
-        if match is None:
-            raise RuntimeError(f"CrossTrade balance query returned no row for account {self.crosstrade_account_id}: {body}")
+        balance = (body.get("data") or {}).get("balance") or {}
+        if not balance:
+            raise RuntimeError(f"CrossTrade account query returned no balance for account {self.crosstrade_account_id}: {body}")
         return {
-            "cash_balance": float(match.get("cashBalance", 0.0)),
-            "total_equity": float(match.get("totalCashValue", match.get("cashBalance", 0.0))),
-            "realized_pnl": float(match.get("realizedPnL", 0.0)),
-            "open_pnl": float(match.get("openPnL", 0.0)),
+            "cash_balance": float(balance.get("cashUSD", balance.get("totalCashValue", 0.0))),
+            "total_equity": float(balance.get("netLiq", balance.get("totalCashValue", 0.0))),
+            "realized_pnl": float(balance.get("realizedPnL", 0.0)),
+            "open_pnl": float(balance.get("openPnL", 0.0)),
         }
 
     async def get_positions(self) -> List[Dict[str, Any]]:
