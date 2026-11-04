@@ -520,12 +520,14 @@ async function loadAccounts() {
                     <button class="btn btn-ok" onclick="saveCmeConfig(${a.id})" style="align-self:flex-end;">SAVE</button>
                 </div>
                 <p class="empty" id="cmeSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
-                <p class="empty" style="padding:8px 0 4px;">Required before VERIFY AUTH's balance check means anything -- without the real Tradovate account ID, that check silently queries account 0 instead of yours.</p>
+                <p class="empty" style="padding:8px 0 4px;">Required before VERIFY AUTH's balance check means anything -- without the real Tradovate account ID, that check silently queries account 0 instead of yours. The numeric ID is NOT shown anywhere on Tradovate's own site (only the "APEX..." display name is) -- set credentials above first, then click Look Up to fetch it.</p>
                 <div class="risk-form">
-                    <label>Tradovate Account ID (numeric, from Tradovate Web -> Account Settings)<input type="number" step="1" id="cmeTvAccountId-${a.id}"></label>
-                    <label>Tradovate Account Name (optional, e.g. APEX12345)<input type="text" id="cmeTvAccountName-${a.id}"></label>
+                    <label>Tradovate Account ID (numeric -- use Look Up, don't guess)<input type="number" step="1" id="cmeTvAccountId-${a.id}"></label>
+                    <label>Tradovate Account Name (e.g. APEX6918900000001)<input type="text" id="cmeTvAccountName-${a.id}"></label>
+                    <button class="btn" onclick="lookUpTradovateAccounts(${a.id})" style="align-self:flex-end;">LOOK UP</button>
                     <button class="btn btn-ok" onclick="saveTradovateAccountInfo(${a.id})" style="align-self:flex-end;">SAVE</button>
                 </div>
+                <div id="cmeTvAccountLookupResults-${a.id}" style="margin-top:6px;"></div>
                 <p class="empty" id="cmeTvAccountInfoResult-${a.id}" style="margin-top:6px; display:none;"></p>
             </div>
 
@@ -648,6 +650,25 @@ async function saveTradovateAccountInfo(accountId) {
     }
     resultEl.textContent = `Saved: account ID ${resp.account.tradovate_account_id}.`;
     resultEl.style.color = "#6ee7b7";
+}
+
+async function lookUpTradovateAccounts(accountId) {
+    const box = document.getElementById(`cmeTvAccountLookupResults-${accountId}`);
+    box.innerHTML = `<p class="empty">Looking up...</p>`;
+    const resp = await api(`/api/executor/accounts/${accountId}/tradovate-accounts`);
+    if (!resp.ok) {
+        box.innerHTML = `<p class="empty" style="color:#fca5a5;">${escapeHtml(resp.error || "lookup failed")}</p>`;
+        return;
+    }
+    if (!resp.accounts || resp.accounts.length === 0) {
+        box.innerHTML = `<p class="empty" style="color:#fca5a5;">No Tradovate accounts found for these credentials.</p>`;
+        return;
+    }
+    box.innerHTML = resp.accounts.map(acc => `
+        <button class="btn" style="margin:2px 4px 2px 0;" onclick="document.getElementById('cmeTvAccountId-${accountId}').value='${acc.id}'; document.getElementById('cmeTvAccountName-${accountId}').value='${escapeHtml(acc.name || "")}';">
+            ${escapeHtml(acc.name || "(unnamed)")} -- id ${acc.id}${acc.active === false ? " (inactive)" : ""}
+        </button>
+    `).join("") + `<p class="empty" style="margin-top:4px;">Click one to fill the fields above, then hit SAVE.</p>`;
 }
 
 // ------------------------------------------------------------------ Strategy Profile (Phase 2 Ruling A, 2026-09-15 22:10 CT)

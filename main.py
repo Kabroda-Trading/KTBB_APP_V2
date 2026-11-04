@@ -2051,6 +2051,41 @@ async def api_executor_test_connection(account_id: int, request: Request, db: Se
     return JSONResponse({"ok": all_ok, "checks": checks})
 
 
+@app.get("/api/executor/accounts/{account_id}/tradovate-accounts")
+async def api_executor_list_tradovate_accounts(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """GET /account/list, surfaced to the admin UI -- the ONLY way to get
+    the real numeric Tradovate accountId the trading API actually needs.
+    Tradovate's own website only ever shows the human-readable `name`
+    (e.g. "APEX6918900000001") -- there is no way to read the numeric id
+    off the site itself. Read-only, no order placed, same safety class as
+    test-connection."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    if (account.exchange or "").strip().lower() != "tradovate":
+        return JSONResponse({"ok": False, "error": "This account's exchange is not set to tradovate."}, status_code=400)
+
+    api_key, api_secret = _executor_accounts.get_decrypted_credentials(account)
+    if not api_key or not api_secret:
+        return JSONResponse({"ok": False, "error": "No credentials set on this account yet."}, status_code=400)
+
+    import cme_tradovate_client
+    client = cme_tradovate_client.TradovateClient(
+        username=api_key, password=api_secret, account_id=0, account_name=account.label,
+        is_demo=request.query_params.get("demo", "").strip().lower() in ("1", "true", "yes"),
+    )
+    try:
+        accounts = await client.list_accounts()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    return JSONResponse({"ok": True, "accounts": [
+        {"id": a.get("id"), "name": a.get("name"), "active": a.get("active")} for a in accounts
+    ]})
+
+
 @app.post("/api/executor/accounts/{account_id}/mode")
 async def api_executor_set_account_mode(account_id: int, request: Request, body: ExecutorModeChangeRequest, db: Session = Depends(get_db)):
     # 2026-09-07 -- until this route existed, NOTHING could ever set an

@@ -155,6 +155,23 @@ class TradovateClient:
             "open_pnl": float(data.get("openPnL", 0.0)),
         }
 
+    async def list_accounts(self) -> List[Dict[str, Any]]:
+        """GET /account/list -- every account tied to this login. Needs
+        only a valid bearer token, not self.account_id (this is in fact
+        how a caller is meant to DISCOVER account_id in the first place:
+        Tradovate's own UI shows the human-readable `name` -- e.g.
+        "APEX6918900000001" -- never the numeric internal `id` the REST
+        API actually filters on elsewhere, so there is no way to read
+        the real id off the Tradovate website at all; this call is the
+        only way to get it)."""
+        await self._ensure_token()
+        url = f"{self.base_url}/account/list"
+        session = _get_session()
+        async with session.get(url, headers=self._headers()) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Tradovate account list query failed ({resp.status}): {await resp.text()}")
+            return await resp.json()
+
     async def get_positions(self) -> List[Dict[str, Any]]:
         """GET /position/list, filtered client-side to this account."""
         await self._ensure_token()

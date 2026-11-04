@@ -301,6 +301,58 @@ def test_connection_routes_tradovate_accounts_to_the_tradovate_client(env, monke
     assert body["checks"]["get_positions"]["response"] == []
 
 
+# ------------------------------------------------------------------ GET /api/executor/accounts/{id}/tradovate-accounts
+
+def test_lookup_tradovate_accounts_returns_id_and_name_for_each_account(env, monkeypatch):
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "u", "api_secret": "p"})
+
+    async def _fake_list_accounts(self):
+        return [{"id": 6918900000001, "name": "APEX6918900000001", "active": True},
+                {"id": 6918900000002, "name": "APEX6918900000002", "active": False}]
+    monkeypatch.setattr(tvc.TradovateClient, "list_accounts", _fake_list_accounts)
+
+    resp = client.get(f"/api/executor/accounts/{env['account_id']}/tradovate-accounts")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["accounts"] == [
+        {"id": 6918900000001, "name": "APEX6918900000001", "active": True},
+        {"id": 6918900000002, "name": "APEX6918900000002", "active": False},
+    ]
+
+
+def test_lookup_tradovate_accounts_requires_credentials_first(env):
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.get(f"/api/executor/accounts/{env['account_id']}/tradovate-accounts")
+    assert resp.status_code == 400
+
+
+def test_lookup_tradovate_accounts_rejects_a_non_tradovate_account(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.get(f"/api/executor/accounts/{env['account_id']}/tradovate-accounts")
+    assert resp.status_code == 400   # account.exchange defaults to "bitunix" in this fixture
+
+
+def test_lookup_tradovate_accounts_non_owner_gets_403(env):
+    client = _login("cme_other@kabroda.com", "otherpass123")
+    resp = client.get(f"/api/executor/accounts/{env['account_id']}/tradovate-accounts")
+    assert resp.status_code == 403
+
+
 def test_connection_reports_a_real_auth_failure_without_hiding_which_check_failed(env, monkeypatch):
     import cme_tradovate_client as tvc
 
