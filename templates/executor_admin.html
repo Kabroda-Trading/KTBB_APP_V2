@@ -520,15 +520,36 @@ async function loadAccounts() {
                     <button class="btn btn-ok" onclick="saveCmeConfig(${a.id})" style="align-self:flex-end;">SAVE</button>
                 </div>
                 <p class="empty" id="cmeSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
-                <p class="empty" style="padding:8px 0 4px;">Required before VERIFY AUTH's balance check means anything -- without the real Tradovate account ID, that check silently queries account 0 instead of yours. The numeric ID is NOT shown anywhere on Tradovate's own site (only the "APEX..." display name is) -- set credentials above first, then click Look Up to fetch it.</p>
+                <p class="empty" style="padding:8px 0 4px;">Execution provider -- how real orders actually reach Tradovate. Direct Tradovate requires a funded account with its own paid API subscription (confirmed 2026-11-04: Tradovate's own community forum, unfunded/evaluation accounts cannot get API credentials at all). CrossTrade (crosstrade.io) is a Tradovate-sanctioned broker-integration partner that works on evaluation accounts too -- use it if VERIFY AUTH fails with "authentication failed" on an unfunded account.</p>
                 <div class="risk-form">
-                    <label>Tradovate Account ID (numeric -- use Look Up, don't guess)<input type="number" step="1" id="cmeTvAccountId-${a.id}"></label>
-                    <label>Tradovate Account Name (e.g. APEX6918900000001)<input type="text" id="cmeTvAccountName-${a.id}"></label>
-                    <label style="flex-direction:row; align-items:center; gap:6px;"><input type="checkbox" id="cmeTvIsDemo-${a.id}"> Demo environment (e.g. an evaluation account -- most prop-firm evaluations, including MFFU, run on Tradovate's demo gateway, not live)</label>
-                    <button class="btn" onclick="lookUpTradovateAccounts(${a.id})" style="align-self:flex-end;">LOOK UP</button>
-                    <button class="btn btn-ok" onclick="saveTradovateAccountInfo(${a.id})" style="align-self:flex-end;">SAVE</button>
+                    <label>Execution Provider
+                        <select id="cmeExecProvider-${a.id}" onchange="toggleExecutionProviderFields(${a.id})">
+                            <option value="tradovate">Direct Tradovate</option>
+                            <option value="crosstrade">CrossTrade (crosstrade.io)</option>
+                        </select>
+                    </label>
                 </div>
-                <div id="cmeTvAccountLookupResults-${a.id}" style="margin-top:6px;"></div>
+
+                <div id="cmeTvFields-${a.id}">
+                    <p class="empty" style="padding:8px 0 4px;">Required before VERIFY AUTH's balance check means anything -- without the real Tradovate account ID, that check silently queries account 0 instead of yours. The numeric ID is NOT shown anywhere on Tradovate's own site (only the "APEX..." display name is) -- set credentials above first, then click Look Up to fetch it.</p>
+                    <div class="risk-form">
+                        <label>Tradovate Account ID (numeric -- use Look Up, don't guess)<input type="number" step="1" id="cmeTvAccountId-${a.id}"></label>
+                        <label>Tradovate Account Name (e.g. APEX6918900000001)<input type="text" id="cmeTvAccountName-${a.id}"></label>
+                        <label style="flex-direction:row; align-items:center; gap:6px;"><input type="checkbox" id="cmeTvIsDemo-${a.id}"> Demo environment (e.g. an evaluation account -- most prop-firm evaluations, including MFFU, run on Tradovate's demo gateway, not live)</label>
+                        <button class="btn" onclick="lookUpTradovateAccounts(${a.id})" style="align-self:flex-end;">LOOK UP</button>
+                        <button class="btn btn-ok" onclick="saveTradovateAccountInfo(${a.id})" style="align-self:flex-end;">SAVE</button>
+                    </div>
+                    <div id="cmeTvAccountLookupResults-${a.id}" style="margin-top:6px;"></div>
+                </div>
+
+                <div id="cmeCtFields-${a.id}" style="display:none;">
+                    <p class="empty" style="padding:8px 0 4px;">Paste your CrossTrade Bearer token (from crosstrade.io's My Account page, NOT the webhook Secret Key -- a different credential) into Step 1's credential fields above: API key = the Bearer token, API secret = any placeholder text (CrossTrade only needs the one secret).</p>
+                    <div class="risk-form">
+                        <label>CrossTrade Account ID (My Account -> Brokers, e.g. DEMO12345678)<input type="text" id="cmeCtAccountId-${a.id}"></label>
+                        <button class="btn btn-ok" onclick="saveTradovateAccountInfo(${a.id})" style="align-self:flex-end;">SAVE</button>
+                    </div>
+                </div>
+
                 <p class="empty" id="cmeTvAccountInfoResult-${a.id}" style="margin-top:6px; display:none;"></p>
             </div>
 
@@ -568,6 +589,9 @@ async function loadAccounts() {
         document.getElementById(`cmeTvAccountId-${a.id}`).value = a.tradovate_account_id ?? "";
         document.getElementById(`cmeTvAccountName-${a.id}`).value = a.tradovate_account_name ?? "";
         document.getElementById(`cmeTvIsDemo-${a.id}`).checked = !!a.tradovate_is_demo;
+        document.getElementById(`cmeExecProvider-${a.id}`).value = a.execution_provider || "tradovate";
+        document.getElementById(`cmeCtAccountId-${a.id}`).value = a.crosstrade_account_id ?? "";
+        toggleExecutionProviderFields(a.id);
     }
 }
 
@@ -631,13 +655,48 @@ async function saveCmeConfig(accountId) {
     resultEl.style.color = "#6ee7b7";
 }
 
+function toggleExecutionProviderFields(accountId) {
+    const provider = document.getElementById(`cmeExecProvider-${accountId}`).value;
+    document.getElementById(`cmeTvFields-${accountId}`).style.display = provider === "crosstrade" ? "none" : "block";
+    document.getElementById(`cmeCtFields-${accountId}`).style.display = provider === "crosstrade" ? "block" : "none";
+}
+
 async function saveTradovateAccountInfo(accountId) {
+    const provider = document.getElementById(`cmeExecProvider-${accountId}`).value;
+    const resultEl = document.getElementById(`cmeTvAccountInfoResult-${accountId}`);
+    resultEl.style.display = "block";
+
+    if (provider === "crosstrade") {
+        const ctIdField = document.getElementById(`cmeCtAccountId-${accountId}`);
+        const crosstrade_account_id = ctIdField.value.trim();
+        if (!crosstrade_account_id) {
+            resultEl.textContent = "Enter the CrossTrade account ID first.";
+            resultEl.style.color = "#fca5a5";
+            return;
+        }
+        const resp = await api(`/api/executor/accounts/${accountId}/tradovate-account-info`, {
+            method: "POST", body: JSON.stringify({
+                // tradovate_account_id is a required field on this route for
+                // the direct-Tradovate path -- unused and harmless here, a
+                // CrossTrade account is addressed by crosstrade_account_id.
+                tradovate_account_id: 0,
+                execution_provider: "crosstrade", crosstrade_account_id,
+            }),
+        });
+        if (!resp.ok) {
+            resultEl.textContent = resp.error || "failed to save CrossTrade account info";
+            resultEl.style.color = "#fca5a5";
+            return;
+        }
+        resultEl.textContent = `Saved: CrossTrade account ${resp.account.crosstrade_account_id}.`;
+        resultEl.style.color = "#6ee7b7";
+        return;
+    }
+
     const idField = document.getElementById(`cmeTvAccountId-${accountId}`);
     const nameField = document.getElementById(`cmeTvAccountName-${accountId}`);
     const demoField = document.getElementById(`cmeTvIsDemo-${accountId}`);
     const tradovate_account_id = parseInt(idField.value);
-    const resultEl = document.getElementById(`cmeTvAccountInfoResult-${accountId}`);
-    resultEl.style.display = "block";
     if (!tradovate_account_id) {
         resultEl.textContent = "Enter the numeric Tradovate account ID first.";
         resultEl.style.color = "#fca5a5";
@@ -646,7 +705,7 @@ async function saveTradovateAccountInfo(accountId) {
     const resp = await api(`/api/executor/accounts/${accountId}/tradovate-account-info`, {
         method: "POST", body: JSON.stringify({
             tradovate_account_id, tradovate_account_name: nameField.value.trim() || null,
-            tradovate_is_demo: demoField.checked,
+            tradovate_is_demo: demoField.checked, execution_provider: "tradovate",
         }),
     });
     if (!resp.ok) {

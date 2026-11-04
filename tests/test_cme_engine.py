@@ -152,6 +152,49 @@ def test_client_for_defaults_to_live_when_is_demo_unset(db):
     assert client.is_demo is False
 
 
+def test_client_for_routes_to_crosstrade_when_execution_provider_set(db):
+    """2026-11-04 -- added once a real evaluation account (MFFU) confirmed
+    direct Tradovate API access is gated off for unfunded accounts.
+    execution_provider='crosstrade' must produce a CrossTradeClient, not
+    a TradovateClient, with the bearer token (reusing the same encrypted
+    api_key column) and the CrossTrade-specific account identifier."""
+    import cme_crosstrade_client as ctc
+
+    account = _account(db, "crosstrade_acct", mode="LIVE")
+    account.execution_provider = "crosstrade"
+    account.crosstrade_account_id = "DEMO12345678"
+    db.commit()
+
+    client = cx._client_for(account)
+    assert isinstance(client, ctc.CrossTradeClient)
+    assert client.bearer_token == "u"   # from _account()'s set_credentials(api_key="u", ...)
+    assert client.crosstrade_account_id == "DEMO12345678"
+
+
+def test_client_for_crosstrade_requires_crosstrade_account_id(db):
+    account = _account(db, "crosstrade_no_id", mode="LIVE")
+    account.execution_provider = "crosstrade"
+    db.commit()
+
+    with pytest.raises(ValueError):
+        cx._client_for(account)
+
+
+def test_client_for_unset_provider_still_uses_tradovate(db):
+    """A None/blank execution_provider is NOT a new default -- every
+    account created before this field existed must keep working exactly
+    as before."""
+    import cme_tradovate_client as tvc
+
+    account = _account(db, "legacy_acct", mode="LIVE")
+    account.tradovate_account_id = 1
+    db.commit()
+    assert account.execution_provider is None   # the real pre-existing-row shape
+
+    client = cx._client_for(account)
+    assert isinstance(client, tvc.TradovateClient)
+
+
 # ------------------------------------------------------------------ _enabled_accounts_for_symbol
 
 def test_enabled_accounts_filters_by_symbol_flag_and_sorts_by_id(db):

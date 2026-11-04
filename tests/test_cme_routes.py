@@ -316,6 +316,78 @@ def test_connection_demo_query_param_overrides_stored_is_demo(env, monkeypatch):
     assert seen_is_demo == [False]   # explicit override wins over the stored True
 
 
+def test_set_tradovate_account_info_persists_crosstrade_provider(env):
+    """2026-11-04 -- added once a real evaluation account (MFFU) confirmed
+    direct Tradovate API access is gated off for unfunded accounts."""
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",
+                        json={"tradovate_account_id": 0, "execution_provider": "crosstrade",
+                              "crosstrade_account_id": "DEMO12345678"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["account"]["execution_provider"] == "crosstrade"
+    assert body["account"]["crosstrade_account_id"] == "DEMO12345678"
+
+    db.refresh(account)
+    assert account.execution_provider == "crosstrade"
+    assert account.crosstrade_account_id == "DEMO12345678"
+
+
+def test_set_tradovate_account_info_rejects_an_invalid_execution_provider(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",
+                        json={"tradovate_account_id": 1, "execution_provider": "bogus"})
+    assert resp.status_code == 400
+
+
+def test_connection_routes_crosstrade_accounts_to_the_crosstrade_client(env, monkeypatch):
+    import cme_crosstrade_client as ctc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    account.execution_provider = "crosstrade"
+    account.crosstrade_account_id = "DEMO12345678"
+    db.commit()
+
+    seen = []
+
+    def _spy_init(self, bearer_token, crosstrade_account_id):
+        seen.append((bearer_token, crosstrade_account_id))
+
+    monkeypatch.setattr(ctc.CrossTradeClient, "__init__", _spy_init)
+    monkeypatch.setattr(ctc.CrossTradeClient, "get_balance", lambda self: _async_ok({"cashBalance": 1.0}))
+    monkeypatch.setattr(ctc.CrossTradeClient, "get_positions", lambda self: _async_ok([]))
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "the-bearer-token", "api_secret": "n/a"})
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert seen == [("the-bearer-token", "DEMO12345678")]
+
+
+def test_connection_crosstrade_without_account_id_gives_a_clear_error(env):
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    account.execution_provider = "crosstrade"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "token", "api_secret": "n/a"})
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert resp.status_code == 400
+    assert "crosstrade_account_id" in resp.json()["error"]
+
+
 def test_set_tradovate_account_info_non_owner_gets_403(env):
     client = _login("cme_other@kabroda.com", "otherpass123")
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",

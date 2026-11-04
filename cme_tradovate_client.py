@@ -129,7 +129,15 @@ class TradovateClient:
 
         token = data.get("accessToken") if isinstance(data, dict) else None
         if not token:
-            err = data.get("errorText") if isinstance(data, dict) else data
+            # 2026-11-04 -- a real live response came back HTTP 200 with
+            # neither accessToken NOR errorText, which errorText-only
+            # logging surfaced as a useless "HTTP 200: None". Tradovate's
+            # accesstokenrequest can 200 with a p-ticket/p-captcha/p-time
+            # payload instead of a token (its anti-automation challenge on
+            # this exact endpoint) or other non-errorText shapes -- show
+            # the whole body so whatever it actually is is visible, not
+            # just the one field name we happened to guess.
+            err = (data.get("errorText") if isinstance(data, dict) else None) or data
             self.last_auth_error = f"HTTP {status}: {err}"
             print(f"[TRADOVATE] auth rejected: {self.last_auth_error}")
             return False

@@ -544,6 +544,7 @@ def init_db():
         "trailing_drawdown_limit_usd FLOAT", "high_water_mark_usd FLOAT",
         "tradovate_account_id INTEGER", "tradovate_account_name VARCHAR",
         "tradovate_is_demo BOOLEAN",
+        "execution_provider VARCHAR", "crosstrade_account_id VARCHAR",
     ]:
         try:
             with engine.begin() as conn:
@@ -2495,6 +2496,21 @@ class ExecutorAccount(Base):
     # override still works for one-off diagnostics and takes precedence when
     # explicitly passed.
     tradovate_is_demo = Column(Boolean, nullable=True)
+    # 2026-11-04 -- added once a real evaluation account (MFFU) confirmed
+    # Tradovate's own documented restriction: unfunded accounts cannot
+    # obtain cid/sec API credentials at all (verified against Tradovate's
+    # community forum, not just DeepSeek's say-so -- see AGENT_LOG.md).
+    # execution_provider lets an account route CME order placement through
+    # CrossTrade (crosstrade.io, a Tradovate-sanctioned broker-integration
+    # partner that authenticates server-side with its own credentials)
+    # instead of direct Tradovate REST -- cme_executor._client_for() is the
+    # only place that branches on this. None/"tradovate" (default) keeps
+    # the original direct path; "crosstrade" switches providers. Reuses
+    # api_key_encrypted for the CrossTrade Bearer token (api_secret_
+    # encrypted is unused for this provider -- see cme_crosstrade_client.py's
+    # own header for why it still needs a non-empty placeholder there).
+    execution_provider = Column(String, nullable=True)
+    crosstrade_account_id = Column(String, nullable=True)   # CrossTrade's own account identifier, e.g. "DEMO12345678" -- not a secret
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

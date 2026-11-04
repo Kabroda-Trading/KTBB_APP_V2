@@ -105,7 +105,30 @@ def _notify_unprotected(db: Session, account: ExecutorAccount, order_row: CMEOrd
         print(f"|| CME EXECUTOR || unprotected-position notification failed for order {order_row.id}: {e}")
 
 
-def _client_for(account: ExecutorAccount) -> "cme_tradovate_client.TradovateClient":
+def _client_for(account: ExecutorAccount):
+    """Returns either a TradovateClient (direct Tradovate REST) or a
+    CrossTradeClient (crosstrade.io, routed through its own partner-level
+    Tradovate access) depending on account.execution_provider -- the ONLY
+    branch point in this codebase; both clients expose the identical
+    method surface (get_balance/get_positions/get_orders/get_order_detail/
+    place_bracket_limit_order/amend_stop_to_breakeven/cancel_order/
+    emergency_market_close), normalized to the same return shapes, so
+    every other function in this file is provider-agnostic. Added
+    2026-11-04 once a real evaluation account (MFFU) confirmed Tradovate's
+    documented restriction that unfunded accounts cannot obtain direct
+    API credentials -- see cme_crosstrade_client.py's own header."""
+    provider = (account.execution_provider or "tradovate").strip().lower()
+    if provider == "crosstrade":
+        import cme_crosstrade_client
+        bearer_token, _ = executor_accounts.get_decrypted_credentials(account)
+        if not bearer_token:
+            raise ValueError(f"account {account.id} has no CrossTrade credentials set -- cannot place real orders")
+        if not account.crosstrade_account_id:
+            raise ValueError(f"account {account.id} has no crosstrade_account_id set -- cannot place real orders")
+        return cme_crosstrade_client.CrossTradeClient(
+            bearer_token=bearer_token, crosstrade_account_id=account.crosstrade_account_id,
+        )
+
     import cme_tradovate_client
     username, password = executor_accounts.get_decrypted_credentials(account)
     if not username or not password:

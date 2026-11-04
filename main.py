@@ -1800,6 +1800,8 @@ class TradovateAccountInfoRequest(BaseModel):
     tradovate_account_id: int
     tradovate_account_name: Optional[str] = None
     tradovate_is_demo: Optional[bool] = None
+    execution_provider: Optional[str] = None     # None/"tradovate" (default) | "crosstrade"
+    crosstrade_account_id: Optional[str] = None
 
 
 class ExecutorModeChangeRequest(BaseModel):
@@ -1892,6 +1894,8 @@ def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, An
         "tradovate_account_id": account.tradovate_account_id,
         "tradovate_account_name": account.tradovate_account_name,
         "tradovate_is_demo": bool(account.tradovate_is_demo),
+        "execution_provider": account.execution_provider or "tradovate",
+        "crosstrade_account_id": account.crosstrade_account_id,
         "has_credentials": bool(account.api_key_encrypted),
         "credential_set_at": account.credential_set_at.isoformat() if account.credential_set_at else None,
         # Phase 2 (2026-09-15): the RESOLVED profile (gate_profile_of()/
@@ -2026,23 +2030,39 @@ async def api_executor_test_connection(account_id: int, request: Request, db: Se
 
     checks = {}
     if (account.exchange or "").strip().lower() == "tradovate":
-        # Tradovate: username/password reuse the same api_key/api_secret
-        # columns (documented in cme_tradovate_client.py's own header).
+        # 2026-11-04 -- added the CrossTrade branch alongside direct
+        # Tradovate once a real evaluation account (MFFU) confirmed direct
+        # Tradovate API access is gated off entirely for unfunded accounts.
+        # Kept as a direct client construction here (not a delegation to
+        # cme_executor._client_for()) specifically so the ?demo= diagnostic
+        # override below still works -- that's a test-connection-only
+        # concept, not something the real trading path needs.
+        provider = (account.execution_provider or "tradovate").strip().lower()
+        if provider == "crosstrade":
+            import cme_crosstrade_client
+            if not account.crosstrade_account_id:
+                return JSONResponse({"ok": False, "error": "No crosstrade_account_id set on this account yet."}, status_code=400)
+            client = cme_crosstrade_client.CrossTradeClient(
+                bearer_token=api_key, crosstrade_account_id=account.crosstrade_account_id,
+            )
+        else:
+            # Tradovate: username/password reuse the same api_key/api_secret
+            # columns (documented in cme_tradovate_client.py's own header).
+            # is_demo defaults to the account's own stored tradovate_is_demo
+            # (set via the tradovate-account-info route) -- ?demo=true/
+            # ?demo=false still overrides explicitly for one-off diagnostics
+            # without touching the stored account setting.
+            import cme_tradovate_client
+            is_demo = _resolve_tradovate_is_demo(request, account)
+            client = cme_tradovate_client.TradovateClient(
+                username=api_key, password=api_secret,
+                account_id=account.tradovate_account_id or 0,
+                account_name=account.tradovate_account_name or account.label,
+                is_demo=is_demo,
+            )
         # Two independent read-only calls, same "don't hide a partial
-        # failure" shape as the Bitunix checks below. is_demo defaults to
-        # the account's own stored tradovate_is_demo (set once via the
-        # tradovate-account-info route -- e.g. True for an MFFU evaluation
-        # account, which trades against Tradovate's demo gateway, not live)
-        # -- ?demo=true/?demo=false still overrides explicitly for one-off
-        # diagnostics without touching the stored account setting.
-        import cme_tradovate_client
-        is_demo = _resolve_tradovate_is_demo(request, account)
-        client = cme_tradovate_client.TradovateClient(
-            username=api_key, password=api_secret,
-            account_id=account.tradovate_account_id or 0,
-            account_name=account.tradovate_account_name or account.label,
-            is_demo=is_demo,
-        )
+        # failure" shape as the Bitunix checks below -- applies to either
+        # provider identically.
         for name, coro in (
             ("get_balance", client.get_balance()),
             ("get_positions", client.get_positions()),
@@ -2332,6 +2352,13 @@ async def api_executor_set_tradovate_account_info(account_id: int, request: Requ
         account.tradovate_account_name = body.tradovate_account_name
     if body.tradovate_is_demo is not None:
         account.tradovate_is_demo = body.tradovate_is_demo
+    if body.execution_provider is not None:
+        provider = body.execution_provider.strip().lower()
+        if provider not in ("tradovate", "crosstrade", ""):
+            return JSONResponse({"ok": False, "error": "execution_provider must be 'tradovate' or 'crosstrade'."}, status_code=400)
+        account.execution_provider = provider or None
+    if body.crosstrade_account_id is not None:
+        account.crosstrade_account_id = body.crosstrade_account_id.strip() or None
     _executor_accounts.write_audit(
         db, "ACCOUNT_UPDATED",
         f"Tradovate account info set for account {account.id}: id={body.tradovate_account_id}",
@@ -2340,6 +2367,8 @@ async def api_executor_set_tradovate_account_info(account_id: int, request: Requ
             "tradovate_account_id": body.tradovate_account_id,
             "tradovate_account_name": body.tradovate_account_name,
             "tradovate_is_demo": body.tradovate_is_demo,
+            "execution_provider": body.execution_provider,
+            "crosstrade_account_id": body.crosstrade_account_id,
         },
     )
     db.commit()
