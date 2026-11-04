@@ -543,6 +543,7 @@ def init_db():
         "market_type VARCHAR", "account_category VARCHAR",
         "trailing_drawdown_limit_usd FLOAT", "high_water_mark_usd FLOAT",
         "tradovate_account_id INTEGER", "tradovate_account_name VARCHAR",
+        "tradovate_is_demo BOOLEAN",
     ]:
         try:
             with engine.begin() as conn:
@@ -2484,6 +2485,16 @@ class ExecutorAccount(Base):
     high_water_mark_usd = Column(Float, nullable=True)           # running peak equity, cme_risk.py's own write path
     tradovate_account_id = Column(Integer, nullable=True)
     tradovate_account_name = Column(String, nullable=True)       # e.g. "APEX6918900000001" -- not a secret, stored plain
+    # 2026-11-04 -- found while setting up the first real Tradovate account
+    # (MFFU, an evaluation account that trades against Tradovate's demo
+    # gateway, not live): cme_executor._client_for() hardcoded is_demo=False
+    # on every real order placement, with no account-level way to say
+    # otherwise. The diagnostic test-connection/tradovate-accounts routes
+    # already had an ad-hoc ?demo= query override, but the real trading path
+    # had nothing. This column is the actual, durable answer; the query
+    # override still works for one-off diagnostics and takes precedence when
+    # explicitly passed.
+    tradovate_is_demo = Column(Boolean, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

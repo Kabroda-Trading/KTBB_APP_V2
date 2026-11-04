@@ -113,7 +113,13 @@ def _client_for(account: ExecutorAccount) -> "cme_tradovate_client.TradovateClie
     return cme_tradovate_client.TradovateClient(
         username=username, password=password,
         account_id=account.tradovate_account_id, account_name=account.tradovate_account_name,
-        is_demo=False,
+        # 2026-11-04 -- was hardcoded to False (live gateway) with no
+        # account-level override at all. A prop-firm evaluation account
+        # (e.g. MFFU's Rapid EOD plan) trades against Tradovate's demo
+        # gateway, not live -- this must read the real account setting,
+        # same field main.py's test-connection/tradovate-accounts routes
+        # now default to via _resolve_tradovate_is_demo().
+        is_demo=bool(account.tradovate_is_demo),
     )
 
 

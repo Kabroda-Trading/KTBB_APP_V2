@@ -1729,6 +1729,25 @@ def _executor_owner_or_admin(ctx: Dict[str, Any], account: Optional["_ExecutorAc
     return bool(account and user and account.user_id == getattr(user, "id", None))
 
 
+def _resolve_tradovate_is_demo(request: Request, account: "_ExecutorAccount") -> bool:
+    """Shared by the two diagnostic Tradovate routes (test-connection,
+    tradovate-accounts lookup). Defaults to the account's own stored
+    tradovate_is_demo (e.g. True for an MFFU evaluation account, which
+    trades against Tradovate's demo gateway, not live) -- an explicit
+    ?demo=true/?demo=false query param overrides it for one-off diagnostics
+    without touching the stored setting. cme_executor._client_for(), the
+    real order-placement path, has no query param at all and reads
+    account.tradovate_is_demo directly -- found and fixed 2026-11-04,
+    before this it was hardcoded to is_demo=False with no account-level
+    override of any kind."""
+    demo_param = request.query_params.get("demo", "").strip().lower()
+    if demo_param in ("1", "true", "yes"):
+        return True
+    if demo_param in ("0", "false", "no"):
+        return False
+    return bool(account.tradovate_is_demo)
+
+
 class ExecutorCreateAccountRequest(BaseModel):
     # 2026-09-07: user_id now optional. Self-service creators (see the
     # route) never need to send it -- it's forced to their own id
@@ -1780,6 +1799,7 @@ class TradovateAccountInfoRequest(BaseModel):
     display name shown on notifications."""
     tradovate_account_id: int
     tradovate_account_name: Optional[str] = None
+    tradovate_is_demo: Optional[bool] = None
 
 
 class ExecutorModeChangeRequest(BaseModel):
@@ -1871,6 +1891,7 @@ def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, An
         "assumed_balance_usd": account.assumed_balance_usd,
         "tradovate_account_id": account.tradovate_account_id,
         "tradovate_account_name": account.tradovate_account_name,
+        "tradovate_is_demo": bool(account.tradovate_is_demo),
         "has_credentials": bool(account.api_key_encrypted),
         "credential_set_at": account.credential_set_at.isoformat() if account.credential_set_at else None,
         # Phase 2 (2026-09-15): the RESOLVED profile (gate_profile_of()/
@@ -2009,11 +2030,13 @@ async def api_executor_test_connection(account_id: int, request: Request, db: Se
         # columns (documented in cme_tradovate_client.py's own header).
         # Two independent read-only calls, same "don't hide a partial
         # failure" shape as the Bitunix checks below. is_demo defaults to
-        # False -- this account is real Apex/Tradovate infra, not the
-        # public demo environment -- flip via ?demo=true if that
-        # assumption turns out wrong.
+        # the account's own stored tradovate_is_demo (set once via the
+        # tradovate-account-info route -- e.g. True for an MFFU evaluation
+        # account, which trades against Tradovate's demo gateway, not live)
+        # -- ?demo=true/?demo=false still overrides explicitly for one-off
+        # diagnostics without touching the stored account setting.
         import cme_tradovate_client
-        is_demo = request.query_params.get("demo", "").strip().lower() in ("1", "true", "yes")
+        is_demo = _resolve_tradovate_is_demo(request, account)
         client = cme_tradovate_client.TradovateClient(
             username=api_key, password=api_secret,
             account_id=account.tradovate_account_id or 0,
@@ -2075,7 +2098,7 @@ async def api_executor_list_tradovate_accounts(account_id: int, request: Request
     import cme_tradovate_client
     client = cme_tradovate_client.TradovateClient(
         username=api_key, password=api_secret, account_id=0, account_name=account.label,
-        is_demo=request.query_params.get("demo", "").strip().lower() in ("1", "true", "yes"),
+        is_demo=_resolve_tradovate_is_demo(request, account),
     )
     try:
         accounts = await client.list_accounts()
@@ -2307,11 +2330,17 @@ async def api_executor_set_tradovate_account_info(account_id: int, request: Requ
     account.tradovate_account_id = body.tradovate_account_id
     if body.tradovate_account_name is not None:
         account.tradovate_account_name = body.tradovate_account_name
+    if body.tradovate_is_demo is not None:
+        account.tradovate_is_demo = body.tradovate_is_demo
     _executor_accounts.write_audit(
         db, "ACCOUNT_UPDATED",
         f"Tradovate account info set for account {account.id}: id={body.tradovate_account_id}",
         account_id=account.id, actor=ctx.get("email") or "unknown",
-        detail={"tradovate_account_id": body.tradovate_account_id, "tradovate_account_name": body.tradovate_account_name},
+        detail={
+            "tradovate_account_id": body.tradovate_account_id,
+            "tradovate_account_name": body.tradovate_account_name,
+            "tradovate_is_demo": body.tradovate_is_demo,
+        },
     )
     db.commit()
     return JSONResponse({"ok": True, "account": _serialize_account(account, db)})

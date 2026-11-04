@@ -252,6 +252,70 @@ def test_set_tradovate_account_info_persists_and_is_used_by_verify_auth(env, mon
     assert seen_account_ids == [987654]   # not 0 -- the whole point of this route
 
 
+def test_set_tradovate_account_info_persists_is_demo_and_is_used_by_default(env, monkeypatch):
+    """2026-11-04 -- found while setting up the first real Tradovate
+    account (MFFU, an evaluation account that trades on Tradovate's demo
+    gateway, not live): the real trading path (cme_executor._client_for())
+    hardcoded is_demo=False with no account-level override at all. This
+    covers the stored-field default path; the next test covers the
+    explicit ?demo= query override."""
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",
+                        json={"tradovate_account_id": 1, "tradovate_is_demo": True})
+    assert resp.status_code == 200
+    assert resp.json()["account"]["tradovate_is_demo"] is True
+
+    db.refresh(account)
+    assert account.tradovate_is_demo is True
+
+    seen_is_demo = []
+
+    def _spy_init(self, username, password, account_id, account_name, is_demo=False):
+        seen_is_demo.append(is_demo)
+
+    monkeypatch.setattr(tvc.TradovateClient, "__init__", _spy_init)
+    monkeypatch.setattr(tvc.TradovateClient, "get_balance", lambda self: _async_ok({"cashBalance": 1.0}))
+    monkeypatch.setattr(tvc.TradovateClient, "get_positions", lambda self: _async_ok([]))
+
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "u", "api_secret": "p"})
+    client.post(f"/api/executor/accounts/{env['account_id']}/test-connection")
+    assert seen_is_demo == [True]   # picked up the stored account field, no query override given
+
+
+def test_connection_demo_query_param_overrides_stored_is_demo(env, monkeypatch):
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.exchange = "tradovate"
+    account.tradovate_is_demo = True
+    db.commit()
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{env['account_id']}/credentials",
+                json={"api_key": "u", "api_secret": "p"})
+
+    seen_is_demo = []
+
+    def _spy_init(self, username, password, account_id, account_name, is_demo=False):
+        seen_is_demo.append(is_demo)
+
+    monkeypatch.setattr(tvc.TradovateClient, "__init__", _spy_init)
+    monkeypatch.setattr(tvc.TradovateClient, "get_balance", lambda self: _async_ok({"cashBalance": 1.0}))
+    monkeypatch.setattr(tvc.TradovateClient, "get_positions", lambda self: _async_ok([]))
+
+    client.post(f"/api/executor/accounts/{env['account_id']}/test-connection?demo=false")
+    assert seen_is_demo == [False]   # explicit override wins over the stored True
+
+
 def test_set_tradovate_account_info_non_owner_gets_403(env):
     client = _login("cme_other@kabroda.com", "otherpass123")
     resp = client.post(f"/api/executor/accounts/{env['account_id']}/tradovate-account-info",

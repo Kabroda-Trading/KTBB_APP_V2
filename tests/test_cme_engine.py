@@ -123,6 +123,35 @@ def _capture_emails(monkeypatch):
     return calls
 
 
+# ------------------------------------------------------------------ cme_executor._client_for (is_demo wiring)
+
+def test_client_for_reads_is_demo_from_the_account_not_hardcoded_false(db):
+    """2026-11-04 -- found while setting up the first real Tradovate
+    account (MFFU, an evaluation account that trades on Tradovate's demo
+    gateway, not live): this was hardcoded to is_demo=False with no
+    account-level override at all, on the one real code path that
+    actually places live orders. main.py's diagnostic routes have their
+    own equivalent coverage (test_cme_routes.py)."""
+    account = _account(db, "demo_acct", mode="LIVE")
+    account.tradovate_account_id = 12345
+    account.tradovate_account_name = "MFFUEVREOD745510001"
+    account.tradovate_is_demo = True
+    db.commit()
+
+    client = cx._client_for(account)
+    assert client.is_demo is True
+    assert client.base_url.startswith("https://demo.")
+
+
+def test_client_for_defaults_to_live_when_is_demo_unset(db):
+    account = _account(db, "live_acct", mode="LIVE")
+    account.tradovate_account_id = 12345
+    db.commit()
+
+    client = cx._client_for(account)
+    assert client.is_demo is False
+
+
 # ------------------------------------------------------------------ _enabled_accounts_for_symbol
 
 def test_enabled_accounts_filters_by_symbol_flag_and_sorts_by_id(db):
