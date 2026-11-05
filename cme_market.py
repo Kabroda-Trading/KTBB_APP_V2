@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import datetime
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import cme_clock
 import cme_databento_client
@@ -132,3 +132,36 @@ async def fetch_confirmed_5m(symbol: str, since_utc: datetime.datetime) -> List[
     bars_1m = await client.get_ohlcv_1m_bars(symbol, since_utc, now_utc)
     confirmed_5m = _aggregate_to_confirmed_5m(bars_1m, now_utc)
     return _strip_to_signal_shape(confirmed_5m)
+
+
+async def fetch_daily_atr14(symbol: str, date_key: str) -> Optional[float]:
+    """Simple 14-day mean of Daily High - Daily Low, ending the day
+    BEFORE date_key (today's own daily bar isn't closed yet at the
+    10:00 ET lock -- using it would leak an incomplete range). Matches
+    the Brain repo's market_data._calc_daily_atr14 definition exactly:
+    a SIMPLE mean, NOT Wilder's smoothed ATR (CLAUDE.md's own
+    stop_planner.py note already establishes this convention for this
+    codebase -- do not swap to Wilder's without a fresh ruling).
+
+    2026-11-05 -- added to close a real gap found live, same day: D1's
+    cme_engine.py call site had been passing a hardcoded daily_atr14=
+    None since this module's Databento rebuild, which forces EVERY lock
+    to STAND_DOWN_UNREACHABLE via the reachability safety sentinel
+    (999.0 > REACHABILITY_MAX) -- a real trading day silently lost, not
+    a cosmetic bug. On any fetch failure or fewer than 14 real daily
+    bars, returns None -- callers must keep the SAME safe stand-down
+    behavior on None, never fabricate a fallback constant instead."""
+    client = cme_databento_client.DatabentoClient(_require_api_key())
+    year, month, day = (int(x) for x in date_key.split("-"))
+    end_utc = _ny_local_to_utc(year, month, day, 0, 0)   # midnight ET on date_key -- excludes today's own incomplete daily bar
+    start_utc = end_utc - datetime.timedelta(days=21)    # generous window to guarantee >=14 real trading days (weekends/holidays)
+    try:
+        bars = await client.get_ohlcv_1m_bars(symbol, start_utc, end_utc, schema="ohlcv-1d")
+    except Exception as e:
+        print(f"|| CME MARKET || daily ATR14 fetch failed for {symbol}: {e}")
+        return None
+    if len(bars) < 14:
+        return None
+    last14 = bars[-14:]
+    ranges = [b["high"] - b["low"] for b in last14]
+    return sum(ranges) / len(ranges)

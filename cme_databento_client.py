@@ -77,8 +77,9 @@ class DatabentoClient:
 
     async def get_ohlcv_1m_bars(
         self, root_symbol: str, start_utc: datetime.datetime, end_utc: datetime.datetime,
+        schema: str = "ohlcv-1m",
     ) -> List[Dict[str, Any]]:
-        """Returns 1-minute bars in chronological order as
+        """Returns bars in chronological order as
         {"ts_event": datetime (UTC, bar start), "open","high","low","close": float}
         dicts -- real decimal prices, already descaled from Databento's
         fixed-point integers. cme_market.py aggregates these into 5-minute
@@ -91,7 +92,7 @@ class DatabentoClient:
         params = {
             "dataset": DATASET,
             "symbols": symbol,
-            "schema": "ohlcv-1m",
+            "schema": schema,
             "stype_in": "continuous",
             "start": start_utc.strftime("%Y-%m-%dT%H:%M:%S"),
             "end": end_utc.strftime("%Y-%m-%dT%H:%M:%S"),

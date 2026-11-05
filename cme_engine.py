@@ -104,11 +104,19 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
         print(f"|| CME SESSION LOOP || {symbol} calibration fetch failed: {e}")
         return   # no row at all for today -- safe, matches "no lock row for a closed/unfetchable day"
 
-    # daily ATR14 would come from the same market-data layer -- left as a
-    # TODO alongside cme_market.py's own NotImplementedError gap; using a
-    # conservative always-fails-reachability sentinel until that's wired
-    # in means this never silently arms a trade on an unverified ATR.
-    daily_atr14 = None
+    # 2026-11-05 -- found live, same day, flagged by DeepSeek and verified
+    # directly against this exact line before fixing: this was hardcoded
+    # to None (a stale TODO from before cme_market.py's Databento rebuild),
+    # which forces the reachability safety sentinel (999.0 > 0.55) on
+    # EVERY lock -- a real trading day silently lost, not cosmetic. Now a
+    # real fetch; on failure or <14 real daily bars it still returns None,
+    # so the SAME safe stand-down behavior holds -- never a fabricated
+    # fallback constant.
+    try:
+        daily_atr14 = await cme_market.fetch_daily_atr14(symbol, date_key)
+    except Exception as e:
+        print(f"|| CME SESSION LOOP || {symbol} daily ATR14 fetch failed: {e}")
+        daily_atr14 = None
     plan_data = cme_signals.calculate_session_lock(symbol, bars_1m, daily_atr14)
     if plan_data is None:
         return
