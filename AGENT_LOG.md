@@ -9649,3 +9649,10 @@ Consolidated myself: added the four main.py route registrations (kept out of the
 Full suite 1089 passed. Site commit `c709118`, pushed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+### 3. Quantitative Audit on the 7-Day Waiting-for-Touch Cap (Andy Directive)
+* **Backtest Authority:** The original touch-fill measurement harnesses (`lab_touchfill_arms.py:169-181`, `find_fill()`, and `d1_meas_base.py:44-53`) strictly capped the search for a trigger touch at `SESSION_BARS = 90` (90 5-minute bars = **7.5 hours**).
+* **The Root Conflation:** The 7-day cap in the study was the **in-trade holding period** (`journey_cap_at`, maximum time to hold an *already-filled* position until a TIME exit). It was **never** intended to be a 7-day resting limit order window before fill.
+* **Empirical Risk:** Leaving an entry limit open after price has exploded 2,500 points away and entered the next day's session exposes the account to high-velocity counter-trend reversals (catching a falling knife at stale levels) rather than a clean immediate breakout retest. Furthermore, when next-day primaries initialize (as Plan 50 did today), it causes multi-order collisions on the exchange.
+* **Specification Fix for CC:** In `gate_traveler.py:advance_waiting_touch()`, the waiting-for-touch timeout should match the backtested `SESSION_BARS = 90` (7.5 hours) or cancel upon the next session's lock (`now_utc >= session_expires_at`), transitioning to `DONE` with `last_transition_reason: "touch window expired without retest -- not taken"` and triggering `_cancel_expired_traveler_entry_order()` to cancel the resting limit on Bitunix.
