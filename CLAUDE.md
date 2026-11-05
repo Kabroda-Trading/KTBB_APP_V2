@@ -66,6 +66,15 @@ METASIGNALS_SECRET_KEY   # Optional — required only for the Raspberry Pi daemo
                          # _handle_metasignals_ingest() for why both names are accepted (a real, confirmed
                          # discrepancy between this repo's own committed Pi script and the spec's later
                          # commit describing what's actually running on Andy's hardware, 2026-10-13).
+DATABENTO_API_KEY     # Optional -- required only for cme_market.py's real D1/D2 market-data fetch
+                      # (cme_databento_client.py). Added 2026-11-04 once direct Tradovate Market Data
+                      # access was confirmed blocked by the same funded-account gate as trading access
+                      # (accessToken and mdAccessToken come from the identical, confirmed-blocked
+                      # /auth/accesstokenrequest call), and CrossTrade (the execution path that DOES
+                      # work) was confirmed to have no market-data surface on its Tradovate-linked side.
+                      # A single global key, not per-ExecutorAccount -- MES/MNQ price data doesn't
+                      # depend on which Tradovate/CrossTrade account is trading it. Without this set,
+                      # cme_market.py's fetch functions raise a clear RuntimeError (not a silent gap).
 ```
 
 ---

@@ -217,7 +217,7 @@ def test_process_symbol_lock_is_idempotent_on_restart_replay(db, monkeypatch):
     _plan(db, symbol="MNQ", date_key="2026-11-04")   # a lock already exists for today
     calls = {"n": 0}
 
-    async def _fake_calib(client, symbol):
+    async def _fake_calib(symbol, date_key):
         calls["n"] += 1
         return []
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
@@ -231,7 +231,7 @@ def test_process_symbol_lock_creates_no_row_at_all_on_a_calibration_fetch_failur
     account = _account(db)
     _config(db, account)
 
-    async def _fail(client, symbol):
+    async def _fail(symbol, date_key):
         raise NotImplementedError("Tradovate Market Data API not yet confirmed")
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fail)
 
@@ -244,7 +244,7 @@ def test_process_symbol_lock_stand_down_creates_plan_but_no_orders(db, monkeypat
     _config(db, account)
     monkeypatch.setattr(cx, "_client_for", lambda account_: object())
 
-    async def _fake_calib(client, symbol):
+    async def _fake_calib(symbol, date_key):
         return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
     monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: {
@@ -280,7 +280,7 @@ def test_process_symbol_lock_armed_fans_out_long_and_short_orders_per_enabled_ac
     _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
     monkeypatch.setattr(cx, "_client_for", lambda account_: object())
 
-    async def _fake_calib(client, symbol):
+    async def _fake_calib(symbol, date_key):
         return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
     monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
@@ -317,7 +317,7 @@ def test_process_symbol_lock_admits_both_directions_independently_same_tick(db, 
     _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
     monkeypatch.setattr(cx, "_client_for", lambda account_: object())
 
-    async def _fake_calib(client, symbol):
+    async def _fake_calib(symbol, date_key):
         return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
     monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
@@ -347,7 +347,7 @@ def test_process_symbol_lock_respects_a_real_risk_rejection_not_just_a_mock(db, 
     _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
     monkeypatch.setattr(cx, "_client_for", lambda account_: object())
 
-    async def _fake_calib(client, symbol):
+    async def _fake_calib(symbol, date_key):
         return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
     monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
@@ -373,7 +373,7 @@ def test_advance_pending_order_no_cross_yet_leaves_state_untouched(db, monkeypat
     plan = _plan(db)
     order = _order(db, account, plan, management_state="PENDING_ENTRY")
 
-    async def _fake_bars(client, symbol, since):
+    async def _fake_bars(symbol, since):
         return [{"close": 4490.0}]   # inside the box -- no cross
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -387,7 +387,7 @@ def test_advance_pending_order_cross_confirmed_places_bracket(db, monkeypatch):
     plan = _plan(db)
     order = _order(db, account, plan, management_state="PENDING_ENTRY")
 
-    async def _fake_bars(client, symbol, since):
+    async def _fake_bars(symbol, since):
         return [{"close": 4510.0}]   # beyond bo=4500 -- confirmed LONG cross
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -413,7 +413,7 @@ def test_advance_pending_order_opposite_side_stands_down_instead_of_also_enterin
     long_order = _order(db, account, plan, direction="LONG", management_state="PENDING_ENTRY")
     short_order = _order(db, account, plan, direction="SHORT", management_state="PENDING_ENTRY")
 
-    async def _fake_bars(client, symbol, since):
+    async def _fake_bars(symbol, since):
         return [{"close": 4510.0}]   # beyond bo=4500 -- confirmed LONG cross only
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -439,7 +439,7 @@ def test_advance_pending_order_skips_a_rejected_decision(db, monkeypatch):
     order = _order(db, account, plan, management_state="PENDING_ENTRY", decision="REJECTED", decision_reason="trailing dd")
 
     called = {"n": 0}
-    async def _should_not_run(client, symbol, since):
+    async def _should_not_run(symbol, since):
         called["n"] += 1
         return [{"close": 4510.0}]
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _should_not_run)
@@ -506,7 +506,7 @@ def test_advance_open_position_breakeven_ratchet_fires_and_returns_before_exit_c
                     sl_exchange_order_id="1")
 
     monkeypatch.setattr(cc, "today_flush_utc", lambda now: now + datetime.timedelta(hours=1))
-    async def _fake_bars(client, symbol, since):
+    async def _fake_bars(symbol, since):
         return [{"close": 4520.0, "high": 4522.0, "low": 4518.0}]   # past be_trigger_long=4516
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -535,7 +535,7 @@ def test_advance_open_position_stop_hit_closes_with_correct_reason(db, monkeypat
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=True)
 
     monkeypatch.setattr(cc, "today_flush_utc", lambda now: now + datetime.timedelta(hours=1))
-    async def _fake_bars(client, symbol, since):
+    async def _fake_bars(symbol, since):
         return [{"close": 4475.0, "high": 4481.0, "low": 4478.0}]   # low <= stop 4480
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -555,7 +555,7 @@ def test_advance_open_position_no_action_leaves_order_untouched(db, monkeypatch)
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=True)
 
     monkeypatch.setattr(cc, "today_flush_utc", lambda now: now + datetime.timedelta(hours=1))
-    async def _fake_bars(client, symbol, since):
+    async def _fake_bars(symbol, since):
         return [{"close": 4508.0, "high": 4510.0, "low": 4506.0}]   # flat -- no stop/target touch
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 

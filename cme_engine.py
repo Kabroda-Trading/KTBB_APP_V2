@@ -95,9 +95,11 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
         return   # idempotent -- restart-safe, same convention as TravelerPlan/AltMatrixPlan
 
     accounts = _enabled_accounts_for_symbol(db, symbol)
+    if not accounts:
+        return   # nobody has this symbol enabled -- skip the (paid, per-call) market-data fetch entirely
+
     try:
-        client = cme_executor._client_for(accounts[0][0]) if accounts else None
-        bars_1m = await cme_market.fetch_calibration_1m(client, symbol) if client else []
+        bars_1m = await cme_market.fetch_calibration_1m(symbol, date_key)
     except Exception as e:
         print(f"|| CME SESSION LOOP || {symbol} calibration fetch failed: {e}")
         return   # no row at all for today -- safe, matches "no lock row for a closed/unfetchable day"
@@ -201,8 +203,7 @@ async def _advance_pending_order(db: Session, order_row: CMEOrder) -> None:
         return
 
     if order_row.management_state == "PENDING_ENTRY":
-        client = cme_executor._client_for(account)
-        bars_5m = await cme_market.fetch_confirmed_5m(client, order_row.symbol, plan.lock_time)
+        bars_5m = await cme_market.fetch_confirmed_5m(order_row.symbol, plan.lock_time)
         cross = cme_signals.check_cross(bars_5m, plan.bo, plan.bd)
         if cross is None:
             return   # still waiting within the cross window -- caller enforces the window via plan age, not here
@@ -243,8 +244,7 @@ async def _advance_open_position(db: Session, order_row: CMEOrder) -> None:
         await cme_executor.market_close(db, account, order_row, exit_reason="TIME_FLUSH")
         return
 
-    client = cme_executor._client_for(account)
-    bars_5m = await cme_market.fetch_confirmed_5m(client, order_row.symbol, order_row.entry_fill_time or plan.lock_time)
+    bars_5m = await cme_market.fetch_confirmed_5m(order_row.symbol, order_row.entry_fill_time or plan.lock_time)
 
     be_trigger = plan.be_trigger_long if order_row.direction == "LONG" else plan.be_trigger_short
     target = plan.target_long if order_row.direction == "LONG" else plan.target_short
