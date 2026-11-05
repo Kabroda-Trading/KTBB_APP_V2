@@ -1971,6 +1971,71 @@ async def api_admin_cme_market_data_test(request: Request, symbol: str = "MNQ", 
     })
 
 
+@app.post("/api/admin/cme-order-placement-test/{account_id}")
+async def api_admin_cme_order_placement_test(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """Real order-placement test, admin-only -- places a genuine resting
+    LIMIT bracket order on the real account, far enough from the market
+    that it cannot fill. MNQ only for now -- the one symbol with a
+    confirmed real recent price range (via the market-data test panel
+    above: ~28,400-28,800 on 2026-11-04); don't extend to MES here until
+    its own range is confirmed the same way.
+
+    Uses Kabroda's OWN cme_executor._client_for()/cme_crosstrade_client.py
+    code path directly -- NOT a manual Playground call. This is the
+    point: it proves the real code that will run unattended, and removes
+    the exact human-error risk (wrong box, wrong instrument, wrong order
+    type) that caused a real accidental ES market-order fill earlier the
+    same session when this was tested by hand. Never cancels on its own
+    -- use the paired cancel route below once you've seen the response."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+
+    import cme_executor
+    try:
+        client = cme_executor._client_for(account)
+        resp = await client.place_bracket_limit_order(
+            symbol="MNQ", action="Buy", qty=1,
+            limit_price=25000.0, stop_price=24500.0, target_price=25500.0,
+        )
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    _executor_accounts.write_audit(
+        db, "ORDER_PLACED", f"CME order-placement test for account {account.id}: {resp}",
+        account_id=account.id, actor=ctx.get("email") or "unknown", detail=resp,
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "response": resp})
+
+
+@app.post("/api/admin/cme-order-placement-test/{account_id}/cancel")
+async def api_admin_cme_order_placement_test_cancel(account_id: int, order_id: int, request: Request, db: Session = Depends(get_db)):
+    """Pairs with the route above -- cancels the resting test order by
+    its real order id (from that route's response)."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+
+    import cme_executor
+    try:
+        client = cme_executor._client_for(account)
+        cancelled = await client.cancel_order(order_id)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    _executor_accounts.write_audit(
+        db, "ORDER_PLACED", f"CME order-placement test cancel for account {account.id}, order {order_id}: {cancelled}",
+        account_id=account.id, actor=ctx.get("email") or "unknown", detail={"order_id": order_id, "cancelled": cancelled},
+    )
+    db.commit()
+    return JSONResponse({"ok": True, "cancelled": cancelled})
+
+
 @app.get("/api/executor/accounts")
 async def api_executor_list_accounts(request: Request, db: Session = Depends(get_db)):
     # 2026-09-05: deliberately NO admin bypass here, on Andy's own explicit

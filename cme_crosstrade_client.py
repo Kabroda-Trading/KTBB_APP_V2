@@ -206,10 +206,18 @@ class CrossTradeClient:
         carry an `orderId`, same contract as TradovateClient's own
         return shape) or {"error": ..., "status_code": ...} on failure --
         cme_executor.py's place_resting_bracket() checks `"error" in resp`
-        and `resp.get("orderId")` identically regardless of provider."""
+        and `resp.get("orderId")` identically regardless of provider.
+
+        Instrument format: CONFIRMED LIVE 2026-11-04 (Andy's own test,
+        not a guess) -- a bare root symbol was never actually tested;
+        the continuous-contract alias ("ES1!") auto-resolved correctly to
+        the real live front-month contract (ESZ6) for order placement.
+        Uses that same proven format (f"{symbol}1!") rather than a bare
+        root or a quarterly-expiring dated code that would need ongoing
+        maintenance."""
         url = f"{BASE_URL}/accounts/{self.crosstrade_account_id}/orders/place"
         payload = {
-            "instrument": symbol, "action": action.lower(), "qty": qty,
+            "instrument": f"{symbol}1!", "action": action.lower(), "qty": qty,
             "orderType": "limit", "limitPrice": round(limit_price, 2),
             "tif": "day",
             "takeProfit": round(target_price, 2), "stopLoss": round(stop_price, 2),

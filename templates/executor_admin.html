@@ -566,6 +566,14 @@ async function loadAccounts() {
                 </div>
 
                 <p class="empty" id="cmeTvAccountInfoResult-${a.id}" style="margin-top:6px; display:none;"></p>
+
+                <p class="empty" style="padding:8px 0 4px;">Order-placement test -- places a real resting MNQ LIMIT buy, far enough below market (limit $25,000 vs. MNQ trading ~$28,000+) that it cannot fill, through Kabroda's own code (not a manual Playground/platform click -- removes that exact human-error risk). Zero cost unless the market somehow drops ~12% in seconds. Cancel it once you've seen the response.</p>
+                <div class="risk-form">
+                    <button class="btn btn-ok" onclick="placeCmeOrderTest(${a.id})" style="align-self:flex-end;">PLACE TEST ORDER (MNQ)</button>
+                    <label>Order ID to cancel<input type="number" step="1" id="cmeOrderTestId-${a.id}"></label>
+                    <button class="btn btn-danger" onclick="cancelCmeOrderTest(${a.id})" style="align-self:flex-end;">CANCEL TEST ORDER</button>
+                </div>
+                <p class="empty" id="cmeOrderTestResult-${a.id}" style="margin-top:6px; display:none; white-space:pre-wrap;"></p>
             </div>
 
             <details style="margin-top:10px;">
@@ -685,6 +693,44 @@ async function testCmeMarketData() {
     }
     resultEl.style.color = "#6ee7b7";
     resultEl.textContent = `${resp.symbol} ${resp.date_key}: ${resp.bar_count} bar(s).\nFirst: ${JSON.stringify(resp.first_bar)}\nLast: ${JSON.stringify(resp.last_bar)}`;
+}
+
+async function placeCmeOrderTest(accountId) {
+    const resultEl = document.getElementById(`cmeOrderTestResult-${accountId}`);
+    resultEl.style.display = "block";
+    resultEl.textContent = "Placing...";
+    const resp = await api(`/api/admin/cme-order-placement-test/${accountId}`, { method: "POST" });
+    if (!resp.ok) {
+        resultEl.textContent = `FAILED: ${resp.error || "unknown error"}`;
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.style.color = "#6ee7b7";
+    resultEl.textContent = JSON.stringify(resp.response, null, 2);
+    const orderId = resp.response && resp.response.orderId;
+    if (orderId) {
+        document.getElementById(`cmeOrderTestId-${accountId}`).value = orderId;
+    }
+}
+
+async function cancelCmeOrderTest(accountId) {
+    const orderId = document.getElementById(`cmeOrderTestId-${accountId}`).value.trim();
+    const resultEl = document.getElementById(`cmeOrderTestResult-${accountId}`);
+    resultEl.style.display = "block";
+    if (!orderId) {
+        resultEl.textContent = "Enter the order ID to cancel first (auto-filled after a successful placement).";
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.textContent = "Cancelling...";
+    const resp = await api(`/api/admin/cme-order-placement-test/${accountId}/cancel?order_id=${orderId}`, { method: "POST" });
+    if (!resp.ok) {
+        resultEl.textContent = `FAILED: ${resp.error || "unknown error"}`;
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.style.color = resp.cancelled ? "#6ee7b7" : "#fca5a5";
+    resultEl.textContent = `Cancelled: ${resp.cancelled}`;
 }
 
 function toggleExecutionProviderFields(accountId) {

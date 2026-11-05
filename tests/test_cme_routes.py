@@ -195,6 +195,74 @@ def test_market_data_test_defaults_date_key_to_today_ny(env, monkeypatch):
     assert len(seen["date_key"]) == 10   # "YYYY-MM-DD"
 
 
+# ------------------------------------------------------------------ POST /api/admin/cme-order-placement-test/{id}(/cancel)
+
+def test_order_placement_test_requires_admin(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/admin/cme-order-placement-test/{env['account_id']}")
+    assert resp.status_code == 403
+
+
+def test_order_placement_test_calls_the_real_client_and_returns_its_response(env, monkeypatch):
+    import cme_executor as cx
+
+    class _FakeClient:
+        async def place_bracket_limit_order(self, symbol, action, qty, limit_price, stop_price, target_price):
+            assert symbol == "MNQ" and action == "Buy" and qty == 1
+            assert limit_price < stop_price < target_price or stop_price < limit_price < target_price
+            return {"orderId": 999888777}
+
+    monkeypatch.setattr(cx, "_client_for", lambda account: _FakeClient())
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/admin/cme-order-placement-test/{env['account_id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["response"]["orderId"] == 999888777
+
+
+def test_order_placement_test_surfaces_a_real_failure_clearly(env, monkeypatch):
+    import cme_executor as cx
+
+    class _FakeClient:
+        async def place_bracket_limit_order(self, *a, **k):
+            raise RuntimeError("CrossTrade order placement failed (400): unknown_account")
+
+    monkeypatch.setattr(cx, "_client_for", lambda account: _FakeClient())
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/admin/cme-order-placement-test/{env['account_id']}")
+    assert resp.status_code == 502
+    assert "unknown_account" in resp.json()["error"]
+
+
+def test_order_placement_test_cancel_requires_admin(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/admin/cme-order-placement-test/{env['account_id']}/cancel?order_id=1")
+    assert resp.status_code == 403
+
+
+def test_order_placement_test_cancel_calls_the_real_client(env, monkeypatch):
+    import cme_executor as cx
+
+    seen = {}
+    class _FakeClient:
+        async def cancel_order(self, order_id):
+            seen["order_id"] = order_id
+            return True
+
+    monkeypatch.setattr(cx, "_client_for", lambda account: _FakeClient())
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/admin/cme-order-placement-test/{env['account_id']}/cancel?order_id=999888777")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["cancelled"] is True
+    assert seen["order_id"] == 999888777
+
+
 # ------------------------------------------------------------------ GET/POST /api/executor/accounts/{id}/cme-config
 
 def test_get_config_non_owner_gets_403(env):
