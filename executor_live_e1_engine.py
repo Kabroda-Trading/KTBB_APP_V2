@@ -192,10 +192,27 @@ def _plan_has_expired(traveler_plan_row: TravelerPlan, now_utc: datetime.datetim
         return False
     if traveler_plan_row.status in ("DONE", "TERCILE_SKIPPED"):
         return True
-    cap = traveler_plan_row.journey_cap_at
-    if cap is not None:
-        cap = cap if cap.tzinfo is not None else cap.replace(tzinfo=datetime.timezone.utc)
-        return now_utc >= cap
+    # 2026-11-05 -- found live (DeepSeek's quantitative audit, Andy's own
+    # directive to fix): this used to check journey_cap_at (cross + 7
+    # days) here too, but that's the IN-TRADE HOLDING cap for an
+    # ALREADY-FILLED position's own TIME exit (mgmt_e1_stack.py's
+    # separate use of this same field, unaffected by this change) -- not
+    # the right basis for "should a STILL-RESTING, NEVER-FILLED entry
+    # order be cancelled." The actual measured authority behind the gate
+    # (lab_touchfill_arms.py/d1_meas_base.py) capped the touch-fill
+    # search at SESSION_BARS=90 (7.5h) -- the SAME constant the primary
+    # already borrows correctly for re-arm, just above, via
+    # REARM_TOUCH_CAP_SECONDS. A real incident (2026-11-05) showed the
+    # 7-day cap left three real resting orders open across a session
+    # boundary with price ~2,600 points away, risking a second resting
+    # order on the next session's own cross. Andy's own confirmation:
+    # the 7-day field is useful as backtest/tracking data, never the
+    # right live-trading basis for this specific decision.
+    cross_time = traveler_plan_row.cross_time
+    if cross_time is not None:
+        cross_time = cross_time if cross_time.tzinfo is not None else cross_time.replace(tzinfo=datetime.timezone.utc)
+        touch_cap = cross_time + datetime.timedelta(seconds=gate_traveler.REARM_TOUCH_CAP_SECONDS)
+        return now_utc >= touch_cap
     return False
 
 

@@ -716,6 +716,13 @@ def test_entry_canceled_reconciliation_never_books_a_fill_or_loss(db, monkeypatc
 def test_expired_journey_cancels_the_resting_entry_order(db, monkeypatch):
     account = _ready_account(db)
     plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)
+    # 2026-11-05 -- _plan_has_expired()'s primary-path check now reads
+    # cross_time + the 90-bar/7.5h touch cap, not journey_cap_at (the
+    # real in-trade-holding/TIME-exit basis, a separate concern) -- set
+    # cross_time far enough in the past to still exercise this test's
+    # real intent (the resting entry order has outlived its real window).
+    plan.cross_time = _FAR_PAST
+    db.flush()
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
     _install(monkeypatch,
              get_order_detail=_async_seq([_order_detail_response(status="NEW"), _order_detail_response(status="CANCELED")]),
@@ -750,6 +757,8 @@ def test_tercile_skipped_status_also_cancels_the_resting_entry_order(db, monkeyp
 def test_expiry_cancel_race_with_a_real_fill_hands_off_untouched(db, monkeypatch):
     account = _ready_account(db)
     plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)
+    plan.cross_time = _FAR_PAST   # see test_expired_journey_cancels_the_resting_entry_order's own note
+    db.flush()
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
     _install(monkeypatch,
              get_order_detail=_async_seq([_order_detail_response(status="NEW"), _order_detail_response(status="FILLED")]),
@@ -758,9 +767,51 @@ def test_expiry_cancel_race_with_a_real_fill_hands_off_untouched(db, monkeypatch
     assert order.management_state == "PENDING_ENTRY"   # untouched -- next tick's normal fill path takes over
 
 
+def test_primary_order_expires_on_cross_time_touch_cap_even_with_a_far_future_journey_cap(db, monkeypatch):
+    """2026-11-05 -- proves the new behavior actually governs, not just
+    coincidentally passes: journey_cap_at alone would say 'not expired'
+    (old behavior), but cross_time + the 7.5h touch cap says it IS --
+    and the touch cap is what must win for a still-resting, never-filled
+    primary entry order."""
+    account = _ready_account(db)
+    plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)
+    plan.cross_time = _FAR_PAST
+    db.flush()
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    _install(monkeypatch,
+             get_order_detail=_async_seq([_order_detail_response(status="NEW"), _order_detail_response(status="CANCELED")]),
+             cancel_orders=_async(_cancel_orders_response(order_id="entry-order-1")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.management_state == "CLOSED_EXPIRED"
+
+
+def test_primary_order_not_expired_within_the_touch_cap_even_with_a_past_journey_cap(db, monkeypatch):
+    """Mirror of the above: journey_cap_at alone would say 'expired' (old
+    behavior), but a recent cross_time (well within the 7.5h window) says
+    it is NOT -- the touch cap must win, never journey_cap_at, for this
+    specific still-resting-order decision."""
+    account = _ready_account(db)
+    plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)
+    plan.cross_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=30)
+    db.flush()
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    cancel_calls = []
+
+    async def _track_cancel(self, *a, **kw):
+        cancel_calls.append((a, kw))
+        return _cancel_orders_response(order_id="entry-order-1")
+
+    _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="NEW")), cancel_orders=_track_cancel)
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.management_state == "PENDING_ENTRY"   # still resting
+    assert cancel_calls == []   # expiry/cancel path must never have fired
+
+
 def test_expiry_cancel_call_failure_retries_next_tick(db, monkeypatch):
     account = _ready_account(db)
     plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)
+    plan.cross_time = _FAR_PAST   # see test_expired_journey_cancels_the_resting_entry_order's own note
+    db.flush()
     order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
 
     async def _raise(self, *a, **kw):
