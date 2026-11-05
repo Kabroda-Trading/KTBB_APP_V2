@@ -124,6 +124,21 @@
         </div>
     </div>
 
+    {% if is_admin %}
+    <div class="card" id="cmeMarketDataTestCard">
+        <div class="card-header"><span class="card-title">CME Market Data Test (Databento)</span></div>
+        <div class="card-body">
+            <p class="empty" style="padding:0 0 8px;">Global, not per-account -- MES/MNQ price data doesn't depend on which Tradovate/CrossTrade account is trading it. Tests the real DATABENTO_API_KEY end to end against a real historical date (defaults to today) -- no need to wait for tomorrow's live 9:30-10:00 ET window.</p>
+            <div class="risk-form">
+                <label>Symbol<select id="cmeMdTestSymbol"><option value="MNQ">MNQ</option><option value="MES">MES</option></select></label>
+                <label>Date (YYYY-MM-DD, blank = today)<input type="text" id="cmeMdTestDate" placeholder="2026-11-04"></label>
+                <button class="btn btn-ok" onclick="testCmeMarketData()" style="align-self:flex-end;">TEST FETCH</button>
+            </div>
+            <p class="empty" id="cmeMdTestResult" style="margin-top:6px; display:none; white-space:pre-wrap;"></p>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card">
         <div class="card-header"><span class="card-title">Create Account</span></div>
         <div class="card-body">
@@ -653,6 +668,23 @@ async function saveCmeConfig(accountId) {
     }
     resultEl.textContent = `Saved: MNQ ${resp.config.mnq_enabled ? "enabled" : "disabled"}, MES ${resp.config.mes_enabled ? "enabled" : "disabled"}, cap ${resp.config.contracts_cap}, trailing DD $${resp.config.trailing_dd_limit_usd}.`;
     resultEl.style.color = "#6ee7b7";
+}
+
+async function testCmeMarketData() {
+    const symbol = document.getElementById("cmeMdTestSymbol").value;
+    const dateKey = document.getElementById("cmeMdTestDate").value.trim();
+    const resultEl = document.getElementById("cmeMdTestResult");
+    resultEl.style.display = "block";
+    resultEl.textContent = "Fetching...";
+    const qs = dateKey ? `?symbol=${symbol}&date_key=${encodeURIComponent(dateKey)}` : `?symbol=${symbol}`;
+    const resp = await api(`/api/admin/cme-market-data-test${qs}`);
+    if (!resp.ok) {
+        resultEl.textContent = `FAILED: ${resp.error || "unknown error"}`;
+        resultEl.style.color = "#fca5a5";
+        return;
+    }
+    resultEl.style.color = "#6ee7b7";
+    resultEl.textContent = `${resp.symbol} ${resp.date_key}: ${resp.bar_count} bar(s).\nFirst: ${JSON.stringify(resp.first_bar)}\nLast: ${JSON.stringify(resp.last_bar)}`;
 }
 
 function toggleExecutionProviderFields(accountId) {

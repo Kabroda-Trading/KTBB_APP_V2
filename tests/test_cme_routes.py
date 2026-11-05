@@ -140,6 +140,61 @@ def test_admin_status_allows_admin_and_returns_configs(env):
     assert body["configs"][0]["mes_enabled"] is False
 
 
+# ------------------------------------------------------------------ GET /api/admin/cme-market-data-test
+
+def test_market_data_test_requires_admin(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/admin/cme-market-data-test")
+    assert resp.status_code == 403
+
+
+def test_market_data_test_calls_the_real_fetch_function_and_reports_success(env, monkeypatch):
+    import cme_market
+
+    async def _fake_fetch(symbol, date_key):
+        return [{"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5}] * 15
+    monkeypatch.setattr(cme_market, "fetch_calibration_1m", _fake_fetch)
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/cme-market-data-test?symbol=MNQ&date_key=2026-11-04")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["symbol"] == "MNQ"
+    assert body["date_key"] == "2026-11-04"
+    assert body["bar_count"] == 15
+    assert body["first_bar"] == {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5}
+
+
+def test_market_data_test_surfaces_a_real_fetch_failure_clearly(env, monkeypatch):
+    import cme_market
+
+    async def _fake_fail(symbol, date_key):
+        raise RuntimeError("DATABENTO_API_KEY not set -- cannot fetch real market data")
+    monkeypatch.setattr(cme_market, "fetch_calibration_1m", _fake_fail)
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/cme-market-data-test?symbol=MES&date_key=2026-11-04")
+    assert resp.status_code == 502
+    assert "DATABENTO_API_KEY" in resp.json()["error"]
+
+
+def test_market_data_test_defaults_date_key_to_today_ny(env, monkeypatch):
+    import cme_market
+
+    seen = {}
+    async def _fake_fetch(symbol, date_key):
+        seen["date_key"] = date_key
+        return []
+    monkeypatch.setattr(cme_market, "fetch_calibration_1m", _fake_fetch)
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/cme-market-data-test?symbol=MNQ")
+    assert resp.status_code == 200
+    assert seen["date_key"] == resp.json()["date_key"]
+    assert len(seen["date_key"]) == 10   # "YYYY-MM-DD"
+
+
 # ------------------------------------------------------------------ GET/POST /api/executor/accounts/{id}/cme-config
 
 def test_get_config_non_owner_gets_403(env):

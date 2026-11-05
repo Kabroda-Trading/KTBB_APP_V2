@@ -1944,6 +1944,33 @@ async def api_admin_cme_status(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+@app.get("/api/admin/cme-market-data-test")
+async def api_admin_cme_market_data_test(request: Request, symbol: str = "MNQ", date_key: Optional[str] = None, db: Session = Depends(get_db)):
+    """Read-only diagnostic, admin-only, zero financial risk -- the
+    cme_market.py/cme_databento_client.py equivalent of the Tradovate/
+    CrossTrade VERIFY AUTH routes. Lets Andy confirm a real DATABENTO_API_KEY
+    actually works end to end (auth, the real HTTP path, price descaling,
+    DST-correct NY windowing) against a real HISTORICAL date, without
+    waiting for tomorrow's live 9:30-10:00 ET window -- Databento serves
+    historical data, so today's (or any past) window is a valid live test
+    right now. date_key defaults to today's NY calendar date."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+
+    import cme_market
+    if not date_key:
+        date_key = datetime.now(timezone.utc).astimezone(cme_market.cme_clock.NY_TZ).strftime("%Y-%m-%d")
+    try:
+        bars = await cme_market.fetch_calibration_1m(symbol, date_key)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    return JSONResponse({
+        "ok": True, "symbol": symbol, "date_key": date_key, "bar_count": len(bars),
+        "first_bar": bars[0] if bars else None, "last_bar": bars[-1] if bars else None,
+    })
+
+
 @app.get("/api/executor/accounts")
 async def api_executor_list_accounts(request: Request, db: Session = Depends(get_db)):
     # 2026-09-05: deliberately NO admin bypass here, on Andy's own explicit
