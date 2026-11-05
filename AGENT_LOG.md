@@ -9573,3 +9573,17 @@ Closing entry for tonight's CME execution-path verification. Summary of what got
 Full suite run as the closing audit for this entire fix cycle (place/cancel/UI-scope changes pushed on the targeted CME suite alone during the rapid iteration, per Andy's own call to reduce friction -- full audit deferred to the end of the cycle, not skipped). Site commits tonight: `69fe3df`, `004dd0c`, `23fe1ec`, `3db5756`, plus the UI-scoping fix in this same push.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (tenth entry, same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — Mission Control CME desk panel built in suite_dashboard.html, the last deferred item from CC_INTERFACE.md's M2/section E
+
+Found the real spec in the Brain repo (`CC_INTERFACE.md` section E, "Unified Operations Mission Control & Emergency Flatten") rather than guess at a layout -- read it before building anything. Extended the existing 740-line `suite_dashboard.html` (did not create a new file, per that plan's own instruction):
+
+- **Desk split**: Crypto Desk (left, reuses the existing overview KPI figures already on the page -- no new fetch) and TradFi Desk (right, new -- MNQ/MES plan/position state via the already-existing public `GET /api/radar/cme-snapshot`, zero backend changes).
+- **Trailing-DD gauge**: admin-only, since the data (`GET /api/admin/cme-status`'s `configs` list) is already admin-gated server-side by `cme_radar.py`'s own design -- respected, not relaxed. One honest limitation flagged rather than faked: no route anywhere tracks live intraday equity today (only `high_water_mark_usd`, updated once per daily D1 lock) -- the gauge shows the configured cushion against the high-water mark, labeled "as of last daily lock, not a live tick," not a fabricated real-time distance. A genuinely live gauge (section E's literal ask) would need a new backend live-balance call -- out of scope for a UI-only pass.
+- **Fleet Emergency Flatten**: prominent header button, wired to the already-existing `POST /api/tradovate/flatten_all` (zero new backend logic). "Fleet" = every Tradovate account the logged-in user can see, via the already-scoped `GET /api/executor/accounts` (zero admin bypass, Andy's own 2026-09-07 ruling -- mutual isolation preserved exactly, not a new fleet-wide admin bypass). Confirmation dialog required before firing.
+- **Scoping check**: the two routes already feeding the Crypto Desk figures (`/api/dashboard/overview`, `/api/dashboard/mas-history`) were already correctly user-scoped earlier today -- verified directly against the live code, nothing further needed.
+
+2 new tests, full suite 1077 passed, real TestClient boot check green (anon/basic/admin, 11/11). Site commit `3d007a6`, pushed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
