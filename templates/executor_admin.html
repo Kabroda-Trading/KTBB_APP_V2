@@ -730,7 +730,7 @@ async function cancelCmeOrderTest(accountId) {
         return;
     }
     resultEl.style.color = resp.cancelled ? "#6ee7b7" : "#fca5a5";
-    resultEl.textContent = `Cancelled: ${resp.cancelled}`;
+    resultEl.textContent = `Cancelled: ${resp.cancelled}` + (resp.last_cancel_error ? `\n${resp.last_cancel_error}` : "");
 }
 
 function toggleExecutionProviderFields(accountId) {

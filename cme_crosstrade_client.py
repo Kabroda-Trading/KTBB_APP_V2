@@ -112,6 +112,12 @@ class CrossTradeClient:
     def __init__(self, bearer_token: str, crosstrade_account_id: str):
         self.bearer_token = bearer_token
         self.crosstrade_account_id = crosstrade_account_id
+        # 2026-11-04 -- found diagnosing a real "Cancelled: false" with no
+        # context: cancel_order() must never raise (same contract as
+        # TradovateClient's own), but a bare False gives zero information
+        # about why. Same last_*_error pattern cme_tradovate_client.py's
+        # authenticate() already uses.
+        self.last_cancel_error: Optional[str] = None
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -256,16 +262,32 @@ class CrossTradeClient:
 
     async def cancel_order(self, order_id: int) -> bool:
         """POST /accounts/{account}/orders/{id}/cancel. Never raises --
-        same contract as TradovateClient.cancel_order()."""
+        same contract as TradovateClient.cancel_order(). Records the real
+        failure reason on self.last_cancel_error rather than just
+        returning a bare False -- found diagnosing a real "Cancelled:
+        false" with zero context 2026-11-04."""
+        self.last_cancel_error = None
         url = f"{BASE_URL}/accounts/{self.crosstrade_account_id}/orders/{order_id}/cancel"
         session = _get_session()
         try:
             async with session.post(url, headers=self._headers()) as resp:
+                text = await resp.text()
                 if resp.status != 200:
+                    self.last_cancel_error = f"HTTP {resp.status}: {text}"
                     return False
-                body = await resp.json()
-                return bool(body.get("success", True))
+                try:
+                    body = await resp.json(content_type=None)
+                except Exception:
+                    body = text
+                if isinstance(body, dict) and not body.get("success", True):
+                    self.last_cancel_error = f"HTTP {resp.status}: {body}"
+                    return False
+                if isinstance(body, dict):
+                    return bool(body.get("success", True))
+                self.last_cancel_error = f"HTTP {resp.status}: unexpected body: {body}"
+                return False
         except Exception as e:
+            self.last_cancel_error = f"request exception: {e}"
             print(f"[CROSSTRADE] cancel_order exception: {e}")
             return False
 

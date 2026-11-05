@@ -2028,12 +2028,14 @@ async def api_admin_cme_order_placement_test_cancel(account_id: int, order_id: i
         cancelled = await client.cancel_order(order_id)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    last_error = getattr(client, "last_cancel_error", None)
     _executor_accounts.write_audit(
-        db, "ORDER_PLACED", f"CME order-placement test cancel for account {account.id}, order {order_id}: {cancelled}",
-        account_id=account.id, actor=ctx.get("email") or "unknown", detail={"order_id": order_id, "cancelled": cancelled},
+        db, "ORDER_PLACED", f"CME order-placement test cancel for account {account.id}, order {order_id}: {cancelled} ({last_error})",
+        account_id=account.id, actor=ctx.get("email") or "unknown",
+        detail={"order_id": order_id, "cancelled": cancelled, "last_cancel_error": last_error},
     )
     db.commit()
-    return JSONResponse({"ok": True, "cancelled": cancelled})
+    return JSONResponse({"ok": True, "cancelled": cancelled, "last_cancel_error": last_error})
 
 
 @app.get("/api/executor/accounts")
