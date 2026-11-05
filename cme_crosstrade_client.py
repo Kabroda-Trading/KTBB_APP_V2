@@ -270,7 +270,12 @@ class CrossTradeClient:
         url = f"{BASE_URL}/accounts/{self.crosstrade_account_id}/orders/{order_id}/cancel"
         session = _get_session()
         try:
-            async with session.post(url, headers=self._headers()) as resp:
+            # 2026-11-04 -- a real call with no body returned HTTP 400
+            # {"error": "Invalid request"}. _headers() always declares
+            # Content-Type: application/json; sending that with a
+            # genuinely empty body is a common cause of exactly this kind
+            # of generic rejection -- an explicit {} satisfies it.
+            async with session.post(url, headers=self._headers(), json={}) as resp:
                 text = await resp.text()
                 if resp.status != 200:
                     self.last_cancel_error = f"HTTP {resp.status}: {text}"
