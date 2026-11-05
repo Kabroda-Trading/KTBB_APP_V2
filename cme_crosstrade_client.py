@@ -227,7 +227,15 @@ class CrossTradeClient:
             body = await resp.json()
             if resp.status != 200 or not body.get("success", True):
                 return {"error": body, "status_code": resp.status}
-            return body.get("data") or {}
+            # 2026-11-04 -- confirmed live (Andy's own ES1! test): this
+            # endpoint's real success envelope is NOT the {success, data}
+            # shape every other CrossTrade endpoint uses -- order details
+            # sit under "response" instead ({"destination":..., "api":...,
+            # "account":..., "instrument":..., "durationMs":..., "success":
+            # true, "response": {"orderId": ...}}). The order still placed
+            # for real the first time this ran against "data" -- it just
+            # couldn't be displayed, so it may still be resting unseen.
+            return body.get("response") or body.get("data") or {}
 
     async def amend_stop_to_breakeven(self, stop_order_id: int, new_be_price: float, qty: int) -> bool:
         """PUT /accounts/{account}/orders/{id}/change -- amends the live
