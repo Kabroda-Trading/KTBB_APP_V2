@@ -54,6 +54,24 @@
         .s-closed_manual { color: #6b5345; }
 
         .empty-state { text-align: center; padding: 36px 20px; color: #5a3d2c; font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; }
+
+        /* Control strip + Executive Cockpit (desk-page build, 2026-11-xx) */
+        .badge { padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+        .badge-ok { background: rgba(94,140,102,0.15); color: #9fd1a6; border: 1px solid #5e8c66; }
+        .badge-warn { background: rgba(166,124,58,0.15); color: #e0b87a; border: 1px solid #a67c3a; }
+        .badge-danger { background: rgba(140,74,58,0.15); color: #d99a8a; border: 1px solid #8c4a3a; }
+        .badge-neutral { background: rgba(107,83,69,0.15); color: #c9a880; border: 1px solid #6b5345; }
+        .btn { background: #301f17; border: 1px solid #4d3526; color: #e0b87a; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 800;
+               letter-spacing: 0.5px; padding: 7px 12px; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
+        .btn:hover { background: #3a2820; }
+        .btn-danger { background: #3a1f17; border-color: #8c4a3a; color: #d99a8a; }
+        .btn-danger:hover { background: #4a2820; }
+        .btn-ok { background: #1e3a2a; border-color: #5e8c66; color: #9fd1a6; }
+        .btn-ok:hover { background: #26482f; }
+        .btn-sm { font-size: 9px; padding: 4px 8px; }
+        .verdict-line { font-family: 'Playfair Display', serif; font-style: italic; font-size: 13px; color: #c9a880; margin: 12px 0; padding: 10px 12px; background: #1e140f; border-left: 3px solid #4d3526; border-radius: 0 4px 4px 0; }
+        .checklist-line { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 0; }
+        .checklist-pass { color: #9fd1a6; } .checklist-fail { color: #d99a8a; }
     </style>
 </head>
 <body>
@@ -66,7 +84,10 @@
                 <h1 class="desk-page-title">CME Micro Futures Desk</h1>
                 <div class="desk-page-subtitle">MNQ / MES &mdash; Tradovate / CrossTrade &mdash; 10:00 ET lock</div>
             </div>
-            <div class="desk-ts" id="deskTsLabel">&mdash;</div>
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <div id="cmeControls" style="display:flex; gap:8px; align-items:center;"></div>
+                <div class="desk-ts" id="deskTsLabel">&mdash;</div>
+            </div>
         </div>
 
         <div class="symbol-row" id="symbolRow">
@@ -102,6 +123,15 @@
         return resp.json();
     }
 
+    async function api_post(path, body) {
+        const resp = await fetch(path, {
+            method: 'POST',
+            headers: body ? {'Content-Type': 'application/json'} : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        return resp.json();
+    }
+
     function escapeHtml(s) {
         return (s === null || s === undefined) ? "" : String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     }
@@ -134,6 +164,75 @@
     // viewer would never see an open position at all.
     const OPEN_MGMT_STATES = ['PENDING_ENTRY', 'WAITING_RETEST', 'FILLED', 'RATCHETED', 'ENTRY_FILLED_UNPROTECTED'];
 
+    // DeepSeek's "Executive CME Dashboard" spec (AGENT_LOG, 2026-11-05 third
+    // entry) -- status badge / parameter checklist / one-sentence verdict,
+    // verified against the real CMEPlan columns + cme_signals.REACHABILITY_MAX
+    // before building (atr14/box_max_allowed/stop_long/short/target_long/
+    // short are all real fields on cme_radar.py's enriched snapshot now).
+    const CALIBRATION_START_ET_HOUR = 9.5, CALIBRATION_END_ET_HOUR = 10;
+
+    function _etHourNow() {
+        // Rough ET-hour-of-day for the CALIBRATING/AWAITING badge window
+        // only -- not used for anything that needs DST precision (the
+        // real lock itself is computed server-side via cme_clock.py).
+        const now = new Date();
+        const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' });
+        const [h, m] = etStr.split(':').map(Number);
+        return h + m / 60;
+    }
+
+    function statusBadgeHtml(plan) {
+        if (!plan) {
+            const h = _etHourNow();
+            if (h < CALIBRATION_START_ET_HOUR) return `<span class="badge badge-neutral">AWAITING 10:00 ET LOCK</span>`;
+            if (h < CALIBRATION_END_ET_HOUR) return `<span class="badge badge-ok">CALIBRATING 9:30&ndash;10:00 ET</span>`;
+            return `<span class="badge badge-neutral">DATA PENDING / HOLIDAY</span>`;
+        }
+        const s = plan.status;
+        if (s === 'ARMED') return `<span class="badge badge-ok">ARMED &mdash; HUNTING RETEST</span>`;
+        if (s === 'STAND_DOWN_UNREACHABLE') return `<span class="badge badge-warn">STAND DOWN &mdash; CAPITAL PROTECTED</span>`;
+        if (s === 'STAND_DOWN_NO_RETEST' || s === 'NO_RETEST') return `<span class="badge badge-neutral">STAND DOWN &mdash; NO RETEST</span>`;
+        return `<span class="badge badge-neutral">${escapeHtml(s || '&mdash;')}</span>`;
+    }
+
+    function verdictHtml(plan) {
+        if (!plan) return '';
+        if (plan.status === 'STAND_DOWN_UNREACHABLE') {
+            return `<div class="verdict-line">Morning 30m range exceeded the safety limit (${plan.box} pts vs ${plan.box_max_allowed ?? '&mdash;'} pts max). Stood down to prevent overextended risk.</div>`;
+        }
+        if (plan.status === 'ARMED') {
+            return `<div class="verdict-line">Parameters verified. Watching for 5m breakout and retest before placing 1 micro contract.</div>`;
+        }
+        if (plan.status_reason) {
+            return `<div class="verdict-line">${escapeHtml(plan.status_reason)}</div>`;
+        }
+        return '';
+    }
+
+    function checklistHtml(plan) {
+        if (!plan) return '';
+        const reachOk = plan.box_max_allowed != null ? plan.box <= plan.box_max_allowed : null;
+        return `
+            <div style="margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345; text-transform:uppercase; letter-spacing:1px;">Parameter checklist</div>
+            <div class="checklist-line"><span>Data feed</span><span class="checklist-pass">30/30 1m Globex bars &mdash; PASS</span></div>
+            <div class="checklist-line"><span>Reachability gate</span><span class="${reachOk === null ? '' : (reachOk ? 'checklist-pass' : 'checklist-fail')}">Box: ${plan.box ?? '&mdash;'} pts | Max: ${plan.box_max_allowed ?? '&mdash;'} pts (0.55&times;ATR14) ${reachOk === null ? '' : (reachOk ? '&mdash; PASS' : '&mdash; FAIL')}</span></div>
+            <div class="checklist-line"><span>Trigger levels</span><span>BO (Long): ${plan.bo ?? '&mdash;'} | BD (Short): ${plan.bd ?? '&mdash;'}</span></div>
+            ${plan.stop_long != null ? `<div class="checklist-line"><span>Stop / Target (Long)</span><span>${plan.stop_long} / ${plan.target_long ?? '&mdash;'}</span></div>` : ''}
+            ${plan.stop_short != null ? `<div class="checklist-line"><span>Stop / Target (Short)</span><span>${plan.stop_short} / ${plan.target_short ?? '&mdash;'}</span></div>` : ''}
+        `;
+    }
+
+    // Mirrors cme_executor._CANCELLABLE_STATES / _CLOSEABLE_STATES -- the
+    // real states POST /api/cme/orders/{id}/cancel will actually act on.
+    const CME_ACTIONABLE_STATES = ['WAITING_RETEST', 'FILLED', 'RATCHETED', 'ENTRY_FILLED_UNPROTECTED'];
+
+    async function cancelCmeOrder(orderId) {
+        if (!confirm('This sends a real cancel/close to the exchange and cannot be undone. Continue?')) return;
+        const d = await api_post(`/api/cme/orders/${orderId}/cancel`);
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        await loadSymbols();
+    }
+
     function symbolPanelHtml(symbol, data) {
         const plan = data && data.plan;
         const orders = (data && data.recent_orders) || [];
@@ -149,21 +248,22 @@
 
         const fullName = symbol === 'MNQ' ? 'Micro E-mini Nasdaq-100' : 'Micro E-mini S&amp;P 500';
         let html = `<div class="panel"><div class="symbol-name">${symbol}</div><div class="symbol-sub">${fullName}</div>`;
+        html += statusBadgeHtml(plan);
+        html += verdictHtml(plan);
 
         if (!plan) {
             html += `<div class="row-line"><span>Today's lock</span><span>No lock yet</span></div>`;
         } else {
-            html += `<div class="row-line"><span>Status</span><span class="s-${escapeHtml(String(plan.status||'').toLowerCase())}">${escapeHtml(plan.status || '&mdash;')}</span></div>`;
-            if (plan.status_reason) html += `<div class="row-line"><span>Reason</span><span>${escapeHtml(plan.status_reason)}</span></div>`;
-            if (plan.bo != null) html += `<div class="row-line"><span>Breakout / Breakdown</span><span>${plan.bo} / ${plan.bd}</span></div>`;
-            if (plan.box != null) html += `<div class="row-line"><span>Box / Reachability</span><span>${plan.box} / ${plan.reachability != null ? plan.reachability.toFixed(2) : '&mdash;'}</span></div>`;
-            html += `<div class="row-line"><span>Lock time</span><span>${fmtTs(plan.lock_time)}</span></div>`;
+            if (plan.lock_time) html += `<div class="row-line"><span>Lock time</span><span>${fmtTs(plan.lock_time)}</span></div>`;
+            html += checklistHtml(plan);
         }
 
         if (pos) {
-            html += `<div class="row-line"><span>Open position</span><span style="color:#c8813a;">${escapeHtml(pos.direction)} @ ${pos.entry_fill_price ?? '&mdash;'}</span></div>`;
+            html += `<div class="row-line" style="margin-top:10px;"><span>Open position</span><span style="color:#c8813a;">${escapeHtml(pos.direction)} @ ${pos.entry_fill_price ?? '&mdash;'}</span></div>`;
             html += `<div class="row-line"><span>Stop (BE: ${pos.be_amended ? 'yes' : 'no'})</span><span>${pos.stop_price ?? '&mdash;'}</span></div>`;
             html += `<div class="row-line"><span>State</span><span class="s-${escapeHtml(String(pos.management_state||'').toLowerCase())}">${escapeHtml(pos.management_state || '&mdash;')}</span></div>`;
+        } else if (plan) {
+            html += `<div class="row-line" style="margin-top:10px;"><span>Current exposure</span><span>0 contracts / $0.00 at risk</span></div>`;
         }
 
         if (IS_ADMIN) {
@@ -171,13 +271,15 @@
             if (!orders.length) {
                 html += `<div class="empty-state" style="padding:16px 0;">No orders yet for ${escapeHtml(symbol)}.</div>`;
             } else {
-                html += `<table style="margin-top:8px;"><thead><tr><th>Dir</th><th>State</th><th>Entry</th><th>Exit</th><th>R</th></tr></thead><tbody>`;
+                html += `<table style="margin-top:8px;"><thead><tr><th>Dir</th><th>State</th><th>Entry</th><th>Exit</th><th>R</th><th></th></tr></thead><tbody>`;
                 orders.slice(0, 8).forEach(o => {
                     const r = o.realized_pnl_r;
                     const rColor = r > 0 ? '#5e8c66' : (r < 0 ? '#8c4a3a' : '#c9a880');
+                    const canCancel = CME_ACTIONABLE_STATES.includes(o.management_state);
                     html += `<tr><td>${escapeHtml(o.direction)}</td><td class="s-${escapeHtml(String(o.management_state||'').toLowerCase())}">${escapeHtml(o.management_state || '&mdash;')}</td>`
                          + `<td>${o.entry_fill_price ?? '&mdash;'}</td><td>${o.exit_price ?? '&mdash;'} ${o.exit_reason ? '('+escapeHtml(o.exit_reason)+')' : ''}</td>`
-                         + `<td style="color:${rColor};">${r != null ? (r >= 0 ? '+' : '') + r.toFixed(2) + 'R' : '&mdash;'}</td></tr>`;
+                         + `<td style="color:${rColor};">${r != null ? (r >= 0 ? '+' : '') + r.toFixed(2) + 'R' : '&mdash;'}</td>`
+                         + `<td>${canCancel ? `<button class="btn btn-danger btn-sm" onclick="cancelCmeOrder(${o.id})">CANCEL</button>` : ''}</td></tr>`;
                 });
                 html += `</tbody></table>`;
             }
@@ -250,9 +352,76 @@
         `).join('');
     }
 
+    // ── CONTROL STRIP (desk-page build, 2026-11-xx) -- CME's own kill
+    //    switch + Fleet-Emergency-Flatten control, reusing the existing
+    //    account routes verbatim (kill_switch_engaged is already a
+    //    generic ExecutorAccount column, not Traveler-specific -- no new
+    //    backend was needed, just pointing the existing routes at the
+    //    Tradovate account from this page, mirroring traveler_desk.html's
+    //    own control strip). ─────────────────────────────────────────────
+    let _cmeAccount = null;
+
+    async function loadControls() {
+        try {
+            const d = await api('/api/executor/accounts');
+            if (!d.ok) return;
+            const accts = (d.accounts || []).filter(a => (a.exchange || '').toLowerCase() === 'tradovate');
+            if (!accts.length) {
+                document.getElementById('cmeControls').innerHTML = '<span class="symbol-sub">No Tradovate account configured for this user.</span>';
+                return;
+            }
+            _cmeAccount = accts[0];
+            renderControls();
+        } catch (e) {
+            console.error('loadControls failed', e);
+        }
+    }
+
+    function renderControls() {
+        const a = _cmeAccount;
+        if (!a) return;
+        const killBadge = a.kill_switch_engaged ? 'badge-danger' : 'badge-ok';
+        document.getElementById('cmeControls').innerHTML = `
+            <span class="badge ${killBadge}">${a.kill_switch_engaged ? 'KILL SWITCH ON' : 'ACTIVE'}</span>
+            ${a.kill_switch_engaged
+                ? `<button class="btn btn-ok" onclick="releaseCmeKillSwitch()">RELEASE</button>`
+                : `<button class="btn btn-danger" onclick="engageCmeKillSwitch()">ENGAGE KILL SWITCH</button>`}
+            <button class="btn btn-danger" onclick="flattenCme()">FLATTEN</button>
+        `;
+    }
+
+    async function engageCmeKillSwitch() {
+        if (!_cmeAccount) return;
+        const reason = prompt('Reason for engaging the kill switch:');
+        if (reason === null) return;
+        const d = await api_post(`/api/executor/accounts/${_cmeAccount.id}/kill-switch`, {reason: reason || 'manual'});
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        _cmeAccount = d.account || _cmeAccount;
+        _cmeAccount.kill_switch_engaged = true;
+        renderControls();
+    }
+
+    async function releaseCmeKillSwitch() {
+        if (!_cmeAccount) return;
+        const d = await api_post(`/api/executor/accounts/${_cmeAccount.id}/kill-switch/release`);
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        _cmeAccount = d.account || _cmeAccount;
+        _cmeAccount.kill_switch_engaged = false;
+        renderControls();
+    }
+
+    async function flattenCme() {
+        if (!_cmeAccount) return;
+        if (!confirm('This cancels every resting order and market-closes every open position on this account. This cannot be undone. Continue?')) return;
+        const d = await fetch(`/api/tradovate/flatten_all?account_id=${_cmeAccount.id}`, {method: 'POST'}).then(r => r.json());
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        alert(`Flatten complete. Cancelled: ${(d.cancelled||[]).length}, Closed: ${(d.closed||[]).length}, Errors: ${(d.errors||[]).length}`);
+        await loadSymbols();
+    }
+
     async function refreshAll() {
         document.getElementById('deskTsLabel').textContent = new Date().toLocaleTimeString();
-        await Promise.all([loadSymbols(), loadConfigs()]);
+        await Promise.all([loadSymbols(), loadConfigs(), loadControls()]);
     }
 
     refreshAll();

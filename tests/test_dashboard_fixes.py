@@ -149,6 +149,24 @@ def test_api_dashboard_overview(basic_client):
     assert data["win_rate"] == 66.7    # 2 of 3 resolved orders positive
     assert data["net_r"] == 1.0        # +1.5 - 1.0 + 0.5
 
+
+def test_api_dashboard_overview_days_param_actually_filters(basic_client):
+    """Desk-page build (2026-11-xx): before this, there was no real date-
+    range filter on this route at all -- `days` is new. days=0 means "the
+    window starts right now," so every fixture order (all exit_time'd in
+    the past relative to request time) must be excluded -- a real,
+    deterministic proof the filter applies, not just accepted syntax."""
+    response = basic_client.get("/api/dashboard/overview", params={"days": 0})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["win_rate"] == 0.0
+    assert data["net_r"] == 0.0
+    assert data["executor_closed_trades"] == 0
+    # total_sessions/fill_rate are deliberately UNSCOPED by date (shared
+    # gate activity, not money) -- days must not touch them.
+    assert data["total_sessions"] == 4
+
 # test_api_dashboard_accuracy/test_api_dashboard_costs_admin/
 # test_api_dashboard_costs_basic_forbidden removed 2026-09-24 -- tested
 # /api/dashboard/accuracy and /api/dashboard/costs, both removed from
@@ -170,6 +188,19 @@ def test_api_dashboard_mas_history(basic_client):
     p4_row = next(t for t in data["trades"] if t["date_key"] == "2026-09-23")
     assert p4_row["exit_reason"] is None
     assert p4_row["realized_pnl"] is None
+
+
+def test_api_dashboard_mas_history_days_param_actually_filters(basic_client):
+    """Same real date-range proof as the overview route's own test --
+    days=0 must exclude every fixture order from pnl_series (all exit_time'd
+    strictly in the past relative to request time)."""
+    response = basic_client.get("/api/dashboard/mas-history", params={"days": 0})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["pnl_series"] == []
+    # status_counts is deliberately UNSCOPED by date -- days must not touch it.
+    assert data["status_counts"]["FILLED"] == 3
 
 
 def test_api_dashboard_mas_history_prefers_live_order_over_dry_run(basic_client):

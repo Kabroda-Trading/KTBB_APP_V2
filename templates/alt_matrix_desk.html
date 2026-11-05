@@ -215,15 +215,32 @@
 
     // ── ADMIN: cross-account detail, same ctx["is_admin"] gate the backend
     // route already enforces server-side -- not relaxed or re-derived here.
+    // Desk-page build (2026-11-xx): no cancel/close entry point existed for
+    // Alt Matrix at all before POST /api/alt-matrix/orders/{id}/cancel --
+    // the button here is the first one. Entries are immediate market orders
+    // (no resting order to cancel), so this always means "close the open
+    // position" once filled; a PENDING_ENTRY row has no button at all (the
+    // route 400s on it -- a sub-second window, nothing useful to click).
+    const ALT_MATRIX_CLOSEABLE_STATES = ['ENTRY_FILLED_UNPROTECTED', 'FILLED', 'TRAILING'];
+
+    async function closeAltMatrixOrder(orderId) {
+        if (!confirm('This sends a real close to the exchange and cannot be undone. Continue?')) return;
+        const d = await api(`/api/alt-matrix/orders/${orderId}/cancel`, { method: 'POST' });
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        await loadAdminDetail();
+    }
+
     function _orderRowHtml(o) {
         const r = o.realized_pnl_r;
         const rCls = r == null ? '' : (r > 0 ? 'r-pos' : (r < 0 ? 'r-neg' : ''));
+        const canClose = ALT_MATRIX_CLOSEABLE_STATES.includes(o.management_state);
         return `<tr>
             <td>${o.id}</td><td>${escapeHtml(o.symbol)}</td><td>${escapeHtml(o.direction)}</td>
             <td>${escapeHtml(o.management_state)}</td>
             <td>${o.entry_fill_price ?? '—'}</td><td>${o.exit_price ?? '—'}</td>
             <td class="${rCls}">${r != null ? r.toFixed(2) + 'R' : '—'}</td>
             <td>${escapeHtml(o.exit_reason || '—')}</td>
+            <td>${canClose ? `<button class="btn" style="padding:4px 8px; font-size:10px;" onclick="closeAltMatrixOrder(${o.id})">CLOSE</button>` : ''}</td>
         </tr>`;
     }
 
@@ -238,7 +255,7 @@
             }
             allOrders.sort((a, b) => b.id - a.id);
             document.getElementById('adminOrders').innerHTML = allOrders.length
-                ? `<table class="detail"><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>State</th><th>Entry</th><th>Exit</th><th>R</th><th>Exit Reason</th></tr></thead>
+                ? `<table class="detail"><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>State</th><th>Entry</th><th>Exit</th><th>R</th><th>Exit Reason</th><th></th></tr></thead>
                    <tbody>${allOrders.map(_orderRowHtml).join('')}</tbody></table>`
                 : '<div class="empty-note">No orders yet.</div>';
 

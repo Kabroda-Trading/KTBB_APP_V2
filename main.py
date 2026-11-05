@@ -1339,7 +1339,7 @@ async def api_metasignals_audit(limit: int = 20, db: Session = Depends(get_db)):
 
 
 @app.get("/api/metasignals/admin-status")
-async def api_metasignals_admin_status(request: Request, db: Session = Depends(get_db)):
+async def api_metasignals_admin_status(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
     """Admin-only. Full ledger + full pillar-detail triage + webhook
     health, feeding the enhanced MetaSignals Desk page --
     metasignals_radar.get_admin_status() was already fully built but
@@ -1348,7 +1348,7 @@ async def api_metasignals_admin_status(request: Request, db: Session = Depends(g
     if not ctx.get("is_admin"):
         return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
     try:
-        return JSONResponse(metasignals_radar.get_admin_status(db))
+        return JSONResponse(metasignals_radar.get_admin_status(db, days=days))
     except Exception as e:
         print(f"[RADAR] metasignals-admin-status failed: {e}")
         return JSONResponse({"ok": False, "error": str(e), "account": None, "orders": [], "recent_triage": [], "ledger": []})
@@ -3415,6 +3415,99 @@ async def export_traveler_log_csv(request: Request, since: Optional[str] = None,
     )
 
 
+# ------------------------------------------------------------------
+# Desk-page build (2026-11-xx): in-app "Download CSV" buttons for a
+# logged-in user's own account, one per desk. Reuses the generation shape
+# above (csv.writer/io.StringIO/Response, every column in declaration
+# order) verbatim -- but NOT the X-API-Key auth above, which is a flat
+# machine-to-machine secret, the wrong gate for a button a logged-in human
+# clicks. Uses _executor_owner_or_admin() instead, the same "admin OR
+# account owner" (in practice: full mutual isolation, see that function's
+# own comment) gate every other account-mutation/detail route on this
+# domain already uses. traveler-trades.csv is deliberately a NEW, separate
+# route from /api/export/traveler-log.csv above -- that one stays exactly
+# as-is (it's the Brain-facing, API-key-gated, TravelerPlan-based export).
+# ------------------------------------------------------------------
+
+def _csv_response(columns: list, rows: list, filename: str) -> Response:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([getattr(row, col) for col in columns])
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                     headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@app.get("/api/export/cme-trades.csv")
+async def export_cme_trades_csv(request: Request, account_id: int, since: Optional[str] = None, db: Session = Depends(get_db)):
+    from database import CMEOrder as _CMEOrder
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None or not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    query = db.query(_CMEOrder).filter(_CMEOrder.account_id == account_id)
+    if since:
+        query = query.filter(_CMEOrder.closed_at >= since)
+    rows = query.order_by(_CMEOrder.id.asc()).all()
+    columns = [c.name for c in _CMEOrder.__table__.columns]
+    return _csv_response(columns, rows, "cme_trades_export.csv")
+
+
+@app.get("/api/export/alt-matrix-trades.csv")
+async def export_alt_matrix_trades_csv(request: Request, account_id: int, since: Optional[str] = None, db: Session = Depends(get_db)):
+    from database import AltMatrixOrder as _AltMatrixOrder
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None or not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    query = db.query(_AltMatrixOrder).filter(_AltMatrixOrder.account_id == account_id)
+    if since:
+        query = query.filter(_AltMatrixOrder.closed_at >= since)
+    rows = query.order_by(_AltMatrixOrder.id.asc()).all()
+    columns = [c.name for c in _AltMatrixOrder.__table__.columns]
+    return _csv_response(columns, rows, "alt_matrix_trades_export.csv")
+
+
+@app.get("/api/export/traveler-trades.csv")
+async def export_traveler_trades_csv(request: Request, account_id: int, since: Optional[str] = None, db: Session = Depends(get_db)):
+    """A NEW, distinct route from /api/export/traveler-log.csv above --
+    that one is the Brain-facing, API-key-gated, TravelerPlan-based export
+    and stays exactly as-is. This is ExecutorOrder-sourced (the real per-
+    account order rows, including realized_pnl_usd/entry_fee_usd this same
+    build added), for a logged-in owner's own account."""
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None or not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    query = db.query(_ExecutorOrder).filter(
+        _ExecutorOrder.account_id == account_id, _ExecutorOrder.traveler_plan_id.isnot(None),
+    )
+    if since:
+        query = query.filter(_ExecutorOrder.closed_at >= since)
+    rows = query.order_by(_ExecutorOrder.id.asc()).all()
+    columns = [c.name for c in _ExecutorOrder.__table__.columns]
+    return _csv_response(columns, rows, "traveler_trades_export.csv")
+
+
+@app.get("/api/export/metasignals-trades.csv")
+async def export_metasignals_trades_csv(request: Request, since: Optional[str] = None, db: Session = Depends(get_db)):
+    """Admin-only, matching every other MetaSignals route's convention --
+    this is a singleton $500 paper account with no owner concept at all
+    (see metasignals_paper_engine.py's own docstring), not an owner-scoped
+    route like the three above."""
+    from database import MetaSignalsPaperOrder as _MetaSignalsPaperOrder
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    query = db.query(_MetaSignalsPaperOrder)
+    if since:
+        query = query.filter(_MetaSignalsPaperOrder.closed_at >= since)
+    rows = query.order_by(_MetaSignalsPaperOrder.id.asc()).all()
+    columns = [c.name for c in _MetaSignalsPaperOrder.__table__.columns]
+    return _csv_response(columns, rows, "metasignals_trades_export.csv")
+
+
 # /api/agents/test-call removed 2026-08-30 -- fired a real, paid
 # agent_core._call_agent() invocation for no operational purpose (an old
 # "Phase 1 infrastructure test" button). Andy's call: no LLM tied to
@@ -3798,7 +3891,7 @@ async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
 # ==============================================================================
 
 @app.get("/api/dashboard/overview")
-async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)):
+async def api_dashboard_overview(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
     """2026-09-23 rebuild (V2 Crown retirement, CLAUDE.md "Strategic
     Direction"): total_sessions/fill_rate/win_rate/net_r used to read
     CampaignLog (V2's own session-lock shadow simulation, itself being
@@ -3857,10 +3950,21 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         # win/loss COUNT -- same "stops aren't a clean +-1R" reasoning
         # CLAUDE.md rule 5 already established for the retired CampaignLog
         # version of this KPI.
-        resolved_r = [r for (r,) in _scope_to_user(db.query(_ExecutorOrder.realized_pnl_r).filter(
+        # Desk-page build (2026-11-xx): an optional, REAL date-range filter
+        # -- before this, there was no way to ask "how did we do over the
+        # last 30 days," only "lifetime total." Omitting `days` reproduces
+        # the exact prior behavior (no filter added), so no existing caller
+        # changes behavior by not passing it.
+        def _scope_to_window(query, column):
+            if days is None:
+                return query
+            since = datetime.utcnow() - timedelta(days=days)
+            return query.filter(column >= since)
+
+        resolved_r = [r for (r,) in _scope_to_window(_scope_to_user(db.query(_ExecutorOrder.realized_pnl_r).filter(
             _ExecutorOrder.traveler_plan_id.isnot(None),
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        )).all()]
+        )), _ExecutorOrder.exit_time).all()]
         win_rate = round(sum(1 for r in resolved_r if r > 0) / len(resolved_r) * 100, 1) if resolved_r else 0.0
         net_r = round(sum(resolved_r), 4)
 
@@ -3870,13 +3974,13 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
         # (every real ExecutorOrder, any lineage) are shown separately,
         # never merged, same principle the pre-retirement CampaignLog/
         # executor split already established.
-        executor_r_raw = _scope_to_user(db.query(func.sum(_ExecutorOrder.realized_pnl_r)).filter(
+        executor_r_raw = _scope_to_window(_scope_to_user(db.query(func.sum(_ExecutorOrder.realized_pnl_r)).filter(
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        )).scalar()
+        )), _ExecutorOrder.exit_time).scalar()
         executor_realized_pnl_r = round(float(executor_r_raw or 0.0), 4)
-        executor_closed_trades = _scope_to_user(db.query(func.count(_ExecutorOrder.id)).filter(
+        executor_closed_trades = _scope_to_window(_scope_to_user(db.query(func.count(_ExecutorOrder.id)).filter(
             _ExecutorOrder.realized_pnl_r.isnot(None),
-        )).scalar() or 0
+        )), _ExecutorOrder.exit_time).scalar() or 0
         # spend_7d/cache_hit_rate (AgentRunLog-sourced) removed 2026-09-24 --
         # AgentRunLog's only writer, agent_core._call_agent(), has had zero
         # live callers since the 6-agent CrewAI crew was retired 2026-08-17;
@@ -3906,7 +4010,7 @@ async def api_dashboard_overview(request: Request, db: Session = Depends(get_db)
 
 
 @app.get("/api/dashboard/mas-history")
-async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_db)):
+async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
     """2026-09-23 rebuild (V2 Crown retirement): repointed from CampaignLog
     (mas_approval_status/entry_price/stop_loss/t1/realized_pnl) to
     TravelerPlan/ExecutorOrder. `approval_counts` -> `status_counts`: the
@@ -3946,14 +4050,21 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
             _TravelerPlan.symbol == "BTC/USDT").group_by(_TravelerPlan.status).all()
         status_counts = {row[0]: row[1] for row in status_rows}
 
+        # Desk-page build (2026-11-xx): same optional, real date-range
+        # filter as /api/dashboard/overview's own fix -- omitting `days`
+        # reproduces the exact prior "every closed order, no window"
+        # behavior, so no existing caller changes behavior.
+        closed_orders_q = _scope_to_user(db.query(_ExecutorOrder.exit_time, _ExecutorOrder.realized_pnl_r).filter(
+            _ExecutorOrder.traveler_plan_id.isnot(None),
+            _ExecutorOrder.realized_pnl_r.isnot(None),
+        ))
+        if days is not None:
+            closed_orders_q = closed_orders_q.filter(_ExecutorOrder.exit_time >= datetime.utcnow() - timedelta(days=days))
         # Cumulative R across every resolved (closed) Traveler-linked
         # order, ordered by exit time -- real realized_pnl_r sum, not a
         # hardcoded +-1.0, same principle the retired CampaignLog version
         # of this KPI already established.
-        closed_orders = _scope_to_user(db.query(_ExecutorOrder.exit_time, _ExecutorOrder.realized_pnl_r).filter(
-            _ExecutorOrder.traveler_plan_id.isnot(None),
-            _ExecutorOrder.realized_pnl_r.isnot(None),
-        )).order_by(_ExecutorOrder.exit_time).all()
+        closed_orders = closed_orders_q.order_by(_ExecutorOrder.exit_time).all()
         cumulative = 0.0
         pnl_series = []
         for exit_time, r in closed_orders:
@@ -3996,6 +4107,145 @@ async def api_dashboard_mas_history(request: Request, db: Session = Depends(get_
             })
         return JSONResponse({"ok": True, "status_counts": status_counts,
                              "pnl_series": pnl_series, "trades": trades_data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ------------------------------------------------------------------
+# Desk-page build (2026-11-xx): CME and Alt Matrix never had an
+# overview/history pair at all -- cme_radar.py/alt_matrix_radar.py only
+# expose raw recent-10-orders, no aggregation. Mirrors /api/dashboard/
+# overview + /api/dashboard/mas-history's own shape and scoping pattern
+# exactly (is_admin -> every account, else the logged-in user's own
+# account_ids only), reading CMEOrder/AltMatrixOrder instead of
+# ExecutorOrder. Both CME and Alt Matrix already have a dollar P&L column
+# (dollar_pnl / realized_pnl_usd) -- Traveler's own ExecutorOrder didn't
+# until this same build added realized_pnl_usd to it (see database.py).
+# ------------------------------------------------------------------
+
+def _account_ids_for_scope(ctx: Dict[str, Any], db: Session) -> Optional[list]:
+    if ctx.get("is_admin"):
+        return None
+    return [a_id for (a_id,) in db.query(_ExecutorAccount.id).filter(
+        _ExecutorAccount.user_id == ctx["user"].id
+    ).all()]
+
+
+@app.get("/api/dashboard/cme-overview")
+async def api_dashboard_cme_overview(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from sqlalchemy import func
+        from database import CMEOrder as _CMEOrder
+        account_ids = _account_ids_for_scope(ctx, db)
+
+        q = db.query(_CMEOrder.realized_pnl_r, _CMEOrder.dollar_pnl).filter(_CMEOrder.realized_pnl_r.isnot(None))
+        if account_ids is not None:
+            q = q.filter(_CMEOrder.account_id.in_(account_ids)) if account_ids else q.filter(_CMEOrder.id.is_(None))
+        if days is not None:
+            q = q.filter(_CMEOrder.closed_at >= datetime.utcnow() - timedelta(days=days))
+        rows = q.all()
+        resolved_r = [r for (r, _u) in rows]
+        net_usd = sum((u or 0.0) for (_r, u) in rows)
+        win_rate = round(sum(1 for r in resolved_r if r > 0) / len(resolved_r) * 100, 1) if resolved_r else 0.0
+        return JSONResponse({
+            "ok": True, "closed_trades": len(resolved_r), "win_rate": win_rate,
+            "net_r": round(sum(resolved_r), 4), "net_usd": round(net_usd, 2),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/cme-history")
+async def api_dashboard_cme_history(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from database import CMEOrder as _CMEOrder
+        account_ids = _account_ids_for_scope(ctx, db)
+
+        q = db.query(_CMEOrder).filter(_CMEOrder.realized_pnl_r.isnot(None))
+        if account_ids is not None:
+            q = q.filter(_CMEOrder.account_id.in_(account_ids)) if account_ids else q.filter(_CMEOrder.id.is_(None))
+        if days is not None:
+            q = q.filter(_CMEOrder.closed_at >= datetime.utcnow() - timedelta(days=days))
+        orders = q.order_by(_CMEOrder.closed_at).all()
+
+        cumulative_usd = 0.0
+        pnl_series = []
+        trades = []
+        for o in orders:
+            cumulative_usd += (o.dollar_pnl or 0.0)
+            pnl_series.append({"date": o.closed_at.strftime("%Y-%m-%d") if o.closed_at else None, "cumulative_usd": round(cumulative_usd, 2)})
+            trades.append({
+                "symbol": o.symbol, "direction": o.direction, "entry_fill_price": o.entry_fill_price,
+                "exit_price": o.exit_price, "exit_reason": o.exit_reason,
+                "realized_pnl_r": o.realized_pnl_r, "dollar_pnl": o.dollar_pnl,
+                "closed_at": o.closed_at.isoformat() if o.closed_at else None,
+            })
+        return JSONResponse({"ok": True, "pnl_series": pnl_series, "trades": trades})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/alt-matrix-overview")
+async def api_dashboard_alt_matrix_overview(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from database import AltMatrixOrder as _AltMatrixOrder
+        account_ids = _account_ids_for_scope(ctx, db)
+
+        q = db.query(_AltMatrixOrder.realized_pnl_r, _AltMatrixOrder.realized_pnl_usd).filter(_AltMatrixOrder.realized_pnl_r.isnot(None))
+        if account_ids is not None:
+            q = q.filter(_AltMatrixOrder.account_id.in_(account_ids)) if account_ids else q.filter(_AltMatrixOrder.id.is_(None))
+        if days is not None:
+            q = q.filter(_AltMatrixOrder.closed_at >= datetime.utcnow() - timedelta(days=days))
+        rows = q.all()
+        resolved_r = [r for (r, _u) in rows]
+        net_usd = sum((u or 0.0) for (_r, u) in rows)
+        win_rate = round(sum(1 for r in resolved_r if r > 0) / len(resolved_r) * 100, 1) if resolved_r else 0.0
+        return JSONResponse({
+            "ok": True, "closed_trades": len(resolved_r), "win_rate": win_rate,
+            "net_r": round(sum(resolved_r), 4), "net_usd": round(net_usd, 2),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/dashboard/alt-matrix-history")
+async def api_dashboard_alt_matrix_history(request: Request, db: Session = Depends(get_db), days: Optional[int] = None):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    try:
+        from database import AltMatrixOrder as _AltMatrixOrder
+        account_ids = _account_ids_for_scope(ctx, db)
+
+        q = db.query(_AltMatrixOrder).filter(_AltMatrixOrder.realized_pnl_r.isnot(None))
+        if account_ids is not None:
+            q = q.filter(_AltMatrixOrder.account_id.in_(account_ids)) if account_ids else q.filter(_AltMatrixOrder.id.is_(None))
+        if days is not None:
+            q = q.filter(_AltMatrixOrder.closed_at >= datetime.utcnow() - timedelta(days=days))
+        orders = q.order_by(_AltMatrixOrder.closed_at).all()
+
+        cumulative_usd = 0.0
+        pnl_series = []
+        trades = []
+        for o in orders:
+            cumulative_usd += (o.realized_pnl_usd or 0.0)
+            pnl_series.append({"date": o.closed_at.strftime("%Y-%m-%d") if o.closed_at else None, "cumulative_usd": round(cumulative_usd, 2)})
+            trades.append({
+                "symbol": o.symbol, "direction": o.direction, "entry_fill_price": o.entry_fill_price,
+                "exit_price": o.exit_price, "exit_reason": o.exit_reason,
+                "realized_pnl_r": o.realized_pnl_r, "realized_pnl_usd": o.realized_pnl_usd,
+                "closed_at": o.closed_at.isoformat() if o.closed_at else None,
+            })
+        return JSONResponse({"ok": True, "pnl_series": pnl_series, "trades": trades})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

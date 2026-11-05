@@ -33,6 +33,18 @@
         .kpi-val { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 800; color: #f2e3cf; line-height: 1; transition: color 0.3s; }
         .kpi-lbl { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #8a6f57; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 8px; }
 
+        /* WHAT'S OPEN EVERYWHERE (desk-page build, 2026-11-xx) -- a plain
+           data view, no AI: a quick "is anything open right now" check
+           across all four desks without digging through each page. */
+        .open-everywhere { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+        @media (max-width: 1000px) { .open-everywhere { grid-template-columns: repeat(2, 1fr); } }
+        .open-chip { background: #251a14; border: 1px solid #4d3526; border-radius: 8px; padding: 14px 16px; }
+        .open-chip-desk { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #8a6f57; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .open-chip-badge { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 4px; text-transform: uppercase; }
+        .open-chip-open { background: rgba(200,129,58,0.15); color: #e0b87a; border: 1px solid #c8813a; }
+        .open-chip-flat { background: rgba(94,140,102,0.12); color: #9fd1a6; border: 1px solid #5e8c66; }
+        .open-chip-detail { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c9a880; margin-top: 8px; }
+
         /* CHART LAYOUT */
         .chart-row { display: grid; gap: 18px; margin-bottom: 18px; }
         .row-2-1 { grid-template-columns: 2fr 1fr; }
@@ -149,6 +161,11 @@
                 </div>
                 <div class="dash-ts" id="tsLabel">—</div>
             </div>
+        </div>
+
+        <!-- ── WHAT'S OPEN EVERYWHERE ─────────────────────────────── -->
+        <div class="open-everywhere" id="whatsOpenRow">
+            <div class="open-chip"><div class="open-chip-detail">Loading&hellip;</div></div>
         </div>
 
         <!-- ── TAB NAVIGATION ─────────────────────────────── -->
@@ -924,6 +941,59 @@
     // ── INIT ──────────────────────────────────────────────
     // exportStartDate/exportEndDate init removed 2026-09-23 along with the
     // "Audit-AI & Data Export" card those elements belonged to.
+    // ── WHAT'S OPEN EVERYWHERE (desk-page build, 2026-11-xx) -- a plain
+    // combining view over data that already exists on each desk's own
+    // public snapshot route. No new backend route, no AI/decision logic
+    // beyond one small Traveler inference (that desk's own public snapshot
+    // has no direct boolean the way the other three do): a Traveler
+    // position is open when mgmt_entry_fill_time is set and mgmt_exit_
+    // reason is still null (traveler_radar.py's own _mgmt_fields()).
+    async function loadWhatsOpen() {
+        const row = document.getElementById('whatsOpenRow');
+        try {
+            const [trav, am, cme, ms] = await Promise.all([
+                fetch('/api/radar/traveler-snapshot').then(r => r.json()).catch(() => ({ok: false})),
+                fetch('/api/radar/alt-matrix-snapshot').then(r => r.json()).catch(() => ({ok: false})),
+                fetch('/api/radar/cme-snapshot').then(r => r.json()).catch(() => ({ok: false})),
+                fetch('/api/metasignals/snapshot').then(r => r.json()).catch(() => ({ok: false})),
+            ]);
+
+            const travPlan = trav.ok ? trav.plan : null;
+            const travOpen = !!(travPlan && travPlan.mgmt_entry_fill_time && !travPlan.mgmt_exit_reason);
+            const travDetail = travOpen ? `${travPlan.direction || ''} @ ${travPlan.mgmt_entry_fill_price ?? '—'}` : '';
+
+            const amSymbols = am.ok ? (am.symbols || {}) : {};
+            const amOpenSymbols = Object.keys(amSymbols).filter(k => amSymbols[k] && amSymbols[k].position);
+            const amOpen = amOpenSymbols.length > 0;
+            const amDetail = amOpenSymbols.map(k => `${k} ${amSymbols[k].position.direction || ''}`).join(', ');
+
+            const cmeSymbols = cme.ok ? (cme.symbols || {}) : {};
+            const cmeOpenSymbols = Object.keys(cmeSymbols).filter(k => cmeSymbols[k] && cmeSymbols[k].position);
+            const cmeOpen = cmeOpenSymbols.length > 0;
+            const cmeDetail = cmeOpenSymbols.map(k => `${k} ${cmeSymbols[k].position.direction || ''}`).join(', ');
+
+            const msPositions = ms.ok ? (ms.positions || []) : [];
+            const msOpen = msPositions.length > 0;
+            const msDetail = msPositions.map(p => `${p.symbol || ''} ${p.side || ''}`).join(', ');
+
+            const chip = (desk, open, detail, href) => `
+                <a href="${href}" class="open-chip" style="text-decoration:none; display:block;">
+                    <div class="open-chip-desk">${desk}</div>
+                    <span class="open-chip-badge ${open ? 'open-chip-open' : 'open-chip-flat'}">${open ? 'OPEN' : 'FLAT'}</span>
+                    ${open && detail ? `<div class="open-chip-detail">${detail}</div>` : ''}
+                </a>
+            `;
+            row.innerHTML =
+                chip('Traveler (BTC)', travOpen, travDetail, '/traveler-desk') +
+                chip('Alt Matrix', amOpen, amDetail, '/alt-matrix-desk') +
+                chip('CME Micro Futures', cmeOpen, cmeDetail, '/cme-desk') +
+                chip('MetaSignals', msOpen, msDetail, '/admin/metasignals');
+        } catch (e) {
+            console.error('loadWhatsOpen failed', e);
+            row.innerHTML = '<div class="open-chip"><div class="open-chip-detail">Failed to load.</div></div>';
+        }
+    }
+
     async function initDashboard() {
         await Promise.all([
             loadOverview().catch(e => console.error("loadOverview failed", e)),
@@ -932,6 +1002,7 @@
             loadHeartbeat().catch(e => console.error("loadHeartbeat failed", e)),
             loadCmeDesk().catch(e => console.error("loadCmeDesk failed", e)),
             loadFleetFlatten().catch(e => console.error("loadFleetFlatten failed", e)),
+            loadWhatsOpen().catch(e => console.error("loadWhatsOpen failed", e)),
         ]);
     }
 
@@ -966,6 +1037,7 @@
         // advance on 5m-bar-aligned ticks, same cadence Market Radar polls
         // its own public snapshot at.
         setInterval(loadCmeDesk, 60000);
+        setInterval(loadWhatsOpen, 60000);
         // setInterval(loadCostData, ...) removed 2026-09-24 -- loadCostData()
         // itself is gone, see the "AGENT COSTS" removal note above.
     };

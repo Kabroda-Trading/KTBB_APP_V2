@@ -1454,6 +1454,18 @@ def test_admin_status_includes_the_full_ledger_and_every_order(db):
     assert "ENTRY_FEE" in ledger_types
 
 
+def test_admin_status_days_param_actually_filters_the_ledger(db):
+    """Desk-page build (2026-11-xx): before this, the ledger here was
+    always 'last 30 rows,' never actually date-windowed -- days=0 means
+    the window starts right now, so every row from this fixture's
+    deposit/fees (all created in the past relative to request time) must
+    be excluded. Omitting `days` must reproduce the exact prior behavior."""
+    plan = _approved_plan(db)
+    engine.open_paper_trade(db, plan)
+    assert len(radar.get_admin_status(db)["ledger"]) > 0   # no days -- unchanged prior behavior
+    assert radar.get_admin_status(db, days=0)["ledger"] == []
+
+
 def test_admin_status_reports_webhook_secret_configured(db, monkeypatch):
     monkeypatch.setenv("METASIGNALS_SECRET_KEY", "test-secret")
     assert radar.get_admin_status(db)["webhook_secret_configured"] is True

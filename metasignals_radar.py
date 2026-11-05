@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -131,7 +131,7 @@ def get_audit_log(db: Session, limit: int = 20) -> Dict[str, Any]:
     return {"ok": True, "alerts": [_plan_dict(p, full=True) for p in plans]}
 
 
-def get_admin_status(db: Session, recent_ledger_limit: int = 30) -> Dict[str, Any]:
+def get_admin_status(db: Session, recent_ledger_limit: int = 30, days: Optional[int] = None) -> Dict[str, Any]:
     """Admin-only (caller checks login/is_admin) -- adds the full
     geometry on every recent plan and the raw ledger rows for real
     audit visibility, same "D3 close detail belongs in the admin
@@ -146,7 +146,13 @@ def get_admin_status(db: Session, recent_ledger_limit: int = 30) -> Dict[str, An
     account = metasignals_paper_engine.get_or_init_paper_account(db)
     all_orders = db.query(MetaSignalsPaperOrder).order_by(MetaSignalsPaperOrder.id.desc()).limit(30).all()
     recent_plans = db.query(MetaSignalsPlan).order_by(MetaSignalsPlan.id.desc()).limit(30).all()
-    ledger_rows = db.query(MetaSignalsPaperLedger).order_by(MetaSignalsPaperLedger.id.desc()).limit(recent_ledger_limit).all()
+    # Desk-page build (2026-11-xx): an optional, real date-range filter --
+    # before this, this was always "last 30 rows," never actually date-
+    # windowed. Omitting `days` reproduces the exact prior behavior.
+    ledger_q = db.query(MetaSignalsPaperLedger)
+    if days is not None:
+        ledger_q = ledger_q.filter(MetaSignalsPaperLedger.created_at >= datetime.utcnow() - timedelta(days=days))
+    ledger_rows = ledger_q.order_by(MetaSignalsPaperLedger.id.desc()).limit(recent_ledger_limit).all()
     last_raw_alert = db.query(MetaSignalsRawAlert).order_by(MetaSignalsRawAlert.id.desc()).first()
 
     return {

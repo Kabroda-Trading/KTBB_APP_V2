@@ -79,6 +79,13 @@
         </div>
     </div>
 
+    <div class="card" id="tdeskLiveOrderCard" style="display:none;">
+        <div class="card-header"><span class="card-title">Live Order</span></div>
+        <div class="card-body" id="tdeskLiveOrder">
+            <div class="empty">Loading…</div>
+        </div>
+    </div>
+
     <div class="card">
         <div class="card-header"><span class="card-title">Recent Closed Trades</span></div>
         <div class="card-body" id="tdeskHistory">
@@ -276,16 +283,76 @@
         }
     }
 
+    // ── LIVE ORDER (desk-page build, 2026-11-xx) -- reuses the existing
+    //    self-scoped /api/executor/orders (login-only, no admin bypass --
+    //    the SAME route every Dawson/Terry-owned account already gets its
+    //    own orders from, not a new access model) to find the logged-in
+    //    user's own currently-open order (resting entry or open position)
+    //    and give them a real Cancel/Close button, something this desk had
+    //    no way to do at all before this build. ──────────────────────────
+    const _OPEN_ORDER_STATES = ['PENDING_ENTRY', 'ENTRY_FILLED_UNPROTECTED', 'ENTRY_FILLED_ORDERS_PLACED'];
+    let _tdeskLiveOrder = null;
+
+    async function loadLiveOrder() {
+        const card = document.getElementById('tdeskLiveOrderCard');
+        try {
+            const d = await _api('/api/executor/orders?limit=10');
+            if (!d.ok) throw new Error(d.error || 'unknown error');
+            const open = (d.orders || []).find(o => _OPEN_ORDER_STATES.includes(o.management_state));
+            if (!open) { card.style.display = 'none'; _tdeskLiveOrder = null; return; }
+            _tdeskLiveOrder = open;
+            card.style.display = '';
+            await renderLiveOrder(open);
+        } catch (e) {
+            card.style.display = 'none';
+            console.error('loadLiveOrder failed', e);
+        }
+    }
+
+    async function renderLiveOrder(o) {
+        const isResting = o.management_state === 'PENDING_ENTRY';
+        const label = isResting ? 'Resting entry (not yet filled)' : 'Open position';
+        let healthLine = '';
+        if (!isResting && o.entry_fill_price != null) {
+            try {
+                const lp = await _api('/api/live-price');
+                if (lp.ok && lp.price) {
+                    const dist = lp.price - o.sl_price_current;
+                    healthLine = `<div class="row-line"><span>Live price / distance to stop</span><span>${_fmtUsd(lp.price)} (${dist >= 0 ? '+' : ''}${dist.toFixed(2)})</span></div>`;
+                }
+            } catch (e) { /* health line is best-effort -- never block the card on this */ }
+        }
+        document.getElementById('tdeskLiveOrder').innerHTML = `
+            <div class="row-line"><span>State</span><span>${label} &mdash; ${o.management_state}</span></div>
+            <div class="row-line"><span>Direction</span><span>${o.direction || '—'}</span></div>
+            <div class="row-line"><span>Entry</span><span>${_fmtUsd(o.entry_fill_price != null ? o.entry_fill_price : o.entry_price)}</span></div>
+            <div class="row-line"><span>Stop</span><span>${_fmtUsd(o.sl_price_current != null ? o.sl_price_current : o.stop_price)}</span></div>
+            ${healthLine}
+            <div style="margin-top:12px;">
+                <button class="btn btn-danger" onclick="cancelLiveOrder()">${isResting ? 'CANCEL ORDER' : 'CLOSE POSITION'}</button>
+            </div>
+        `;
+    }
+
+    async function cancelLiveOrder() {
+        if (!_tdeskLiveOrder) return;
+        if (!confirm('This sends a real cancel/close to the exchange and cannot be undone. Continue?')) return;
+        const d = await _api(`/api/executor/orders/${_tdeskLiveOrder.id}/cancel`, { method: 'POST' });
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        await loadLiveOrder();
+    }
+
     async function initAll() {
         await Promise.all([
             loadControls().catch(e => console.error('loadControls failed', e)),
             loadSession().catch(e => console.error('loadSession failed', e)),
             loadJourney().catch(e => console.error('loadJourney failed', e)),
+            loadLiveOrder().catch(e => console.error('loadLiveOrder failed', e)),
             loadHistory().catch(e => console.error('loadHistory failed', e)),
         ]);
     }
     document.addEventListener('DOMContentLoaded', initAll);
-    setInterval(() => { loadSession(); loadJourney(); }, 60000);
+    setInterval(() => { loadSession(); loadJourney(); loadLiveOrder(); }, 60000);
     </script>
 </body>
 </html>

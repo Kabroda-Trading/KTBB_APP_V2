@@ -2794,6 +2794,16 @@ class ExecutorOrder(Base):
     t1_leg_r = Column(Float, nullable=True)
     runner_r = Column(Float, nullable=True)
     realized_pnl_r = Column(Float, nullable=True)
+    # Desk-page build (2026-11-xx) -- dollar P&L + entry fee parity with
+    # CMEOrder.dollar_pnl/AltMatrixOrder.realized_pnl_usd, which already
+    # had both. _finalize_traveler_close() (executor_live_e1_engine.py)
+    # already computes pnl_usd -- this just gives it somewhere to live.
+    # entry_fee_usd mirrors exit_fee_usd's existing shape (both stay NULL
+    # until a separate fee-capture spike confirms Bitunix exposes a fee
+    # field on fill responses and wires a writer -- a known, flagged gap,
+    # not fabricated data).
+    realized_pnl_usd = Column(Float, nullable=True)
+    entry_fee_usd = Column(Float, nullable=True)
 
     closed_at = Column(DateTime, nullable=True)
     close_reason = Column(String, nullable=True)   # STOP_BEFORE_T1 | RUNNER_STOP | T3 | MANUAL | EXPIRED (2026-09-19, P0-1)
