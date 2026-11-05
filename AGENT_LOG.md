@@ -9556,3 +9556,20 @@ Two real-data corrections needed on the first actual call, same discipline as ev
 3. Dial `contracts_cap` back to 1 on Andy_CME_Funds before anything live.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (ninth entry, same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — CrossTrade order placement AND cancellation live-confirmed end to end against the real MFFU account; full OSO bracket verified correct
+
+Closing entry for tonight's CME execution-path verification. Summary of what got proven live, in order, each one a real finding from an actual call, not a guess accepted on faith:
+
+1. **Instrument symbol**: a bare root symbol was never actually tested. Andy's own manual test (`ES1!`) proved the continuous-contract alias auto-resolves to the real front-month contract (`ESZ6`) -- `place_bracket_limit_order()` now sends `f"{symbol}1!"` instead of a bare root or a quarterly-expiring hardcoded month code.
+2. **A real accidental fill happened during manual testing** (full-size ES market order, not Micro, ~$80 slippage on the MFFU demo account) -- caused by CrossTrade's own Playground UI retaining its own default placeholder body instead of what was typed. Not a Kabroda code bug, but the direct motivation for building `POST /api/admin/cme-order-placement-test/{account_id}` (+`/cancel`) -- a safe, code-driven test using Kabroda's own `cme_executor._client_for()` path instead of manual UI clicks, with a limit price far enough from market (MNQ $25,000 vs. ~$28,000+ live) that it cannot fill.
+3. **Place-order response envelope**: confirmed the success shape differs from every other CrossTrade endpoint -- order details sit under `"response"`, not `"data"`. Fixed and reconfirmed: the real response correctly returned the parent order ID plus both OSO child leg IDs (`osoChildIds`), and Tradovate's own order book showed all three legs (entry limit, target limit, stop) at the exact prices sent -- the full bracket mechanism works correctly, not just single-order placement.
+4. **Cancel-order 400**: `cancel_order()` was silently swallowing the real failure reason (same `last_*_error` gap already fixed once for Tradovate auth) -- added `last_cancel_error`, which surfaced the real cause (`HTTP 400: {"error": "Invalid request"}`, from sending `Content-Type: application/json` with no actual body). Fixed by sending an explicit `json={}`. Recancelled successfully -- all three bracket legs confirmed `Canceled` on Tradovate's own order book, account back to flat.
+5. **UI fix**: the CME/Tradovate Step 7 config block was showing on every account card regardless of exchange, including Bitunix-only ones -- directly caused a real mix-up tonight (a test accidentally run against the wrong, unconfigured account). Now scoped to `exchange === "tradovate"` only, both the rendered block and the per-account populate logic.
+
+**Still open, not blocking**: breakeven-amend and emergency-flatten remain unverified against a real position, since nothing has filled yet (by design -- every test used a limit price far from market). `contracts_cap` is still 3 on Andy_CME_Funds; Andy dialing it to 1 before any live fill, per the original plan's own staged-rollout intent.
+
+Full suite run as the closing audit for this entire fix cycle (place/cancel/UI-scope changes pushed on the targeted CME suite alone during the rapid iteration, per Andy's own call to reduce friction -- full audit deferred to the end of the cycle, not skipped). Site commits tonight: `69fe3df`, `004dd0c`, `23fe1ec`, `3db5756`, plus the UI-scoping fix in this same push.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

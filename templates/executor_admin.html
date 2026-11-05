@@ -522,6 +522,7 @@ async function loadAccounts() {
                 <p class="empty" id="altMatrixSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
             </div>
 
+            ${(a.exchange || "").toLowerCase() === "tradovate" ? `
             <div class="setup-step" id="cmeFutures-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
                 <div class="setup-step-title" style="color:#93c5fd;"><span class="setup-step-num">7</span> CME Micro Futures (MNQ/MES, Tradovate)</div>
                 <p class="empty" style="padding:0 0 8px;">A fully separate system from this account's own BTC Traveler trading above -- own schema, own loops, own broker (Tradovate, not Bitunix). Daily risk budget is split $175/asset if both MNQ and MES trigger the same session. Trailing drawdown limit mirrors a prop-firm evaluation's own rule (e.g. Apex).</p>
@@ -575,6 +576,7 @@ async function loadAccounts() {
                 </div>
                 <p class="empty" id="cmeOrderTestResult-${a.id}" style="margin-top:6px; display:none; white-space:pre-wrap;"></p>
             </div>
+            ` : ""}
 
             <details style="margin-top:10px;">
                 <summary>Advanced / Legacy Risk State</summary>
@@ -608,13 +610,15 @@ async function loadAccounts() {
         renderStrategyProfileSection(a.id, a);
         renderGoLiveSection(a.id, a);
         loadAltMatrixConfig(a.id);
-        loadCmeConfig(a.id);
-        document.getElementById(`cmeTvAccountId-${a.id}`).value = a.tradovate_account_id ?? "";
-        document.getElementById(`cmeTvAccountName-${a.id}`).value = a.tradovate_account_name ?? "";
-        document.getElementById(`cmeTvIsDemo-${a.id}`).checked = !!a.tradovate_is_demo;
-        document.getElementById(`cmeExecProvider-${a.id}`).value = a.execution_provider || "tradovate";
-        document.getElementById(`cmeCtAccountId-${a.id}`).value = a.crosstrade_account_id ?? "";
-        toggleExecutionProviderFields(a.id);
+        if ((a.exchange || "").toLowerCase() === "tradovate") {
+            loadCmeConfig(a.id);
+            document.getElementById(`cmeTvAccountId-${a.id}`).value = a.tradovate_account_id ?? "";
+            document.getElementById(`cmeTvAccountName-${a.id}`).value = a.tradovate_account_name ?? "";
+            document.getElementById(`cmeTvIsDemo-${a.id}`).checked = !!a.tradovate_is_demo;
+            document.getElementById(`cmeExecProvider-${a.id}`).value = a.execution_provider || "tradovate";
+            document.getElementById(`cmeCtAccountId-${a.id}`).value = a.crosstrade_account_id ?? "";
+            toggleExecutionProviderFields(a.id);
+        }
     }
 }
 
