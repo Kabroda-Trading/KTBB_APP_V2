@@ -9841,3 +9841,46 @@ Full suite: 1150 passed, 0 failed. Site commits `2840941` (the build)
 and this entry's own commit, both pushed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-11-05 (sixth entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Spec: User Profile Telegram Onboarding, Desktop/Mobile PWA, and Slack Conversational AI Gateway
+
+Following Andy's strategic guidance and Claude Code's audit of the blueprint (Entry 25), this entry details the concrete specifications for the next phase of work:
+
+### 1. User Profile Telegram Onboarding UX (`account.html`)
+For multi-user account isolation (so Dawson, Terry, and others receive alerts for their accounts only, while Andy's master ID remains set in Render):
+- In `templates/account.html`, add a dedicated "Mobile Alerts (Telegram)" card with a 3-step inline guide:
+  1. "Open Telegram and message `@kabrodabot` -> tap **Start**."
+  2. "Open `@userinfobot` on Telegram to get your 9-digit numeric ID."
+  3. "Paste your Chat ID below and click **Save**."
+- Input field: `telegram_chat_id` stored on `users` / `executor_accounts` table.
+- "Send Test Alert" button: Calls `POST /api/account/telegram-test` which sends a test ping to that ID, verifying their phone vibrates immediately.
+
+### 2. Desktop & Mobile PWA Installation ("Kabroda App on Desktop/Home Screen")
+Andy requested a clean desktop & mobile app experience with the official Kabroda logo:
+- Add `static/manifest.json` with:
+  - `name`: "Kabroda Trading Desk"
+  - `short_name`: "Kabroda"
+  - `display`: "standalone" (launches without browser URL bar or navigation buttons)
+  - `background_color`: "#1a120d" (matches the espresso dark palette)
+  - `theme_color`: "#c9a880"
+  - `icons`: 192x192 and 512x512 high-resolution Kabroda icons (`static/img/icon-192.png`, `icon-512.png`).
+- Add `<link rel="manifest" href="/static/manifest.json">` to `templates/nav.html` / base header.
+- Desktop users (Chrome/Edge) can click "Install Kabroda" in the address bar to add a native desktop icon and taskbar launcher. Mobile users (Safari/Chrome) can tap "Add to Home Screen" to install it full-screen.
+
+### 3. Slack Conversational AI Gateway Architecture ("Chat with Kabroda on Your Phone")
+Andy has an existing conversational Slack AI setup for Back Forty Provisions and wants to bring the same capability to Kabroda:
+- **Concept:** Andy texts a dedicated Slack channel (`#kabroda-desk` or direct message with `@KabrodaAI`) from his phone asking natural questions:
+  - *"How does the CME desk look today?"*
+  - *"Did Bitcoin fill, and where is the stop?"*
+  - *"What is our remaining drawdown cushion on Tradovate?"*
+  - *"Why did MNQ stand down this morning?"*
+- **Backend Architecture:**
+  1. A lightweight Slack Bolt webhook endpoint (or standalone worker) listening to Slack app mentions.
+  2. Integrated with an LLM (Claude Sonnet 3.5 / Gemini 1.5 Pro) equipped with structured Read-Only Function Tools:
+     - `get_cme_status()` -> Calls `/api/radar/cme-snapshot` & `/api/admin/cme-status`.
+     - `get_crypto_status()` -> Calls `/api/radar/traveler-snapshot` & `/api/dashboard/overview`.
+     - `get_knowledge_base_article(query)` -> Searches `CANON.md`, `LIVE_SYSTEM_STATE.md`, `DECISION_MODEL.md`.
+  3. **Security & Iron Wall:** The Slack bot only answers from read-only data endpoints. It cannot execute trades, cancel orders, or modify risk limits without explicit 2-factor confirmation.
+  4. **Knowledge Synchronization:** Knowledge assets currently in the local `Kabroda AI Brain` can be indexed or synced via a lightweight read-only knowledge endpoint on Render, so the Slack AI answers from canonical ground truth, never hallucinating rules or numbers.
