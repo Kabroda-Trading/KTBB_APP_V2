@@ -9884,3 +9884,18 @@ Andy has an existing conversational Slack AI setup for Back Forty Provisions and
      - `get_knowledge_base_article(query)` -> Searches `CANON.md`, `LIVE_SYSTEM_STATE.md`, `DECISION_MODEL.md`.
   3. **Security & Iron Wall:** The Slack bot only answers from read-only data endpoints. It cannot execute trades, cancel orders, or modify risk limits without explicit 2-factor confirmation.
   4. **Knowledge Synchronization:** Knowledge assets currently in the local `Kabroda AI Brain` can be indexed or synced via a lightweight read-only knowledge endpoint on Render, so the Slack AI answers from canonical ground truth, never hallucinating rules or numbers.
+
+
+## 2026-11-05 (seventh entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Architecture: Multi-Agent Slack Gateway (MRE Mapping) & Institutional Desk Naming Framework
+
+Following Andy's strategic guidance mapping his enterprise multi-agent Copilot Studio workflow (Neighborly/Mr. Electric) into Kabroda:
+- Artifact created: `kabroda_multi_agent_slack_gateway_and_desk_naming_architecture.md`
+- Key Architecture Deliverables:
+  1. **Hierarchical Multi-Agent System (Supervisor/Router Pattern):** Slack App front-end communicating with a Supervisor LLM routing into 6 domain specialist agents (Live Telemetry, Pacing & Benchmarks, Market Profile & TPO, Prop Firm Risk, Knowledge/CANON, and Executive Reporting/Scenarios).
+  2. **Cloud Knowledge Warehouse Migration:** Moving canonical documentation (`CANON.md`, `LIVE_SYSTEM_STATE.md`, `Trading Knowledge`) and historical 5y/10y backtest distributions from local PC markdown files into PostgreSQL on Render.
+  3. **Institutional Trading Desk Naming Framework:** Retiring internal codename "Traveler" in favor of clean institutional names:
+     - "Traveler" (BTC) -> **Crypto Horizon Desk** (or **Crypto Alpha Desk**)
+     - "CME" (MNQ/MES) -> **TradFi Index Velocity Desk** (or **CME Futures Desk**)
+     - "Alt Matrix" -> **Digital Asset Momentum Matrix**
+     - "MetaSignals" -> **Tactical Signal Dispatch Desk**
