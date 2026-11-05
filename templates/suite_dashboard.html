@@ -87,6 +87,39 @@
         @media (max-width: 900px)  { .row-2-1, .row-1-1 { grid-template-columns: 1fr; } }
         @media (max-width: 600px)  { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
 
+        /* ── DESK SPLIT (CC_INTERFACE.md §E: "Left Panel: Crypto Desk --
+           Right Panel: TradFi Desk") ───────────────────────────── */
+        .desk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+        @media (max-width: 900px) { .desk-row { grid-template-columns: 1fr; } }
+        .desk-card { background: #251a14; border: 1px solid #4d3526; border-radius: 8px; padding: 22px 24px; }
+        .desk-title { font-family: 'Playfair Display', serif; font-size: 13px; font-weight: 600; color: #c9a880; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
+        .desk-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6b5345; margin-bottom: 16px; }
+        .desk-symbol-block { border-top: 1px solid #3a2820; padding-top: 12px; margin-top: 12px; }
+        .desk-symbol-block:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+        .desk-symbol-name { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 800; color: #f2e3cf; margin-bottom: 6px; }
+        .desk-row-line { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c9a880; padding: 3px 0; }
+        .desk-row-line span:first-child { color: #8a6f57; }
+
+        /* Trailing-DD gauge */
+        .dd-gauge-track { background: #1a120d; border: 1px solid #3a2820; border-radius: 6px; height: 10px; overflow: hidden; margin: 8px 0 4px; }
+        .dd-gauge-fill { height: 100%; transition: width 0.3s; }
+        .dd-ok     { background: #5e8c66; }
+        .dd-warn   { background: #a67c3a; }
+        .dd-danger { background: #8c4a3a; }
+
+        /* Fleet Emergency Flatten */
+        .btn-flatten { background: #4a1d1d; border: 1px solid #8c4a3a; color: #f2b8b0; font-family: 'JetBrains Mono', monospace;
+                        font-size: 10px; font-weight: 800; letter-spacing: 1px; padding: 8px 14px; border-radius: 6px; cursor: pointer;
+                        text-transform: uppercase; }
+        .btn-flatten:hover { background: #5e2424; }
+        .flatten-menu { position: absolute; margin-top: 8px; background: #1a120d; border: 1px solid #8c4a3a; border-radius: 8px;
+                         padding: 10px; min-width: 260px; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        .flatten-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 4px;
+                        font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c9a880; }
+        .flatten-confirm-btn { background: #8c4a3a; border: none; color: #f2e3cf; font-family: 'JetBrains Mono', monospace;
+                                font-size: 9px; font-weight: 800; padding: 5px 9px; border-radius: 4px; cursor: pointer; text-transform: uppercase; }
+        .flatten-confirm-btn:hover { background: #a85a47; }
+
         /* TAB NAVIGATION */
         .tab-bar { display: flex; gap: 4px; margin-bottom: 28px; border-bottom: 1px solid #4d3526; padding-bottom: 0; }
         .tab-btn { background: transparent; border: none; color: #8a6f57; font-family: 'JetBrains Mono', monospace;
@@ -109,7 +142,13 @@
                 <h1 class="dash-title">Executive Dashboard</h1>
                 <div class="dash-subtitle">Kabroda Intelligence System — Performance &amp; Operations</div>
             </div>
-            <div class="dash-ts" id="tsLabel">—</div>
+            <div style="display:flex; align-items:center; gap:16px;">
+                <div id="fleetFlattenWrap" style="display:none;">
+                    <button class="btn-flatten" id="fleetFlattenBtn" onclick="toggleFleetFlattenMenu()">⛔ FLEET EMERGENCY FLATTEN</button>
+                    <div id="fleetFlattenMenu" class="flatten-menu" style="display:none;"></div>
+                </div>
+                <div class="dash-ts" id="tsLabel">—</div>
+            </div>
         </div>
 
         <!-- ── TAB NAVIGATION ─────────────────────────────── -->
@@ -156,6 +195,35 @@
              -- both read AgentRunLog, whose only writer (agent_core._call_
              agent()) has had zero live callers since the 6-agent CrewAI crew
              was retired 2026-08-17. Been showing $0.00/frozen data since. -->
+
+        <!-- ── DESK SPLIT (CC_INTERFACE.md §E) ───────────────
+             Left: Crypto Desk (BTC Traveler, 8:00 CST lock) -- a condensed
+             view of the KPIs already on this page, not a new data source.
+             Right: TradFi Desk (CME MNQ/MES, 10:00 EST lock) -- fed by the
+             EXISTING public cme-snapshot route (everyone) and, for admins
+             only, the existing admin cme-status route (adds the trailing-DD
+             gauge, since that's per-account config/state only admins can
+             see server-side today -- see cme_radar.py's own access model). -->
+        <div class="desk-row">
+            <div class="desk-card">
+                <div class="desk-title">Crypto Desk</div>
+                <div class="desk-sub">BTC/USDT -- Traveler gate, 8:00 CST lock, Bitunix</div>
+                <div class="desk-row-line"><span>Fill rate</span><span id="deskCryptoFillRate">—</span></div>
+                <div class="desk-row-line"><span>Win rate</span><span id="deskCryptoWinRate">—</span></div>
+                <div class="desk-row-line"><span>Net R (evaluation)</span><span id="deskCryptoNetR">—</span></div>
+                <div class="desk-row-line"><span>Real executor P&amp;L</span><span id="deskCryptoExecPnl">—</span></div>
+            </div>
+            <div class="desk-card">
+                <div class="desk-title">TradFi Desk</div>
+                <div class="desk-sub">CME Micro Futures (MNQ/MES) -- 10:00 EST lock, Tradovate/CrossTrade</div>
+                <div id="deskCmeSymbols"><div class="empty-state" style="padding:16px 0;">Loading CME desk…</div></div>
+                <div id="deskCmeDdGauge" style="display:none;">
+                    <div class="desk-row-line" style="margin-top:4px;"><span>Trailing drawdown buffer</span><span id="deskDdRemaining">—</span></div>
+                    <div class="dd-gauge-track"><div class="dd-gauge-fill" id="deskDdFill" style="width:0%;"></div></div>
+                    <div class="desk-sub" style="margin:2px 0 0;">High-water mark <span id="deskDdHwm">—</span> · floor <span id="deskDdFloor">—</span> (as of last daily lock, not a live tick)</div>
+                </div>
+            </div>
+        </div>
 
         <!-- ── ROW 2: PnL + Approval ─────────────────────── -->
         <div class="chart-row row-2-1">
@@ -344,6 +412,12 @@
          listener removed in the same pass. -->
 
     <script>
+    // Server-rendered once at page load -- is_admin gates the admin-only
+    // cme-status call (trailing-DD gauge) below; mirrors the server's own
+    // access model (cme_radar.get_admin_cme_status() is admin-only by
+    // design, see that file's own docstring) rather than re-deriving it.
+    const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
     // ── ESPRESSO EXECUTIVE CHART PALETTE ──────────────────
     const C = {
         cognac:  '#c8813a',
@@ -404,6 +478,18 @@
             execPnlEl.style.color = execR > 0 ? C.green : (execR < 0 ? C.red : C.cream);
             document.getElementById('k-executor-trades').textContent = d.executor_closed_trades ?? 0;
 
+            // Crypto Desk panel -- same figures as the KPI cards above,
+            // condensed into the desk-split layout (CC_INTERFACE.md §E),
+            // not a second fetch.
+            document.getElementById('deskCryptoFillRate').textContent = d.fill_rate + '%';
+            document.getElementById('deskCryptoWinRate').textContent = d.win_rate + '%';
+            const deskNetR = document.getElementById('deskCryptoNetR');
+            deskNetR.textContent = (d.net_r >= 0 ? '+' : '') + d.net_r + 'R';
+            deskNetR.style.color = d.net_r > 0 ? C.green : (d.net_r < 0 ? C.red : C.cream);
+            const deskExecPnl = document.getElementById('deskCryptoExecPnl');
+            deskExecPnl.textContent = (execR >= 0 ? '+' : '') + execR + 'R (' + (d.executor_closed_trades ?? 0) + ' closed)';
+            deskExecPnl.style.color = execR > 0 ? C.green : (execR < 0 ? C.red : C.cream);
+
             // k-spend/k-cache (AgentRunLog-sourced) removed 2026-09-24 along
             // with the spend_7d/cache_hit_rate fields themselves -- see
             // main.py's /api/dashboard/overview removal note.
@@ -420,6 +506,123 @@
             document.getElementById('k-netr').style.color     = C.red;
             document.getElementById('tsLabel').textContent    = 'Load Error';
             document.getElementById('tsLabel').style.color    = C.red;
+        }
+    }
+
+    // ── TRADFI DESK (CME Micro Futures) ───────────────────
+    // Public cme-snapshot (symbol-level, no account identity -- same
+    // openness model as the public Traveler/Alt Matrix radars) works for
+    // everyone. The admin cme-status call adds the trailing-DD gauge,
+    // because that's per-account config only cme_radar.get_admin_cme_
+    // status() exposes (admin-only server-side, by that module's own
+    // design) -- not re-derived or relaxed here, just respected.
+    function _cmeSymbolBlockHtml(symbol, s) {
+        const plan = s && s.plan;
+        const pos = s && s.position;
+        let html = `<div class="desk-symbol-block"><div class="desk-symbol-name">${symbol}</div>`;
+        if (!plan) {
+            html += `<div class="desk-row-line"><span>Status</span><span>No lock yet today</span></div>`;
+        } else {
+            const stCls = plan.status === 'ARMED' ? C.green : (String(plan.status || '').includes('STAND_DOWN') ? C.muted : C.amber);
+            html += `<div class="desk-row-line"><span>Status</span><span style="color:${stCls};">${plan.status || '—'}</span></div>`;
+            if (plan.bo != null) html += `<div class="desk-row-line"><span>Breakout / Breakdown</span><span>${plan.bo} / ${plan.bd}</span></div>`;
+            if (plan.box != null) html += `<div class="desk-row-line"><span>Box / Reachability</span><span>${plan.box} / ${plan.reachability != null ? plan.reachability.toFixed(2) : '—'}</span></div>`;
+        }
+        if (pos) {
+            html += `<div class="desk-row-line"><span>Position</span><span style="color:${C.cognac};">${pos.direction} @ ${pos.entry_fill_price ?? '—'}</span></div>`;
+            html += `<div class="desk-row-line"><span>Stop (BE: ${pos.be_amended ? 'yes' : 'no'})</span><span>${pos.stop_price ?? '—'}</span></div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
+
+    async function loadCmeDesk() {
+        try {
+            const r = await fetch('/api/radar/cme-snapshot');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            const wrap = document.getElementById('deskCmeSymbols');
+            wrap.innerHTML = ['MNQ', 'MES'].map(sym => _cmeSymbolBlockHtml(sym, d.symbols[sym])).join('');
+        } catch (e) {
+            console.error('Failed to load CME desk:', e);
+            document.getElementById('deskCmeSymbols').innerHTML = '<div class="empty-state" style="padding:16px 0; color:#8c4a3a;">Failed to load CME desk.</div>';
+        }
+
+        if (!IS_ADMIN) return;   // trailing-DD gauge needs cme_radar.get_admin_cme_status(), admin-only server-side
+        try {
+            const r = await fetch('/api/admin/cme-status');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            const cfg = (d.configs || []).find(c => c.high_water_mark_usd != null && c.trailing_dd_limit_usd != null);
+            if (!cfg) return;   // no account has both fields populated yet (no D1 lock has run against it)
+            const floor = cfg.high_water_mark_usd - cfg.trailing_dd_limit_usd;
+            document.getElementById('deskDdHwm').textContent = '$' + cfg.high_water_mark_usd.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('deskDdFloor').textContent = '$' + floor.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            // "Remaining buffer" here is the configured trailing-DD cushion
+            // size itself ($high_water_mark - $floor), NOT a live distance
+            // from current equity to the floor -- no route currently tracks
+            // live intraday equity (only the high-water mark, updated once
+            // per daily D1 lock). Labeled honestly in the panel's own
+            // subtitle rather than implied as real-time when it isn't.
+            const remaining = cfg.trailing_dd_limit_usd;
+            document.getElementById('deskDdRemaining').textContent = '$' + remaining.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' cushion';
+            const fillEl = document.getElementById('deskDdFill');
+            const pct = Math.max(0, Math.min(100, (remaining / cfg.high_water_mark_usd) * 100));
+            fillEl.style.width = pct + '%';
+            fillEl.className = 'dd-gauge-fill ' + (remaining < 1000 ? 'dd-danger' : (remaining < cfg.trailing_dd_limit_usd ? 'dd-warn' : 'dd-ok'));
+            document.getElementById('deskCmeDdGauge').style.display = 'block';
+        } catch (e) {
+            console.error('Failed to load CME trailing-DD gauge:', e);
+        }
+    }
+
+    // ── FLEET EMERGENCY FLATTEN (CC_INTERFACE.md §E) ──────
+    // "Fleet" = every account the LOGGED-IN user can see, same mutual-
+    // isolation scoping /api/executor/accounts already enforces server-
+    // side (zero admin bypass, by Andy's own 2026-09-07 ruling) -- this
+    // reuses that existing route rather than building a new fleet-wide
+    // listing endpoint. Each flatten call is still per-account, same as
+    // the backend route's own docstring explains (main.py:2379).
+    let _fleetAccounts = [];
+
+    async function loadFleetFlatten() {
+        try {
+            const r = await fetch('/api/executor/accounts');
+            if (!r.ok) throw new Error('Status ' + r.status);
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            _fleetAccounts = (d.accounts || []).filter(a => (a.exchange || '').toLowerCase() === 'tradovate');
+            document.getElementById('fleetFlattenWrap').style.display = _fleetAccounts.length ? 'block' : 'none';
+        } catch (e) {
+            console.error('Failed to load fleet accounts for Emergency Flatten:', e);
+        }
+    }
+
+    function toggleFleetFlattenMenu() {
+        const menu = document.getElementById('fleetFlattenMenu');
+        const isOpen = menu.style.display === 'block';
+        if (isOpen) { menu.style.display = 'none'; return; }
+        menu.innerHTML = _fleetAccounts.map(a => `
+            <div class="flatten-row">
+                <span>${a.label || ('Account #' + a.id)}</span>
+                <button class="flatten-confirm-btn" onclick="confirmFlatten(${a.id}, '${(a.label || '').replace(/'/g, "")}')">FLATTEN</button>
+            </div>
+        `).join('') || '<div class="flatten-row">No Tradovate/CME accounts.</div>';
+        menu.style.display = 'block';
+    }
+
+    async function confirmFlatten(accountId, label) {
+        if (!confirm(`FLATTEN ${label}?\n\nThis cancels every open order and market-closes every open position on this account immediately. This cannot be undone.`)) return;
+        try {
+            const r = await fetch(`/api/tradovate/flatten_all?account_id=${accountId}`, { method: 'POST' });
+            const d = await r.json();
+            if (!d.ok) { alert('Flatten failed: ' + (d.error || 'unknown error')); return; }
+            alert(`Flattened ${label}: cancelled ${((d.cancelled)||[]).length}, closed ${((d.closed)||[]).length}, errors ${((d.errors)||[]).length}.`);
+            document.getElementById('fleetFlattenMenu').style.display = 'none';
+        } catch (e) {
+            alert('Flatten request failed: ' + e.message);
         }
     }
 
@@ -702,6 +905,8 @@
             loadMasHistory().catch(e => console.error("loadMasHistory failed", e)),
             loadLiveSystem().catch(e => console.error("loadLiveSystem failed", e)),
             loadHeartbeat().catch(e => console.error("loadHeartbeat failed", e)),
+            loadCmeDesk().catch(e => console.error("loadCmeDesk failed", e)),
+            loadFleetFlatten().catch(e => console.error("loadFleetFlatten failed", e)),
         ]);
     }
 
@@ -732,6 +937,10 @@
         if (_origInit) _origInit();
         // Polling for Live System tab data
         setInterval(loadHeartbeat, 60000);
+        // TradFi Desk -- 60s is plenty; D1 locks once/day and D2/D3 only
+        // advance on 5m-bar-aligned ticks, same cadence Market Radar polls
+        // its own public snapshot at.
+        setInterval(loadCmeDesk, 60000);
         // setInterval(loadCostData, ...) removed 2026-09-24 -- loadCostData()
         // itself is gone, see the "AGENT COSTS" removal note above.
     };

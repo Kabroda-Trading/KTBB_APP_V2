@@ -188,6 +188,25 @@ class KabrodaE2ETestSuite(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn("Analysis", res.text)
 
+    def test_f6_dashboard_renders_desk_split(self):
+        """CC_INTERFACE.md §E: Crypto Desk / TradFi Desk split, Fleet
+        Emergency Flatten control, and the trailing-DD gauge container."""
+        res = self.admin_client.get("/suite/dashboard")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("Crypto Desk", res.text)
+        self.assertIn("TradFi Desk", res.text)
+        self.assertIn("FLEET EMERGENCY FLATTEN", res.text)
+        self.assertIn("deskCmeDdGauge", res.text)
+
+    def test_f6_dashboard_is_admin_flag_reflects_real_user(self):
+        """The server-rendered IS_ADMIN JS constant gates the admin-only
+        trailing-DD call client-side -- must actually reflect who's
+        logged in, not a hardcoded value."""
+        admin_res = self.admin_client.get("/suite/dashboard")
+        self.assertIn("const IS_ADMIN = true;", admin_res.text)
+        basic_res = self.basic_client.get("/suite/dashboard")
+        self.assertIn("const IS_ADMIN = false;", basic_res.text)
+
 
     # --- F7: AI Analysis Loop Background Worker removed 2026-09-23 (V2
     # Crown retirement, Audit-AI surface retirement, Andy's "retire
