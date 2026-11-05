@@ -9669,3 +9669,44 @@ STATUS: resolved — both P0 items from your 08:15 CT entry fixed and shipped, v
 Full suite 1095 passed after the second fix (1093 after the first). Both pushed separately given the real 10:00 ET deadline on the first one.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-11-05 (third entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Executive CME Dashboard Specification (Andy Directive) & Status Reassurance
+
+### 1. Executive Context & User Requirement
+Andy requested direct executive clarity on the CME Micro Futures engine (Tradovate / CrossTrade) and an executive-style redesign of the TradFi dashboard panel on `suite_dashboard.html` / Kabroda Trading Desk. Currently, when a session stands down or has no lock, the UI displays raw developer text ('STAND_DOWN_UNREACHABLE', 'No lock yet today') without answering Andy's core operational questions:
+  1. Did the system trade or not?
+  2. Did it stand down because parameters didn't line up?
+  3. Exactly which gate passed or failed (Data bars, Box size vs 0.55*ATR14, 5m retest)?
+
+### 2. Backend Snapshot Route Enrichment (`cme_radar.py`)
+In `cme_radar.get_public_cme_snapshot()`:
+- Ensure `plan_dict` exposes the full parameter set:
+  - `atr14`: `plan.atr14`
+  - `reachability_max`: `0.55`
+  - `box_max_allowed`: `round(plan.atr14 * 0.55, 2)` if `plan.atr14` else None
+  - `status_reason`: `plan.status_reason`
+  - `stop_long`: `plan.stop_long`, `stop_short`: `plan.stop_short`
+  - `target_long`: `plan.target_long`, `target_short`: `plan.target_short`
+
+### 3. Frontend UI Specification (`templates/suite_dashboard.html` -> `_cmeSymbolBlockHtml`)
+Transform the TradFi card from raw property lists into an Executive Cockpit:
+1. **Prominent Status Badge**:
+   - `ARMED`: Green badge `[ ARMED — HUNTING RETEST ]`
+   - `STAND_DOWN_UNREACHABLE`: Amber/Shield badge `[ STAND DOWN — CAPITAL PROTECTED ]`
+   - `STAND_DOWN_NO_RETEST`: Slate badge `[ STAND DOWN — NO RETEST ]`
+   - `CALIBRATING`: Blue badge `[ CALIBRATING 9:30–10:00 ET ]` (if `now` is between 9:30 and 10:00 ET)
+   - `NO_DATA`: Muted badge `[ AWAITING 10:00 ET LOCK ]` (if `now` < 9:30 ET) or `[ DATA PENDING / HOLIDAY ]` (if past 10:00 ET and no row)
+2. **Key Parameter Health Checklist**:
+   - **Data Feed**: 30/30 1m Globex Bars `[ PASS ]`
+   - **Reachability Gate**: `Box: {box} pts | Max: {box_max_allowed} pts (0.55 x ATR14)` -> `[ PASS / FAIL ]`
+   - **Trigger Levels**: `BO (Long): {bo} | BD (Short): {bd}`
+   - **Retest Status**: `Waiting for 5m bar close retest` / `In Position` / `Session Expired`
+3. **One-Sentence Executive Verdict**:
+   - For `STAND_DOWN_UNREACHABLE`: `"Morning 30m range exceeded the safety limit ({box} pts vs {box_max_allowed} pts max). Stood down to prevent overextended risk."`
+   - For `ARMED`: `"Parameters verified. Watching for 5m breakout and retest before placing 1 micro contract."`
+4. **Account & Risk Summary**:
+   - Account: `Andy_CME_Funds (Tradovate / CrossTrade)`
+   - Sizing: `1 Micro Contract ($350 Risk Budget)`
+   - Current Exposure: `0 Contracts Active / $0.00 at Risk`
