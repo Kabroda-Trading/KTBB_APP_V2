@@ -129,12 +129,21 @@ class DatabentoClient:
                     f"(flat or nested under 'hd') -- real record was: {record}"
                 )
             ts_ns = int(ts_raw)
+            # 2026-11-04 -- the second real-data finding on this same call:
+            # open/high/low/close came back as JSON STRINGS, not numbers
+            # (TypeError: unsupported operand type(s) for /: 'str' and
+            # 'float') -- a common pattern for 64-bit fixed-point values,
+            # since JSON numbers can't losslessly represent the full int64
+            # range in every consumer. int(...) handles both a string and
+            # a real JSON number transparently; ts_event already did,
+            # which is exactly why this didn't surface until the price
+            # fields were reached.
             bars.append({
                 "ts_event": datetime.datetime.fromtimestamp(ts_ns / 1e9, tz=datetime.timezone.utc),
-                "open": record["open"] / 1e9,
-                "high": record["high"] / 1e9,
-                "low": record["low"] / 1e9,
-                "close": record["close"] / 1e9,
+                "open": int(record["open"]) / 1e9,
+                "high": int(record["high"]) / 1e9,
+                "low": int(record["low"]) / 1e9,
+                "close": int(record["close"]) / 1e9,
             })
         bars.sort(key=lambda b: b["ts_event"])   # JSON-lines order isn't contractually guaranteed sorted
         return bars
