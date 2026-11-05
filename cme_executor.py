@@ -313,6 +313,38 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrde
     _notify_account(db, account, "build_cme_exit_email", order_row)
 
 
+_CANCELLABLE_STATES = ("WAITING_RETEST",)
+_CLOSEABLE_STATES = ("FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
+
+
+async def cancel_or_close_order(db: Session, account: ExecutorAccount, order_row: CMEOrder, exit_reason: str = "MANUAL") -> Dict[str, Any]:
+    """Cancels a resting WAITING_RETEST entry or market-closes an open
+    FILLED/RATCHETED/ENTRY_FILLED_UNPROTECTED position, whichever applies
+    to order_row's current state. Factored out of emergency_flatten()'s
+    own per-row loop (2026-11-xx desk-page build) so the single-order admin
+    cancel route and the fleet-wide flatten share one branch of logic
+    instead of two copies that could drift. Raises ValueError on a
+    terminal/unrecognized state rather than silently no-op'ing -- the
+    caller decides how to report that (emergency_flatten() catches it per-
+    row; the single-order route 400s)."""
+    if order_row.management_state in _CANCELLABLE_STATES:
+        client = _client_for(account)
+        if order_row.entry_exchange_order_id:
+            await client.cancel_order(int(order_row.entry_exchange_order_id))
+        from_state = order_row.management_state
+        order_row.management_state = f"CLOSED_{exit_reason}"
+        order_row.exit_reason = exit_reason
+        order_row.closed_at = datetime.datetime.utcnow()
+        _log_transition(db, order_row, from_state, order_row.management_state, detail={"reason": exit_reason})
+        _audit(db, "POSITION_CLOSED", f"CME order {order_row.id} resting entry cancelled ({exit_reason})", account.id, order_row)
+        return {"action": "cancelled", "order_id": order_row.id}
+    elif order_row.management_state in _CLOSEABLE_STATES:
+        await market_close(db, account, order_row, exit_reason=exit_reason)
+        return {"action": "closed", "order_id": order_row.id}
+    else:
+        raise ValueError(f"order {order_row.id} is not in a cancellable/closeable state ({order_row.management_state!r})")
+
+
 async def emergency_flatten(db: Session, account: ExecutorAccount) -> Dict[str, Any]:
     """Fleet Emergency Flatten -- NEW functionality, nothing like this
     exists anywhere else in the codebase (confirmed via grep, 2026-11-04;
@@ -321,34 +353,19 @@ async def emergency_flatten(db: Session, account: ExecutorAccount) -> Dict[str, 
     open position for this account, independent of the mode-gated kill
     switch. Returns a summary dict; never raises -- a failure on one leg
     must not stop attempts on the rest."""
-    client = _client_for(account)
     cancelled, closed, errors = [], [], []
 
-    open_orders = db.query(CMEOrder).filter(
+    open_rows = db.query(CMEOrder).filter(
         CMEOrder.account_id == account.id,
-        CMEOrder.management_state.in_(("WAITING_RETEST",)),
+        CMEOrder.management_state.in_(_CANCELLABLE_STATES + _CLOSEABLE_STATES),
     ).all()
-    for order_row in open_orders:
+    for order_row in open_rows:
+        step = "cancel" if order_row.management_state in _CANCELLABLE_STATES else "close"
         try:
-            if order_row.entry_exchange_order_id:
-                await client.cancel_order(int(order_row.entry_exchange_order_id))
-            order_row.management_state = "CLOSED_MANUAL"
-            order_row.closed_at = datetime.datetime.utcnow()
-            _log_transition(db, order_row, "WAITING_RETEST", "CLOSED_MANUAL", detail={"reason": "emergency_flatten"})
-            cancelled.append(order_row.id)
+            result = await cancel_or_close_order(db, account, order_row, exit_reason="MANUAL")
+            (cancelled if result["action"] == "cancelled" else closed).append(order_row.id)
         except Exception as e:
-            errors.append({"order_id": order_row.id, "step": "cancel", "error": str(e)})
-
-    open_positions = db.query(CMEOrder).filter(
-        CMEOrder.account_id == account.id,
-        CMEOrder.management_state.in_(("FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")),
-    ).all()
-    for order_row in open_positions:
-        try:
-            await market_close(db, account, order_row, exit_reason="MANUAL")
-            closed.append(order_row.id)
-        except Exception as e:
-            errors.append({"order_id": order_row.id, "step": "close", "error": str(e)})
+            errors.append({"order_id": order_row.id, "step": step, "error": str(e)})
 
     executor_accounts.write_audit(
         db, "KILL_SWITCH_ENGAGED" if not errors else "ERROR",

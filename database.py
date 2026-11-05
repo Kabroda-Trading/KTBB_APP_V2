@@ -586,6 +586,22 @@ def init_db():
     except Exception as e:
         print(f"cme_orders constraint migration check failed: {e}")
 
+    # --- DESK-PAGE REPORTING BUILD (2026-11-xx) -- dollar P&L + entry-fee
+    # parity with CMEOrder/AltMatrixOrder, which already have both.
+    # _finalize_traveler_close() (executor_live_e1_engine.py) already
+    # COMPUTES pnl_usd -- this just gives it somewhere to live; see that
+    # function's own write right after this computes. entry_fee_usd
+    # mirrors exit_fee_usd's existing (currently always-NULL, zero writers
+    # repo-wide as of this build) shape -- stays NULL until a separate
+    # fee-capture spike confirms whether Bitunix/Tradovate/CrossTrade
+    # actually expose a fee field on fill responses and wires a writer. ---
+    for _col in ["realized_pnl_usd FLOAT", "entry_fee_usd FLOAT"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE executor_orders ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- GATE_LOG SS9a MIGRATIONS (2026-08-31 -- see the GateLog class
     # docstring above for what each column is and why) ---
     for _col in [
@@ -2540,6 +2556,40 @@ class ExecutorRiskState(Base):
     consecutive_losses = Column(Integer, nullable=False, default=0)
 
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class ExecutorAccountBalanceSnapshot(Base):
+    """Periodic real-balance/equity history for ANY ExecutorAccount --
+    Traveler+Alt Matrix (which share one physical Bitunix account) and CME
+    (its own Tradovate/CrossTrade account) alike; account_id alone
+    disambiguates which subsystem via ExecutorAccount.exchange/market_type,
+    so this is ONE generic table, not one per desk -- Traveler/Alt Matrix
+    share one real account_id, so a split table would double-write the
+    same real dollar figure under two names every tick. Populated by
+    account_balance_snapshot.py's background loop, reusing each engine's
+    own already-existing balance-query functions (no new exchange-call
+    code). MetaSignals is deliberately excluded: MetaSignalsPaperLedger
+    already IS a real append-only balance/equity history table (per-event,
+    not periodic) -- a second one here would be a duplicate source of
+    truth for it.
+
+    New table -- picked up by Base.metadata.create_all() on deploy. No
+    ALTER TABLE needed."""
+    __tablename__ = "executor_account_balance_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, nullable=False, index=True)  # executor_accounts.id
+    captured_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
+    balance_usd = Column(Float, nullable=True)
+    equity_usd = Column(Float, nullable=True)
+    # "SNAPSHOT_LOOP" | "MANUAL" -- mirrors _query_real_balance()'s own
+    # "source" string (e.g. an unverified-fallback label) so a reader can
+    # tell a real queried figure from an assumed one, same discipline as
+    # that function's own docstring.
+    source = Column(String, nullable=True)
+    detail = Column(Text, nullable=True)  # optional raw balance-query response, audit only
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 class ExecutorSizingPolicy(Base):

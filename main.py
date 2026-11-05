@@ -48,6 +48,7 @@ import metasignals_triage
 import metasignals_paper_engine
 import metasignals_watcher
 import metasignals_radar
+import account_balance_snapshot
 # mtf_confluence_scanner import removed 2026-09-07 (stagnant sweep) -- never
 # actually called in this file; the "mtf_confluence_scanner" string at the
 # dependency-graph metadata route below is a plain literal, not a reference
@@ -754,6 +755,14 @@ async def lifespan(app: FastAPI):
     # closed (see that module's own header).
     app.state.cme_session_task = asyncio.create_task(cme_engine.run_cme_session_loop())
     app.state.cme_watch_task   = asyncio.create_task(cme_engine.run_cme_watch_loop())
+    # Desk-page balance/P&L reporting build (2026-11-xx) -- a FIFTH loop,
+    # but deliberately not account-isolated the way the four subsystem
+    # loops above are: it reads every active ExecutorAccount regardless of
+    # subsystem (Traveler/Alt Matrix/CME alike) and writes ONLY to the new
+    # ExecutorAccountBalanceSnapshot table, never to any subsystem's own
+    # Plan/Order/Transition tables -- see account_balance_snapshot.py's own
+    # header for why this can't be piggybacked onto any existing watch loop.
+    app.state.balance_snapshot_task = asyncio.create_task(account_balance_snapshot.run_balance_snapshot_loop())
     # jewel_task (run_jewel_scheduler) removed 2026-08-30 -- see that
     # function's old location for the removal note.
     # weekly_task (run_weekly_scheduler) removed 2026-09-24 -- see that
@@ -785,6 +794,7 @@ async def lifespan(app: FastAPI):
     app.state.metasignals_watch_task.cancel()
     app.state.cme_session_task.cancel()
     app.state.cme_watch_task.cancel()
+    app.state.balance_snapshot_task.cancel()
     app.state.outcome_tracker_task.cancel()
     app.state.monitor_task.cancel()
 
@@ -2453,6 +2463,181 @@ async def api_tradovate_flatten_all(account_id: int, request: Request, db: Sessi
         db.rollback()
         print(f"[CME] emergency flatten failed for account {account_id}: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/cme/orders/{order_id}/cancel")
+async def api_cme_cancel_order(order_id: int, request: Request, db: Session = Depends(get_db)):
+    """Desk-page build (2026-11-xx) -- promotes the real cancel/close call
+    (previously only reachable via the admin test-order tool,
+    /api/admin/cme-order-placement-test/{account_id}/cancel) into a real,
+    single-order route a human can hit from cme_desk.html. Same owner-or-
+    admin gate as every other account-mutation route on this domain."""
+    from database import CMEOrder as _CMEOrder
+    ctx = get_user_context(request, db)
+    order = db.query(_CMEOrder).filter_by(id=order_id).first()
+    if order is None:
+        return JSONResponse({"ok": False, "error": "No such order."}, status_code=404)
+    account = db.query(_ExecutorAccount).filter_by(id=order.account_id).first()
+    if account is None or not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    import cme_executor
+    try:
+        result = await cme_executor.cancel_or_close_order(db, account, order, exit_reason="MANUAL")
+        db.commit()
+        return JSONResponse({"ok": True, **result})
+    except ValueError as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:
+        db.rollback()
+        print(f"[CME] cancel/close failed for order {order_id}: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_TRAVELER_OPEN_POSITION_STATES = ("ENTRY_FILLED_UNPROTECTED", "ENTRY_FILLED_ORDERS_PLACED")
+
+
+@app.post("/api/executor/orders/{order_id}/cancel")
+async def api_executor_cancel_traveler_order(order_id: int, request: Request, db: Session = Depends(get_db)):
+    """Desk-page build (2026-11-xx) -- the Traveler desk has had a real
+    kill switch since day one but no way to act on ONE specific order; this
+    is that. Branches on management_state: a still-resting entry gets
+    cancel_traveler_entry_order() (generalized from the automated expiry-
+    only _cancel_expired_traveler_entry_order(), executor_live_e1_engine.py),
+    an already-filled open position gets _market_close_traveler_order().
+    Same owner-or-admin gate as the kill-switch/flatten routes."""
+    import executor_live_e1_engine as _e1
+    from database import TravelerPlan as _TravelerPlan
+    ctx = get_user_context(request, db)
+    order = db.query(_ExecutorOrder).filter_by(id=order_id).first()
+    if order is None:
+        return JSONResponse({"ok": False, "error": "No such order."}, status_code=404)
+    account = db.query(_ExecutorAccount).filter_by(id=order.account_id).first()
+    if account is None or not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+    traveler_plan = db.query(_TravelerPlan).filter_by(id=order.traveler_plan_id).first()
+    if traveler_plan is None:
+        return JSONResponse({"ok": False, "error": "No parent traveler plan found for this order."}, status_code=404)
+
+    try:
+        client = _e1._client_for(account)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    symbol = order.symbol.replace("/", "")
+
+    if order.management_state == "PENDING_ENTRY" and order.entry_exchange_order_id and not order.entry_fill_price:
+        try:
+            await _e1.cancel_traveler_entry_order(db, account, client, symbol, traveler_plan, order, close_reason="MANUAL")
+            db.commit()
+            return JSONResponse({"ok": True, "action": "cancelled"})
+        except Exception as e:
+            db.rollback()
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    elif order.management_state in _TRAVELER_OPEN_POSITION_STATES:
+        before_state = order.management_state
+        try:
+            await _e1._market_close_traveler_order(
+                db, account, client, symbol, traveler_plan, order,
+                exit_reason="MANUAL", c5_fired=False, bbwp_fired=False,
+            )
+        except Exception as e:
+            db.rollback()
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+        if order.management_state == before_state:
+            # _market_close_traveler_order() never raises on failure -- it
+            # just leaves the row untouched and writes an audit row (never
+            # assume closed on a call that didn't actually confirm).
+            db.rollback()
+            return JSONResponse({"ok": False, "error": "Close did not confirm -- check the exchange directly, try again shortly."}, status_code=502)
+        db.commit()
+        return JSONResponse({"ok": True, "action": "closed"})
+    else:
+        return JSONResponse({"ok": False, "error": f"order {order_id} is not in a cancellable/closeable state ({order.management_state!r})."}, status_code=400)
+
+
+_ALT_MATRIX_CLOSEABLE_STATES = ("ENTRY_FILLED_UNPROTECTED", "FILLED", "TRAILING")
+
+
+@app.post("/api/alt-matrix/orders/{order_id}/cancel")
+async def api_alt_matrix_cancel_order(order_id: int, request: Request, db: Session = Depends(get_db)):
+    """Desk-page build (2026-11-xx) -- no cancel/close entry point existed
+    for Alt Matrix at all before this (confirmed via grep). Alt Matrix
+    entries are immediate MARKET orders (alt_matrix_executor.py, order_type
+    == "MARKET"), not resting limits like Traveler/CME -- there is no real
+    pre-fill order to cancel, so this is really "close the open position,"
+    reusing alt_matrix_executor.market_close() directly. A PENDING_ENTRY
+    row (the market order is still being placed, a sub-second window) 400s
+    rather than attempting anything against a row with no resting order on
+    the exchange to act on."""
+    from database import AltMatrixOrder as _AltMatrixOrder
+    import alt_matrix_executor
+    ctx = get_user_context(request, db)
+    order = db.query(_AltMatrixOrder).filter_by(id=order_id).first()
+    if order is None:
+        return JSONResponse({"ok": False, "error": "No such order."}, status_code=404)
+    account = db.query(_ExecutorAccount).filter_by(id=order.account_id).first()
+    if account is None or not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    if order.management_state == "PENDING_ENTRY":
+        return JSONResponse({"ok": False, "error": "Order is still being placed (market order, sub-second window) -- try again in a moment."}, status_code=400)
+    if order.management_state not in _ALT_MATRIX_CLOSEABLE_STATES:
+        return JSONResponse({"ok": False, "error": f"order {order_id} is not in a closeable state ({order.management_state!r})."}, status_code=400)
+
+    before_state = order.management_state
+    try:
+        await alt_matrix_executor.market_close(db, account, order, exit_reason="MANUAL")
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    if order.management_state == before_state:
+        # market_close() never raises on failure -- it leaves the row
+        # untouched and writes an audit row (never assume closed on a call
+        # that didn't actually confirm).
+        db.rollback()
+        return JSONResponse({"ok": False, "error": "Close did not confirm -- check the exchange directly, try again shortly."}, status_code=502)
+    db.commit()
+    return JSONResponse({"ok": True, "action": "closed"})
+
+
+@app.get("/api/dashboard/account-balance-history")
+async def api_dashboard_account_balance_history(account_id: int, request: Request, days: int = 30, db: Session = Depends(get_db)):
+    """Desk-page reporting build (2026-11-xx) -- reads
+    ExecutorAccountBalanceSnapshot, populated by account_balance_snapshot.
+    run_balance_snapshot_loop()'s background task. Same owner-or-admin gate
+    as every other single-account route on this domain (kill-switch,
+    flatten, config) -- not the multi-account-scoped pattern /api/dashboard/
+    overview uses, since this always names one specific account."""
+    from database import ExecutorAccountBalanceSnapshot as _BalanceSnapshot
+    ctx = get_user_context(request, db)
+    account = db.query(_ExecutorAccount).filter_by(id=account_id).first()
+    if account is None:
+        return JSONResponse({"ok": False, "error": "No such account."}, status_code=404)
+    if not _executor_owner_or_admin(ctx, account):
+        return JSONResponse({"ok": False, "error": "Not authorized."}, status_code=403)
+
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        db.query(_BalanceSnapshot)
+        .filter(_BalanceSnapshot.account_id == account_id, _BalanceSnapshot.captured_at >= since)
+        .order_by(_BalanceSnapshot.captured_at.asc())
+        .all()
+    )
+    return JSONResponse({
+        "ok": True,
+        "account_id": account_id,
+        "days": days,
+        "snapshots": [
+            {
+                "captured_at": r.captured_at.isoformat() if r.captured_at else None,
+                "balance_usd": r.balance_usd,
+                "equity_usd": r.equity_usd,
+                "source": r.source,
+            }
+            for r in rows
+        ],
+    })
 
 
 @app.post("/api/executor/accounts/{account_id}/assumed-balance")

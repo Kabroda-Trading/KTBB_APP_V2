@@ -271,25 +271,30 @@ async def place_traveler_entry_order(db: Session, account: ExecutorAccount, trav
         account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=resp)
 
 
-async def _cancel_expired_traveler_entry_order(
+async def cancel_traveler_entry_order(
     db: Session, account: ExecutorAccount, client: "executor_bitunix_client.BitunixClient",
     symbol: str, traveler_plan_row: TravelerPlan, order_row: ExecutorOrder,
+    close_reason: str = "EXPIRED",
 ) -> None:
-    """P3/P0-1 parity: cancels a real resting entry LIMIT whose parent
-    journey has already expired (see _plan_has_expired()). Race-safe,
+    """P3/P0-1 parity: cancels a real resting entry LIMIT. Generalized
+    2026-11-xx (desk-page build) from what used to be _cancel_expired_
+    traveler_entry_order() -- same body, close_reason parameterized so the
+    new single-order admin cancel route (main.py) can reuse it with
+    close_reason="MANUAL" instead of duplicating this logic. Race-safe,
     identical discipline to executor_live_engine.py's own
     _cancel_expired_entry_order(): a fresh get_order_detail() after the
     cancel confirms the real final state before committing to
-    CLOSED_EXPIRED; a real fill found there is handed back to the normal
-    fill path untouched; a cancel-call failure or an unconfirmed
-    successList never assumes success, both just retry next tick."""
+    CLOSED_{close_reason}; a real fill found there is handed back to the
+    normal fill path untouched; a cancel-call failure or an unconfirmed
+    successList never assumes success, both just retry next tick (or, for
+    the manual route, return an error to the caller instead of retrying)."""
     try:
         cancel_resp = await client.cancel_orders(symbol, [order_row.entry_exchange_order_id])
     except Exception as e:
         executor_accounts.write_audit(
-            db, "ERROR", f"cancel_orders call failed for expired traveler entry order {order_row.id}: {e}",
+            db, "ERROR", f"cancel_orders call failed for traveler entry order {order_row.id} ({close_reason}): {e}",
             account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system")
-        return
+        raise
 
     detail_resp = await client.get_order_detail(order_id=order_row.entry_exchange_order_id)
     if detail_resp.get("code") not in (0, None):
@@ -298,37 +303,56 @@ async def _cancel_expired_traveler_entry_order(
             f"get_order_detail returned a real API error confirming the cancel for order {order_row.id}: "
             f"code={detail_resp.get('code')} msg={detail_resp.get('msg')!r} -- CHECK THE EXCHANGE DIRECTLY",
             account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=detail_resp)
-        return
+        raise RuntimeError(f"could not confirm cancel for order {order_row.id} -- check the exchange directly")
     real_status = (detail_resp.get("data") or {}).get("status")
 
     if real_status == "FILLED":
         executor_accounts.write_audit(
             db, "ERROR",
-            f"cancel-on-expiry raced with a real fill on order {order_row.id} -- cancel not applied, "
+            f"cancel ({close_reason}) raced with a real fill on order {order_row.id} -- cancel not applied, "
             f"handing off to the normal fill-confirmation path instead",
             account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=detail_resp)
-        return
+        raise RuntimeError(f"order {order_row.id} was just filled on the exchange -- cannot cancel, already live")
 
     success_ids = {e.get("orderId") for e in (cancel_resp.get("data") or {}).get("successList") or []}
     if order_row.entry_exchange_order_id not in success_ids and real_status != "CANCELED":
         executor_accounts.write_audit(
             db, "ERROR",
             f"cancel_orders did not report orderId={order_row.entry_exchange_order_id} in successList for "
-            f"expired traveler order {order_row.id}, and get_order_detail shows status={real_status!r} -- "
+            f"traveler order {order_row.id} ({close_reason}), and get_order_detail shows status={real_status!r} -- "
             f"CHECK THE EXCHANGE DIRECTLY, will retry next tick",
             account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system", detail=cancel_resp)
-        return
+        raise RuntimeError(f"could not confirm cancel for order {order_row.id} -- check the exchange directly")
 
-    order_row.management_state = "CLOSED_EXPIRED"
+    order_row.management_state = f"CLOSED_{close_reason}"
     order_row.entry_status = real_status
-    order_row.close_reason = "EXPIRED"
+    order_row.close_reason = close_reason
+    order_row.exit_reason = close_reason
     order_row.closed_at = datetime.datetime.utcnow()
     executor_accounts.write_audit(
-        db, "ORDER_CANCELLED_ON_EXPIRY",
-        f"real traveler resting entry order {order_row.entry_exchange_order_id} cancelled -- the parent "
-        f"journey (traveler_plan_id={traveler_plan_row.id}) expired before the entry ever filled",
+        db, "ORDER_CANCELLED_ON_EXPIRY" if close_reason == "EXPIRED" else "ORDER_CANCELLED",
+        f"real traveler resting entry order {order_row.entry_exchange_order_id} cancelled ({close_reason}), "
+        f"traveler_plan_id={traveler_plan_row.id}",
         account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system",
         detail={"cancel_response": cancel_resp, "order_detail": detail_resp})
+
+
+async def _cancel_expired_traveler_entry_order(
+    db: Session, account: ExecutorAccount, client: "executor_bitunix_client.BitunixClient",
+    symbol: str, traveler_plan_row: TravelerPlan, order_row: ExecutorOrder,
+) -> None:
+    """Thin wrapper kept so the automated expiry caller (poll_traveler_
+    position(), below) is behaviorally untouched by the cancel_traveler_
+    entry_order() generalization above -- this swallows the exception
+    (the automated loop already relies on "no exception raised means retry
+    next tick," same as the old inline behavior); the new manual-cancel
+    route calls the generalized function directly and lets the exception
+    propagate instead, since a human clicking Cancel wants to see an error,
+    not a silent retry."""
+    try:
+        await cancel_traveler_entry_order(db, account, client, symbol, traveler_plan_row, order_row, close_reason="EXPIRED")
+    except Exception:
+        pass
 
 
 async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAccount, traveler_plan_row: TravelerPlan, order_row: ExecutorOrder) -> None:
@@ -568,6 +592,7 @@ async def _finalize_traveler_close(
         account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order_row.id, actor="system")
 
     pnl_usd = order_row.realized_pnl_r * (order_row.risk_dollars_used or 0.0)
+    order_row.realized_pnl_usd = pnl_usd
     executor_accounts.record_trade_result(db, account, pnl_usd, trade_plan_id=order_row.trade_plan_id, recorded_by="system")
 
     # 2026-09-23 -- the new management-event email (Andy's own ask: "the

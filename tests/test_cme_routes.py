@@ -363,6 +363,104 @@ def test_flatten_all_owner_succeeds_with_mocked_executor(env, monkeypatch):
     mock_flatten.assert_awaited_once()
 
 
+# ------------------------------------------------------------------ POST /api/cme/orders/{id}/cancel
+
+def _make_order(db, account_id, **overrides):
+    plan = CMEPlan(symbol="MNQ", date_key="2026-11-05", lock_time=datetime.datetime(2026, 11, 5, 15, 0, 0),
+                    status="ARMED", box=20.0, bo=4500.0, bd=4480.0)
+    db.add(plan)
+    db.flush()
+    defaults = dict(cme_plan_id=plan.id, account_id=account_id, mode="LIVE", symbol="MNQ",
+                     direction="LONG", contracts=1, management_state="WAITING_RETEST")
+    defaults.update(overrides)
+    order = CMEOrder(**defaults)
+    db.add(order)
+    db.commit()
+    return order
+
+
+def test_cme_cancel_order_non_owner_gets_403(env):
+    order = _make_order(env["db"], env["account_id"])
+    client = _login("cme_other@kabroda.com", "otherpass123")
+    resp = client.post(f"/api/cme/orders/{order.id}/cancel")
+    assert resp.status_code == 403
+
+
+def test_cme_cancel_order_no_such_order_404(env):
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post("/api/cme/orders/999999/cancel")
+    assert resp.status_code == 404
+
+
+def test_cme_cancel_order_owner_succeeds_with_mocked_executor(env, monkeypatch):
+    import cme_executor
+    order = _make_order(env["db"], env["account_id"])
+    mock_cancel = AsyncMock(return_value={"action": "cancelled", "order_id": order.id})
+    monkeypatch.setattr(cme_executor, "cancel_or_close_order", mock_cancel)
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/cme/orders/{order.id}/cancel")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["action"] == "cancelled"
+    mock_cancel.assert_awaited_once()
+
+
+def test_cme_cancel_order_non_owning_admin_gets_403(env, monkeypatch):
+    """_executor_owner_or_admin() is a misleading name -- confirmed via
+    its own docstring and this real test: Andy's 2026-09-07 ruling made
+    this domain full mutual isolation, with NO admin bypass at all (admin
+    only governs OTHER parts of the site). An admin who doesn't own this
+    account gets 403 here, same as any other non-owner -- same as every
+    other account-mutation route on this domain (kill-switch, flatten_all,
+    cme-config)."""
+    import cme_executor
+    order = _make_order(env["db"], env["account_id"])
+    monkeypatch.setattr(cme_executor, "cancel_or_close_order",
+                         AsyncMock(return_value={"action": "closed", "order_id": order.id}))
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.post(f"/api/cme/orders/{order.id}/cancel")
+    assert resp.status_code == 403
+
+
+def test_cme_cancel_order_already_terminal_returns_400(env, monkeypatch):
+    import cme_executor
+    order = _make_order(env["db"], env["account_id"], management_state="CLOSED_STOP")
+    # Not mocked -- exercises the REAL cancel_or_close_order() so this test
+    # proves the actual ValueError-on-terminal-state path, not a mock's promise.
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    resp = client.post(f"/api/cme/orders/{order.id}/cancel")
+    assert resp.status_code == 400
+
+
+def test_cme_cancel_order_second_call_after_success_400s_not_double_cancels(env, monkeypatch):
+    """Route-level version of the double-cancel race test in
+    test_cme_executor.py -- confirms the SAME real behavior through the
+    actual HTTP route, not just the underlying function."""
+    import cme_tradovate_client as tvc
+
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    ea.set_credentials(db, account, api_key="fake-user", api_secret="fake-pass", set_by="test@kabroda.com")
+    db.commit()
+    order = _make_order(db, env["account_id"], entry_exchange_order_id="777")
+
+    async def _fake_cancel(self, *a, **kw):
+        return True
+    monkeypatch.setattr(tvc.TradovateClient, "cancel_order", _fake_cancel)
+
+    client = _login("cme_owner@kabroda.com", "ownerpass123")
+    first = client.post(f"/api/cme/orders/{order.id}/cancel")
+    assert first.status_code == 200
+    assert first.json()["action"] == "cancelled"
+
+    second = client.post(f"/api/cme/orders/{order.id}/cancel")
+    assert second.status_code == 400
+
+
 # ------------------------------------------------------------------ POST /api/executor/accounts/{id}/tradovate-account-info
 
 def test_set_tradovate_account_info_persists_and_is_used_by_verify_auth(env, monkeypatch):

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from database import CMEPlan, CMEOrder, CMEConfig, CMETransition, ExecutorAccount
+from cme_signals import REACHABILITY_MAX
 
 SYMBOLS = ["MNQ", "MES"]
 _OPEN_MGMT_STATES = ("PENDING_ENTRY", "WAITING_RETEST", "FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
@@ -58,6 +59,17 @@ def get_public_cme_snapshot(db: Session) -> Dict[str, Any]:
                 "status": plan.status, "status_reason": plan.status_reason,
                 "box": plan.box, "reachability": plan.reachability,
                 "bo": plan.bo, "bd": plan.bd,
+                # Desk-page build (2026-11-xx) -- DeepSeek's "Executive CME
+                # Dashboard" spec (AGENT_LOG, 2026-11-05 third entry),
+                # verified against the real CMEPlan columns and
+                # cme_signals.REACHABILITY_MAX before adding: the checklist/
+                # verdict UI needs these to show WHY a lock armed or stood
+                # down, not just the bare status string.
+                "atr14": plan.atr14,
+                "reachability_max": REACHABILITY_MAX,
+                "box_max_allowed": round(plan.atr14 * REACHABILITY_MAX, 2) if plan.atr14 else None,
+                "stop_long": plan.stop_long, "stop_short": plan.stop_short,
+                "target_long": plan.target_long, "target_short": plan.target_short,
             }
 
         open_orders = _open_orders_for_symbol(db, symbol)
@@ -133,6 +145,12 @@ def get_admin_cme_status(db: Session, recent_transitions_limit: int = 20) -> Dic
             "execution_provider": (account.execution_provider or "tradovate") if account is not None else None,
             "crosstrade_account_id": account.crosstrade_account_id if account is not None else None,
             "tradovate_account_id": account.tradovate_account_id if account is not None else None,
+            # Desk-page build (2026-11-xx) -- kill_switch_engaged is already
+            # a generic ExecutorAccount column (not Traveler-specific), just
+            # never surfaced here before; the CME desk page needs its own
+            # pause display independent of Traveler/Alt Matrix's shared one.
+            "kill_switch_engaged": account.kill_switch_engaged if account is not None else None,
+            "kill_switch_reason": account.kill_switch_reason if account is not None else None,
         })
 
     for t in db.query(CMETransition).order_by(CMETransition.id.desc()).limit(recent_transitions_limit).all():

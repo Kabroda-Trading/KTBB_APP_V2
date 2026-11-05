@@ -294,3 +294,67 @@ def test_emergency_flatten_collects_errors_without_stopping(db, monkeypatch):
     assert result["cancelled"] == []
     assert len(result["errors"]) == 1
     assert result["errors"][0]["order_id"] == resting.id
+
+
+# ------------------------------------------------------------------ cancel_or_close_order() (desk-page build, 2026-11-xx)
+# The shared single-order helper behind both emergency_flatten()'s own
+# per-row loop (covered above) and the new POST /api/cme/orders/{id}/cancel
+# route (tests/test_cme_routes.py) -- unit-tested directly here so the
+# branch logic itself (not just the route wiring) is proven.
+
+def test_cancel_or_close_order_cancels_a_resting_entry(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
+    _patch(monkeypatch, cancel_order=_async(True))
+
+    result = _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
+    db.commit()
+
+    assert result == {"action": "cancelled", "order_id": order.id}
+    assert order.management_state == "CLOSED_MANUAL"
+    assert order.exit_reason == "MANUAL"
+    assert order.closed_at is not None
+
+
+def test_cancel_or_close_order_closes_an_open_position_instead(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4500.0)
+    _patch(monkeypatch, emergency_market_close=_async(True), get_positions=_async([]))
+
+    result = _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
+    db.commit()
+
+    assert result == {"action": "closed", "order_id": order.id}
+    assert order.management_state == "CLOSED_MANUAL"
+
+
+def test_cancel_or_close_order_rejects_an_already_terminal_order(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="CLOSED_STOP")
+
+    with pytest.raises(ValueError):
+        _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
+    # untouched -- never silently no-ops into a wrong state
+    assert order.management_state == "CLOSED_STOP"
+
+
+def test_cancel_or_close_order_double_cancel_second_call_raises_not_double_cancels(db, monkeypatch):
+    """The real financial-risk case this route must get right: two near-
+    simultaneous cancel requests against the same resting order must never
+    both succeed and both call cancel_order() against the real exchange."""
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
+    _patch(monkeypatch, cancel_order=_async(True))
+
+    first = _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
+    db.commit()
+    assert first["action"] == "cancelled"
+    assert order.management_state == "CLOSED_MANUAL"
+
+    # Second call sees the now-terminal state and must raise, not re-cancel.
+    with pytest.raises(ValueError):
+        _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
