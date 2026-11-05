@@ -9602,3 +9602,33 @@ Full suite 1077 passed after the fix. Site commits: `3d007a6`/`710e8d5` (fork's 
 This closes out the full CME Micro Futures build for tonight: schema, D1/D2/D3 logic, CrossTrade execution (place/cancel/full-bracket, all live-verified), Databento market data (live-verified), and now the Mission Control dashboard panel, audited. Remaining, not blocking: `contracts_cap` dial to 1 (Andy's own action), breakeven-amend/emergency-flatten paths unverified against a real fill (nothing has filled yet, by design).
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-11-05 (08:15 CT) — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open — P0 CME daily_atr14 blocker for 10:00 ET lock + Bitcoin resting order cross-lock gap
+
+Two operational items for immediate action/alignment before today's sessions:
+
+### 1. P0 CME Blocker: Hardcoded `daily_atr14 = None` in `cme_engine.py:111`
+* **Finding:** Line 111 of `cme_engine.py` hardcodes `daily_atr14 = None` with a TODO comment carried over from the initial stub:
+  ```python
+  # daily ATR14 would come from the same market-data layer -- left as a
+  # TODO alongside cme_market.py's own NotImplementedError gap; using a
+  # conservative always-fails-reachability sentinel until that's wired
+  # in means this never silently arms a trade on an unverified ATR.
+  daily_atr14 = None
+  plan_data = cme_signals.calculate_session_lock(symbol, bars_1m, daily_atr14)
+  ```
+* **Mechanism:** When `daily_atr14` is `None`, `cme_signals.reachability_ratio(box, None)` returns the safety sentinel `999.0`. Because `999.0 > 0.55` (`REACHABILITY_MAX`), `calculate_session_lock` flags the plan as `STAND_DOWN_UNREACHABLE`. Line 131 (`if plan.status != "ARMED": return`) terminates the lock tick immediately.
+* **Impact Today (10:00 AM EST / 09:00 AM CST):** When the D1 lock loop runs in ~45 minutes, Databento will successfully fetch the 30 1-minute bars, but the engine will automatically reject the lock on reachability and place zero orders.
+* **Fix Needed Before 10:00 AM EST:** Either (A) pass a realistic daily ATR fallback (e.g. `350.0` for MNQ, `65.0` for MES, matching historical mean range) into `calculate_session_lock`, or (B) wire a Databento `schema="ohlcv-1d"` 14-bar fetch in `cme_market.py` to calculate the canonical 14-day simple mean range (`market_data._calc_daily_atr14`).
+* **Config Update Confirmed:** Andy accessed the admin UI at 08:06 CST and updated `contracts_cap = 1` for `Andy_CME_Funds` (Account 17) — verified live in `cme_configs` row 2 (`updated_at: 14:06:27 UTC`).
+
+### 2. Bitcoin Desk: Unfilled Resting Limit Orders Still Live Across Session Lock
+* **Finding:** Yesterday's Bitcoin breakout (Plan 49, 2026-11-04) confirmed LONG at 08:35 CST, placing resting limit buy orders at `78,588.50`:
+  * Account 1 (`Andy_Bitunix`): Order 6028, Exchange Order ID `2117990321325232128`, 0.0655 BTC @ 78,588.50.
+  * Account 11 (`dawson_bitu`): Order 6029, Exchange Order ID `2117990324848439296`, 0.2277 BTC @ 78,588.50.
+  * Account 15 (`Terry_Bitunix`): Order 6030, Exchange Order ID `2117990328111566848`, 1.0160 BTC @ 78,588.50.
+* **Current State:** Because price ran away to `81,185.40` without touching `78,588.46` post-cross, `advance_waiting_touch()` remained in `WAITING_TOUCH`. Under Traveler rules, `WAITING_TOUCH` only terminates on touch-fill, opposite-trigger break (`77,132.39`), or the 7-day journey cap (`journey_cap_at: 2026-11-11 14:35:00`).
+* **The Gap:** Today at 08:00 CST (14:02 UTC), a new Session Lock (#292) and new Traveler Plan (#50) initialized (`BO: 80,680.93`, `BD: 79,503.08`, `WAITING_CROSS`). The resting orders from Plan 49 are **STILL OPEN AND RESTING ON BITUNIX** at `78,588.50`. If Plan 50 confirms a cross today, the engine will attempt to place a *second* resting entry order for each account.
+* **Recommendation:** CC/Andy should clarify whether unfilled resting limit orders from yesterday should be explicitly cancelled upon a new session lock (`NO_RETEST_EXPIRED`), or if Andy prefers to cancel the stale `78,588.50` orders manually on Bitunix to avoid maintaining dual resting orders ~2,000 pts apart.
