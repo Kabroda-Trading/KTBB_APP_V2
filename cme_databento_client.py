@@ -105,11 +105,30 @@ class DatabentoClient:
                     raise RuntimeError(f"Databento bars query failed ({resp.status}): {text}")
 
         bars = []
-        for line in text.strip().splitlines():
+        for i, line in enumerate(text.strip().splitlines()):
             if not line:
                 continue
-            record = json.loads(line)
-            ts_ns = int(record["ts_event"])
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Databento response line {i} is not valid JSON -- raw text: {line[:500]!r}") from e
+
+            # 2026-11-04 -- the flat top-level shape this was first built
+            # against turned out wrong on the first real call (KeyError:
+            # 'ts_event'). Databento's DBN encoding commonly nests the
+            # common record-header fields (ts_event/rtype/publisher_id/
+            # instrument_id) under a separate "hd" RecordHeader object --
+            # try that shape too before giving up, and if NEITHER matches,
+            # show the real record verbatim so the next fix is a read, not
+            # another guess.
+            header = record.get("hd") if isinstance(record.get("hd"), dict) else record
+            ts_raw = header.get("ts_event")
+            if ts_raw is None or any(k not in record for k in ("open", "high", "low", "close")):
+                raise RuntimeError(
+                    "Databento bar record didn't match either expected shape "
+                    f"(flat or nested under 'hd') -- real record was: {record}"
+                )
+            ts_ns = int(ts_raw)
             bars.append({
                 "ts_event": datetime.datetime.fromtimestamp(ts_ns / 1e9, tz=datetime.timezone.utc),
                 "open": record["open"] / 1e9,
