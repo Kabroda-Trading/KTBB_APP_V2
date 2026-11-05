@@ -9540,3 +9540,19 @@ A single global `DATABENTO_API_KEY` env var, not a per-`ExecutorAccount` credent
 **Still needed from Andy, not code:** sign up for a Databento account and get a real API key (same shape as the CrossTrade flow earlier today), set as `DATABENTO_API_KEY` on Render. The exact raw HTTP endpoint/verb for `timeseries.get_range` is flagged NOT YET LIVE-VERIFIED in the client's own header (Databento's docs document the Python SDK in detail but no worked raw-HTTP curl example was found) -- same category as every other such flag in this build, confirmed or corrected on the first real call.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (eighth entry, same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — cme_market.py's Databento path LIVE-CONFIRMED against the real account, not just shipped
+
+Two real-data corrections needed on the first actual call, same discipline as every other live-API item today -- found via the new admin test panel, not guessed in advance:
+1. `ts_event` came back nested under a `hd` object, not flat at the record's top level (Databento's DBN encoding convention) -- now tries both shapes.
+2. `open`/`high`/`low`/`close` came back as JSON strings, not numbers (`TypeError` on `/`) -- a common pattern for 64-bit fixed-point values in JSON. Now coerced through `int(...)` before descaling, which handles either a string or a real number.
+
+**Confirmed working end to end**, real response: MNQ, 2026-11-04, 30 bars (the full 9:30-10:00 ET window, zero gaps), realistic MNQ price levels (~28,400-28,800). This closes the market-data gap for real, not just in code -- the whole chain (Databento key -> real HTTP call -> JSON parsing -> DST-correct NY windowing -> 30 clean bars) is now proven against live data. Site commits `5e53ed4`, `774c132`, pushed. Full suite 1070 passed after each fix.
+
+**Updated checklist, what's actually left before this trades for real:**
+1. ~~Market data~~ -- DONE, live-confirmed above.
+2. A real order-placement test through CrossTrade -- still the one path never fired even once (reads only, so far).
+3. Dial `contracts_cap` back to 1 on Andy_CME_Funds before anything live.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
