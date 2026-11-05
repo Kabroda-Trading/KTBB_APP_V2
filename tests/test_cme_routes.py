@@ -140,6 +140,34 @@ def test_admin_status_allows_admin_and_returns_configs(env):
     assert body["configs"][0]["mes_enabled"] is False
 
 
+def test_admin_status_includes_execution_provider_fields(env):
+    """2026-11-05 -- execution_provider/crosstrade_account_id were added
+    to ExecutorAccount the night CrossTrade was wired in, but never
+    surfaced on this route -- the CME desk page needs them."""
+    db = env["db"]
+    account = db.query(ExecutorAccount).filter_by(id=env["account_id"]).first()
+    account.execution_provider = "crosstrade"
+    account.crosstrade_account_id = "72422359"
+    db.add(CMEConfig(account_id=env["account_id"], mnq_enabled=True, mes_enabled=False))
+    db.commit()
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/cme-status")
+    cfg = resp.json()["configs"][0]
+    assert cfg["execution_provider"] == "crosstrade"
+    assert cfg["crosstrade_account_id"] == "72422359"
+
+
+def test_admin_status_defaults_execution_provider_to_tradovate(env):
+    db = env["db"]
+    db.add(CMEConfig(account_id=env["account_id"], mnq_enabled=True, mes_enabled=False))
+    db.commit()
+
+    client = _login("cme_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/cme-status")
+    assert resp.json()["configs"][0]["execution_provider"] == "tradovate"
+
+
 # ------------------------------------------------------------------ GET /api/admin/cme-market-data-test
 
 def test_market_data_test_requires_admin(env):

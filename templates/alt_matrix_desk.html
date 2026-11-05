@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kabroda | Alt Matrix Desk</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        /* Page chrome matches the rest of the site's shared "espresso" base
+           (same :root vars Market Radar's own page shell uses) -- the data
+           cards below use the cool-slate palette instead, the same hybrid
+           Market Radar itself already does for its own radar rows. This is
+           Alt Matrix's own identity: it's never had a dedicated page
+           before tonight, so there's no prior look to preserve or clash
+           with -- chosen as a sibling of Market Radar's crypto-radar feel
+           (same asset class, same "live scan" purpose) rather than
+           inventing a third, unrelated visual language. */
+        :root {
+            --bg-deep: #140d09; --panel: #251a14; --border: #4d3526;
+            --green: #5e8c66; --yellow: #a67c3a; --red: #8c4a3a;
+            --white: #f2e3cf; --gray: #8a6f57;
+        }
+        body { background-color: #140d09; color: #f2e3cf; font-family: 'Inter', sans-serif; padding: 20px; margin: 0; }
+        .wrap { max-width: 1200px; margin: 40px auto; }
+        .hdr { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 28px; }
+        .hdr-title { font-family: 'JetBrains Mono'; font-size: 28px; color: #fff; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+        .hdr-sub { font-family: 'JetBrains Mono'; font-size: 11px; color: var(--gray); margin-top: 6px; }
+
+        .section-title { font-family: 'JetBrains Mono'; font-size: 13px; color: var(--gray); text-transform: uppercase; letter-spacing: 1.5px; margin: 32px 0 12px; }
+
+        /* Data cards -- Market Radar's own cool-slate component palette */
+        .sym-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 800px) { .sym-row { grid-template-columns: 1fr; } }
+        .sym-card { background: #0f172a; border: 1px solid #334155; border-left-width: 4px; border-radius: 6px; padding: 18px 20px; }
+        .sym-card.active { border-left-color: #22c55e; }
+        .sym-card.inactive { border-left-color: #64748b; }
+        .sym-name { font-family: 'JetBrains Mono'; font-size: 20px; font-weight: 800; color: #fff; }
+        .sym-badge { display: inline-block; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 4px; margin-left: 10px; vertical-align: middle; }
+        .b-armed, .b-filled, .b-trailing { background: #15803d; color: #dcfce7; }
+        .b-stand_down, .b-stand_down_unreachable, .b-no_entry, .b-not_entered { background: #475569; color: #e2e8f0; }
+        .b-none { background: #334155; color: #94a3b8; }
+        .row-line { display: flex; justify-content: space-between; font-family: 'JetBrains Mono'; font-size: 12px; color: #cbd5e1; padding: 4px 0; }
+        .row-line span:first-child { color: #64748b; }
+        .empty-note { font-family: 'JetBrains Mono'; font-size: 12px; color: #64748b; padding: 10px 0; }
+
+        /* Your-account action panel */
+        .acct-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px 20px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .acct-label { font-family: 'JetBrains Mono'; font-size: 13px; color: var(--white); }
+        .acct-toggles label { font-family: 'JetBrains Mono'; font-size: 12px; color: var(--gray); margin-right: 14px; }
+        .btn { background: #334155; border: 1px solid #475569; color: #e2e8f0; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; padding: 7px 14px; border-radius: 5px; cursor: pointer; text-transform: uppercase; }
+        .btn:hover { background: #475569; }
+        .btn-ok { background: #15803d; border-color: #16a34a; }
+        .btn-ok:hover { background: #16a34a; }
+
+        /* Admin detail table */
+        table.detail { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono'; font-size: 12px; }
+        table.detail th { text-align: left; color: #64748b; font-weight: 600; padding: 6px 10px; border-bottom: 1px solid #334155; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+        table.detail td { padding: 6px 10px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+        .r-pos { color: #4ade80; } .r-neg { color: #f87171; }
+        .transitions-feed { max-height: 280px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    {% include 'nav.html' %}
+
+    <div class="wrap">
+        <div class="hdr">
+            <div>
+                <h1 class="hdr-title">Alt Matrix Desk</h1>
+                <div class="hdr-sub">SOL/USDT &amp; ETH/USDT — 4H swing, Bitunix — live D1/D2/D3 state, your account controls, and (admin) full audit detail</div>
+            </div>
+            <div class="hdr-sub" id="asOfLabel">—</div>
+        </div>
+
+        <!-- ── PUBLIC: live plan/position state, no login required ── -->
+        <div class="section-title">Live Desk State</div>
+        <div class="sym-row" id="symRow">
+            <div class="sym-card inactive"><div class="empty-note">Loading…</div></div>
+            <div class="sym-card inactive"><div class="empty-note">Loading…</div></div>
+        </div>
+
+        <!-- ── YOUR ACCOUNT: enable/disable per-symbol, any logged-in owner ── -->
+        {% if is_logged_in %}
+        <div class="section-title">Your Account — Enable / Disable</div>
+        <div id="yourAccounts"><div class="empty-note">Loading your Bitunix accounts…</div></div>
+        {% endif %}
+
+        <!-- ── ADMIN: cross-account order/transition detail ── -->
+        {% if is_admin %}
+        <div class="section-title">Admin — Recent Orders &amp; Transitions</div>
+        <div id="adminOrders"><div class="empty-note">Loading…</div></div>
+        <div class="section-title">Admin — Transition Feed</div>
+        <div class="transitions-feed" id="adminTransitions"><div class="empty-note">Loading…</div></div>
+        {% endif %}
+    </div>
+
+    <script>
+    const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+    const IS_LOGGED_IN = {{ 'true' if is_logged_in else 'false' }};
+
+    async function api(path, opts) {
+        const resp = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+        return resp.json();
+    }
+    function escapeHtml(s) {
+        return (s === null || s === undefined) ? "" : String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
+    // Server timestamps are naive (.isoformat() with no "Z") -- without this,
+    // JS parses them as LOCAL time, not UTC (the exact bug caught live on
+    // executor_admin.html 2026-09-06). Same fix, same reasoning, reused here.
+    function _parseServerTimestamp(isoStr) {
+        if (!isoStr) return null;
+        const hasZone = /[Zz]$/.test(isoStr) || /[+-]\d{2}:?\d{2}$/.test(isoStr);
+        return new Date(hasZone ? isoStr : isoStr + "Z");
+    }
+
+    const SYMBOL_LABELS = { "SOLUSDT": "SOL/USDT", "ETHUSDT": "ETH/USDT" };
+
+    function _badgeClass(status) {
+        return "b-" + (status || "none").toLowerCase();
+    }
+
+    function _symbolCardHtml(key, label, s) {
+        const plan = s && s.plan;
+        const pos = s && s.position;
+        const active = !!pos;
+        let html = `<div class="sym-card ${active ? 'active' : 'inactive'}"><div class="sym-name">${label}`;
+        html += `<span class="sym-badge ${_badgeClass(plan ? plan.status : null)}">${plan ? escapeHtml(plan.status) : 'NO PLAN YET'}</span></div>`;
+        if (plan) {
+            if (plan.status_reason) html += `<div class="row-line"><span>Reason</span><span>${escapeHtml(plan.status_reason)}</span></div>`;
+            if (plan.ema21 != null) html += `<div class="row-line"><span>EMA21 / EMA55</span><span>${plan.ema21} / ${plan.ema55}</span></div>`;
+            if (plan.daily_close != null) html += `<div class="row-line"><span>Daily close / SMA200</span><span>${plan.daily_close} / ${plan.sma200}</span></div>`;
+            if (plan.signal_bar_time) html += `<div class="row-line"><span>Signal bar</span><span>${_parseServerTimestamp(plan.signal_bar_time).toLocaleString()}</span></div>`;
+        } else {
+            html += `<div class="empty-note">No signal bar evaluated yet today.</div>`;
+        }
+        if (pos) {
+            html += `<div class="row-line" style="margin-top:8px; border-top:1px dashed #334155; padding-top:8px;"><span>Position</span><span style="color:#4ade80;">${pos.direction} @ ${pos.entry_fill_price ?? '—'}</span></div>`;
+            html += `<div class="row-line"><span>Stop (BE: ${pos.be_amended ? 'yes' : 'no'})</span><span>${pos.stop_price ?? '—'}</span></div>`;
+            html += `<div class="row-line"><span>MFE</span><span>${pos.mfe_r != null ? pos.mfe_r.toFixed(2) + 'R' : '—'}</span></div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
+
+    async function loadSymbolRow() {
+        try {
+            const d = await api('/api/radar/alt-matrix-snapshot');
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            document.getElementById('symRow').innerHTML = Object.keys(SYMBOL_LABELS).map(
+                key => _symbolCardHtml(key, SYMBOL_LABELS[key], d.symbols[key])
+            ).join('');
+            document.getElementById('asOfLabel').textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+        } catch (e) {
+            console.error('Failed to load Alt Matrix snapshot:', e);
+            document.getElementById('symRow').innerHTML = '<div class="empty-note" style="color:#f87171;">Failed to load live desk state.</div>';
+        }
+    }
+
+    // ── YOUR ACCOUNT: reuses the already self-scoped /api/executor/accounts
+    // (zero admin bypass, same mutual-isolation rule every account route on
+    // this site already enforces) plus the existing per-account alt-matrix-
+    // config GET/POST routes -- zero new backend surface.
+    async function loadYourAccounts() {
+        if (!IS_LOGGED_IN) return;
+        const wrap = document.getElementById('yourAccounts');
+        try {
+            const d = await api('/api/executor/accounts');
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            const bitunixAccounts = (d.accounts || []).filter(a => (a.exchange || '').toLowerCase() !== 'tradovate');
+            if (!bitunixAccounts.length) {
+                wrap.innerHTML = '<div class="empty-note">No Bitunix accounts on your login yet.</div>';
+                return;
+            }
+            wrap.innerHTML = bitunixAccounts.map(a => `
+                <div class="acct-card" id="acctCard-${a.id}">
+                    <span class="acct-label">${escapeHtml(a.label || ('Account #' + a.id))}</span>
+                    <span class="acct-toggles">
+                        <label><input type="checkbox" id="amSol-${a.id}"> SOL/USDT</label>
+                        <label><input type="checkbox" id="amEth-${a.id}"> ETH/USDT</label>
+                    </span>
+                    <button class="btn btn-ok" onclick="saveAltMatrixToggle(${a.id})">SAVE</button>
+                    <span class="empty-note" id="amResult-${a.id}" style="display:none;"></span>
+                </div>
+            `).join('');
+            for (const a of bitunixAccounts) {
+                const cfg = await api(`/api/executor/accounts/${a.id}/alt-matrix-config`);
+                if (cfg.ok) {
+                    document.getElementById(`amSol-${a.id}`).checked = !!cfg.config.sol_enabled;
+                    document.getElementById(`amEth-${a.id}`).checked = !!cfg.config.eth_enabled;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load your accounts:', e);
+            wrap.innerHTML = '<div class="empty-note" style="color:#f87171;">Failed to load your accounts.</div>';
+        }
+    }
+
+    async function saveAltMatrixToggle(accountId) {
+        const sol_enabled = document.getElementById(`amSol-${accountId}`).checked;
+        const eth_enabled = document.getElementById(`amEth-${accountId}`).checked;
+        const resultEl = document.getElementById(`amResult-${accountId}`);
+        resultEl.style.display = 'inline';
+        const resp = await api(`/api/executor/accounts/${accountId}/alt-matrix-config`, {
+            method: 'POST', body: JSON.stringify({ sol_enabled, eth_enabled }),
+        });
+        if (!resp.ok) {
+            resultEl.textContent = resp.error || 'Save failed';
+            resultEl.style.color = '#f87171';
+            return;
+        }
+        resultEl.textContent = 'Saved.';
+        resultEl.style.color = '#4ade80';
+    }
+
+    // ── ADMIN: cross-account detail, same ctx["is_admin"] gate the backend
+    // route already enforces server-side -- not relaxed or re-derived here.
+    function _orderRowHtml(o) {
+        const r = o.realized_pnl_r;
+        const rCls = r == null ? '' : (r > 0 ? 'r-pos' : (r < 0 ? 'r-neg' : ''));
+        return `<tr>
+            <td>${o.id}</td><td>${escapeHtml(o.symbol)}</td><td>${escapeHtml(o.direction)}</td>
+            <td>${escapeHtml(o.management_state)}</td>
+            <td>${o.entry_fill_price ?? '—'}</td><td>${o.exit_price ?? '—'}</td>
+            <td class="${rCls}">${r != null ? r.toFixed(2) + 'R' : '—'}</td>
+            <td>${escapeHtml(o.exit_reason || '—')}</td>
+        </tr>`;
+    }
+
+    async function loadAdminDetail() {
+        if (!IS_ADMIN) return;
+        try {
+            const d = await api('/api/admin/alt-matrix-status');
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            const allOrders = [];
+            for (const key of Object.keys(d.symbols || {})) {
+                allOrders.push(...(d.symbols[key].recent_orders || []));
+            }
+            allOrders.sort((a, b) => b.id - a.id);
+            document.getElementById('adminOrders').innerHTML = allOrders.length
+                ? `<table class="detail"><thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>State</th><th>Entry</th><th>Exit</th><th>R</th><th>Exit Reason</th></tr></thead>
+                   <tbody>${allOrders.map(_orderRowHtml).join('')}</tbody></table>`
+                : '<div class="empty-note">No orders yet.</div>';
+
+            document.getElementById('adminTransitions').innerHTML = (d.recent_transitions || []).length
+                ? d.recent_transitions.map(t => `
+                    <div class="row-line"><span>${t.created_at ? _parseServerTimestamp(t.created_at).toLocaleString() : '—'}</span>
+                    <span>${escapeHtml(t.from_state || '—')} → ${escapeHtml(t.to_state || '—')}${t.price != null ? ' @ ' + t.price : ''}${t.realized_pnl_r != null ? ' (' + t.realized_pnl_r.toFixed(2) + 'R)' : ''}</span></div>
+                `).join('')
+                : '<div class="empty-note">No transitions logged yet.</div>';
+        } catch (e) {
+            console.error('Failed to load Alt Matrix admin detail:', e);
+            document.getElementById('adminOrders').innerHTML = '<div class="empty-note" style="color:#f87171;">Failed to load admin detail.</div>';
+        }
+    }
+
+    async function refreshAll() {
+        await Promise.all([
+            loadSymbolRow(),
+            loadYourAccounts(),
+            loadAdminDetail(),
+        ]);
+    }
+
+    refreshAll();
+    setInterval(loadSymbolRow, 30000);   // public state -- cheap, keep it fresh
+    setInterval(loadAdminDetail, 60000); // admin detail -- 60s is plenty, matches other radar pages' own cadence
+    </script>
+</body>
+</html>

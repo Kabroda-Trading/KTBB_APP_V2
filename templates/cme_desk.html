@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kabroda | CME Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        /* Same "espresso" palette family as suite_dashboard.html/
+           executor_admin.html's CME blocks -- deliberate visual continuity
+           with the Mission Control desk-row this page expands on, per
+           Andy's own "keep each desk's identity distinct" ruling (2026-11-05). */
+        .desk-wrap { max-width: 1400px; margin: 0 auto; padding: 40px 24px 80px; }
+        .desk-header { margin-bottom: 32px; border-bottom: 1px solid #4d3526; padding-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+        .desk-page-title { font-family: 'Playfair Display', serif; font-size: 34px; font-weight: 700; color: #f2e3cf; margin: 0; letter-spacing: -0.01em; }
+        .desk-page-subtitle { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8a6f57; text-transform: uppercase; letter-spacing: 2px; margin-top: 6px; }
+        .desk-ts { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b5345; }
+
+        .symbol-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 24px; }
+        @media (max-width: 1000px) { .symbol-row { grid-template-columns: 1fr; } }
+        .panel { background: #251a14; border: 1px solid #4d3526; border-radius: 8px; padding: 22px 24px; margin-bottom: 24px; }
+        .panel-title { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 600; color: #f2e3cf; margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid #4d3526; }
+        .symbol-name { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 800; color: #f2e3cf; margin-bottom: 4px; }
+        .symbol-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6b5345; margin-bottom: 16px; }
+        .row-line { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #c9a880; padding: 5px 0; border-bottom: 1px solid #2d1e15; }
+        .row-line:last-child { border-bottom: none; }
+        .row-line span:first-child { color: #8a6f57; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #301f17; color: #8a6f57; font-family: 'JetBrains Mono', monospace; font-size: 9px; padding: 10px 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; border-bottom: 1px solid #4d3526; text-align: left; }
+        td { padding: 9px 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px; border-bottom: 1px solid #3a2820; color: #c9a880; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #2d1e15; }
+
+        .cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+        .cfg-card { background: #1e140f; border: 1px solid #3a2820; border-radius: 6px; padding: 16px; }
+        .cfg-label { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 800; color: #f2e3cf; margin-bottom: 10px; }
+        .provider-badge { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .provider-crosstrade { background: rgba(94,140,102,0.15); border: 1px solid #5e8c66; color: #9fd1a6; }
+        .provider-tradovate  { background: rgba(166,124,58,0.15); border: 1px solid #a67c3a; color: #e0b87a; }
+
+        .manage-link { display: inline-block; margin-top: 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #c8813a; text-decoration: none; border: 1px solid #4d3526; padding: 8px 14px; border-radius: 6px; }
+        .manage-link:hover { background: #2d1e15; }
+
+        .s-armed { color: #5e8c66; font-weight: 800; }
+        .s-stand_down_unreachable, .s-no_cross, .s-no_retest { color: #94a3b8; font-weight: 800; }
+        .s-waiting_cross, .s-waiting_retest { color: #a67c3a; font-weight: 800; }
+        .s-pending_entry, .s-filled, .s-ratcheted { color: #c8813a; font-weight: 800; }
+        .s-closed_stop, .s-closed_error { color: #8c4a3a; font-weight: 800; }
+        .s-closed_t1, .s-closed_time_flush, .s-closed_be_stop { color: #5e8c66; font-weight: 800; }
+        .s-closed_manual { color: #6b5345; }
+
+        .empty-state { text-align: center; padding: 36px 20px; color: #5a3d2c; font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    {% include 'nav.html' %}
+
+    <div class="desk-wrap">
+        <div class="desk-header">
+            <div>
+                <h1 class="desk-page-title">CME Micro Futures Desk</h1>
+                <div class="desk-page-subtitle">MNQ / MES &mdash; Tradovate / CrossTrade &mdash; 10:00 ET lock</div>
+            </div>
+            <div class="desk-ts" id="deskTsLabel">&mdash;</div>
+        </div>
+
+        <div class="symbol-row" id="symbolRow">
+            <div class="panel"><div class="empty-state">Loading CME desk&hellip;</div></div>
+        </div>
+
+        {% if is_admin %}
+        <div class="panel" id="configPanel">
+            <div class="panel-title">Account Configuration</div>
+            <div class="cfg-grid" id="cfgGrid"><div class="empty-state">Loading&hellip;</div></div>
+            <a class="manage-link" href="/admin/executor">Manage CME Config &amp; Run Order Tests &rarr;</a>
+        </div>
+
+        <div class="panel" id="transitionsPanel">
+            <div class="panel-title">Recent Activity</div>
+            <div class="table-wrap" style="background:#1e140f; border:1px solid #3a2820; border-radius:6px; overflow:hidden;">
+                <table id="transitionsTable">
+                    <thead><tr><th>Time</th><th>Order</th><th>From</th><th>To</th><th>Price</th><th>R</th></tr></thead>
+                    <tbody><tr><td colspan="6" class="empty-state">Loading&hellip;</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <p class="symbol-sub" style="text-align:center; padding:20px 0;">Account-level configuration and trade history are visible to admins only &mdash; the symbol panels above are the same public view everyone sees.</p>
+        {% endif %}
+    </div>
+
+    <script>
+    const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+    async function api(path) {
+        const resp = await fetch(path);
+        return resp.json();
+    }
+
+    function escapeHtml(s) {
+        return (s === null || s === undefined) ? "" : String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
+
+    // Every CME timestamp is a naive UTC datetime serialized server-side
+    // via .isoformat() (no "Z") -- the SAME real bug already found and
+    // fixed once on executor_admin.html's own timestamps (2026-09-06).
+    // Appending "Z" when no zone marker is present is always correct here.
+    function parseServerTs(isoStr) {
+        if (!isoStr) return null;
+        const hasZone = /[Zz]$/.test(isoStr) || /[+-]\d{2}:?\d{2}$/.test(isoStr);
+        return new Date(hasZone ? isoStr : isoStr + "Z");
+    }
+
+    function fmtTs(isoStr) {
+        const d = parseServerTs(isoStr);
+        return d ? d.toLocaleString() : '&mdash;';
+    }
+
+    function statusClass(s) {
+        return 'status-' + String(s || '').toLowerCase();
+    }
+
+    // Mirrors cme_radar.py's own _OPEN_MGMT_STATES -- the admin route
+    // (/api/admin/cme-status) has no "position" key at all (only plan +
+    // recent_orders), unlike the public snapshot. Deriving the open-
+    // position view from recent_orders here instead of assuming a
+    // "position" field that only exists on the public response -- found
+    // and fixed before this was reported done: without this, an admin
+    // viewer would never see an open position at all.
+    const OPEN_MGMT_STATES = ['PENDING_ENTRY', 'WAITING_RETEST', 'FILLED', 'RATCHETED', 'ENTRY_FILLED_UNPROTECTED'];
+
+    function symbolPanelHtml(symbol, data) {
+        const plan = data && data.plan;
+        const orders = (data && data.recent_orders) || [];
+        // _order_detail()'s raw field is sl_price_current; the public
+        // snapshot renames it to stop_price -- normalize here so the
+        // display code below works against either shape identically.
+        const openOrder = orders.find(o => OPEN_MGMT_STATES.includes(o.management_state));
+        const pos = (data && data.position) || (openOrder && {
+            direction: openOrder.direction, entry_fill_price: openOrder.entry_fill_price,
+            stop_price: openOrder.sl_price_current, be_amended: openOrder.be_amended,
+            management_state: openOrder.management_state,
+        });
+
+        const fullName = symbol === 'MNQ' ? 'Micro E-mini Nasdaq-100' : 'Micro E-mini S&amp;P 500';
+        let html = `<div class="panel"><div class="symbol-name">${symbol}</div><div class="symbol-sub">${fullName}</div>`;
+
+        if (!plan) {
+            html += `<div class="row-line"><span>Today's lock</span><span>No lock yet</span></div>`;
+        } else {
+            html += `<div class="row-line"><span>Status</span><span class="s-${escapeHtml(String(plan.status||'').toLowerCase())}">${escapeHtml(plan.status || '&mdash;')}</span></div>`;
+            if (plan.status_reason) html += `<div class="row-line"><span>Reason</span><span>${escapeHtml(plan.status_reason)}</span></div>`;
+            if (plan.bo != null) html += `<div class="row-line"><span>Breakout / Breakdown</span><span>${plan.bo} / ${plan.bd}</span></div>`;
+            if (plan.box != null) html += `<div class="row-line"><span>Box / Reachability</span><span>${plan.box} / ${plan.reachability != null ? plan.reachability.toFixed(2) : '&mdash;'}</span></div>`;
+            html += `<div class="row-line"><span>Lock time</span><span>${fmtTs(plan.lock_time)}</span></div>`;
+        }
+
+        if (pos) {
+            html += `<div class="row-line"><span>Open position</span><span style="color:#c8813a;">${escapeHtml(pos.direction)} @ ${pos.entry_fill_price ?? '&mdash;'}</span></div>`;
+            html += `<div class="row-line"><span>Stop (BE: ${pos.be_amended ? 'yes' : 'no'})</span><span>${pos.stop_price ?? '&mdash;'}</span></div>`;
+            html += `<div class="row-line"><span>State</span><span class="s-${escapeHtml(String(pos.management_state||'').toLowerCase())}">${escapeHtml(pos.management_state || '&mdash;')}</span></div>`;
+        }
+
+        if (IS_ADMIN) {
+            html += `<div style="margin-top:14px; font-family:'JetBrains Mono',monospace; font-size:10px; color:#6b5345; text-transform:uppercase; letter-spacing:1px;">Recent orders</div>`;
+            if (!orders.length) {
+                html += `<div class="empty-state" style="padding:16px 0;">No orders yet for ${escapeHtml(symbol)}.</div>`;
+            } else {
+                html += `<table style="margin-top:8px;"><thead><tr><th>Dir</th><th>State</th><th>Entry</th><th>Exit</th><th>R</th></tr></thead><tbody>`;
+                orders.slice(0, 8).forEach(o => {
+                    const r = o.realized_pnl_r;
+                    const rColor = r > 0 ? '#5e8c66' : (r < 0 ? '#8c4a3a' : '#c9a880');
+                    html += `<tr><td>${escapeHtml(o.direction)}</td><td class="s-${escapeHtml(String(o.management_state||'').toLowerCase())}">${escapeHtml(o.management_state || '&mdash;')}</td>`
+                         + `<td>${o.entry_fill_price ?? '&mdash;'}</td><td>${o.exit_price ?? '&mdash;'} ${o.exit_reason ? '('+escapeHtml(o.exit_reason)+')' : ''}</td>`
+                         + `<td style="color:${rColor};">${r != null ? (r >= 0 ? '+' : '') + r.toFixed(2) + 'R' : '&mdash;'}</td></tr>`;
+                });
+                html += `</tbody></table>`;
+            }
+        }
+
+        html += `</div>`;
+        return html;
+    }
+
+    async function loadSymbols() {
+        try {
+            const d = IS_ADMIN ? await api('/api/admin/cme-status') : await api('/api/radar/cme-snapshot');
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            const row = document.getElementById('symbolRow');
+            row.innerHTML = ['MNQ', 'MES'].map(sym => symbolPanelHtml(sym, d.symbols[sym])).join('');
+        } catch (e) {
+            console.error('Failed to load CME symbols:', e);
+            document.getElementById('symbolRow').innerHTML = '<div class="panel"><div class="empty-state">Failed to load CME desk.</div></div>';
+        }
+    }
+
+    function providerBadge(provider) {
+        const p = provider || 'tradovate';
+        return `<span class="provider-badge provider-${escapeHtml(p)}">${escapeHtml(p)}</span>`;
+    }
+
+    async function loadConfigs() {
+        if (!IS_ADMIN) return;
+        try {
+            const d = await api('/api/admin/cme-status');
+            if (!d.ok) throw new Error(d.error || 'Unknown error');
+            const grid = document.getElementById('cfgGrid');
+            if (!d.configs || !d.configs.length) {
+                grid.innerHTML = '<div class="empty-state">No CME-enabled accounts yet.</div>';
+            } else {
+                grid.innerHTML = d.configs.map(c => `
+                    <div class="cfg-card">
+                        <div class="cfg-label">${escapeHtml(c.account_label || ('Account #' + c.account_id))} ${providerBadge(c.execution_provider)}</div>
+                        <div class="row-line"><span>Symbols</span><span>${c.mnq_enabled ? 'MNQ ' : ''}${c.mes_enabled ? 'MES' : ''}</span></div>
+                        <div class="row-line"><span>Risk budget</span><span>$${c.daily_risk_budget_usd ?? '&mdash;'}</span></div>
+                        <div class="row-line"><span>Contracts cap</span><span>${c.contracts_cap ?? '&mdash;'}</span></div>
+                        <div class="row-line"><span>Trailing DD</span><span>$${c.trailing_dd_limit_usd ?? '&mdash;'}</span></div>
+                        <div class="row-line"><span>Profit target</span><span>$${c.profit_target_usd ?? '&mdash;'}</span></div>
+                        <div class="row-line"><span>Mode</span><span>${escapeHtml(c.account_mode || '&mdash;')}</span></div>
+                    </div>
+                `).join('');
+            }
+            renderTransitions(d.recent_transitions || []);
+        } catch (e) {
+            console.error('Failed to load CME configs:', e);
+            document.getElementById('cfgGrid').innerHTML = '<div class="empty-state">Failed to load account configuration.</div>';
+        }
+    }
+
+    function renderTransitions(transitions) {
+        const tbody = document.querySelector('#transitionsTable tbody');
+        if (!transitions.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No activity yet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = transitions.map(t => `
+            <tr>
+                <td>${fmtTs(t.created_at)}</td>
+                <td>#${t.cme_order_id ?? t.cme_plan_id ?? '&mdash;'}</td>
+                <td>${escapeHtml(t.from_state || '&mdash;')}</td>
+                <td class="s-${escapeHtml(String(t.to_state||'').toLowerCase())}">${escapeHtml(t.to_state || '&mdash;')}</td>
+                <td>${t.price ?? '&mdash;'}</td>
+                <td>${t.realized_pnl_r != null ? t.realized_pnl_r.toFixed(2) + 'R' : '&mdash;'}</td>
+            </tr>
+        `).join('');
+    }
+
+    async function refreshAll() {
+        document.getElementById('deskTsLabel').textContent = new Date().toLocaleTimeString();
+        await Promise.all([loadSymbols(), loadConfigs()]);
+    }
+
+    refreshAll();
+    setInterval(refreshAll, 60000);   // same cadence Market Radar's own public snapshot polls at
+    </script>
+
+</body>
+</html>

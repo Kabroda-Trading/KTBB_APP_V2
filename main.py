@@ -1328,6 +1328,22 @@ async def api_metasignals_audit(limit: int = 20, db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e), "alerts": []})
 
 
+@app.get("/api/metasignals/admin-status")
+async def api_metasignals_admin_status(request: Request, db: Session = Depends(get_db)):
+    """Admin-only. Full ledger + full pillar-detail triage + webhook
+    health, feeding the enhanced MetaSignals Desk page --
+    metasignals_radar.get_admin_status() was already fully built but
+    had ZERO route exposing it anywhere; confirmed via grep, 2026-11-05."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    try:
+        return JSONResponse(metasignals_radar.get_admin_status(db))
+    except Exception as e:
+        print(f"[RADAR] metasignals-admin-status failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "account": None, "orders": [], "recent_triage": [], "ledger": []})
+
+
 class MetaSignalsConfigRequest(BaseModel):
     execution_mode: str
     linked_account_id: Optional[int] = None
@@ -2913,6 +2929,31 @@ async def page_executor_admin(request: Request, db: Session = Depends(get_db)):
         # roster page's own user list (main.py's admin_roster_page()).
         ctx["all_users"] = db.query(UserModel).order_by(UserModel.id).all()
     return _template_or_fallback(request, templates, "executor_admin.html", ctx)
+
+
+@app.get("/traveler-desk")
+async def page_traveler_desk(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return RedirectResponse("/login", status_code=303)
+    return _template_or_fallback(request, templates, "traveler_desk.html", ctx)
+
+
+@app.get("/cme-desk")
+async def page_cme_desk(request: Request, db: Session = Depends(get_db)):
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_logged_in"):
+        return RedirectResponse("/login", status_code=303)
+    return _template_or_fallback(request, templates, "cme_desk.html", ctx)
+
+
+@app.get("/alt-matrix-desk")
+async def page_alt_matrix_desk(request: Request, db: Session = Depends(get_db)):
+    # No login redirect -- the page itself degrades correctly for
+    # anonymous viewers (public snapshot only), same precedent as
+    # Market Radar's own public page.
+    ctx = get_user_context(request, db)
+    return _template_or_fallback(request, templates, "alt_matrix_desk.html", ctx)
 
 
 # ==============================================================================

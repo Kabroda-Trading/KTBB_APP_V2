@@ -43,6 +43,24 @@
         .ms-select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 7px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; max-width: 320px; }
         .btn { border: 1px solid #475569; color: #cbd5e1; background: transparent; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .btn:hover { background: #334155; color: #fff; }
+
+        /* System Health row -- added 2026-11-05: webhook secret status
+           (never the secret value) + last-signal-received, which is a
+           real-data proxy, not a true Pi-daemon heartbeat (none exists
+           -- confirmed via grep before building this, see
+           metasignals_radar.get_admin_status()'s own docstring). */
+        .ms-health { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+        .ms-health-chip { background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 8px 14px; font-family: 'JetBrains Mono'; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+        .ms-health-label { color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+        .ms-health-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot-ok { background: #34d399; }
+        .dot-warn { background: #fbbf24; }
+        .dot-bad { background: #f87171; }
+
+        .detail-btn { border: none; background: transparent; color: #38bdf8; cursor: pointer; font-family: 'JetBrains Mono'; font-size: 10px; text-decoration: underline; padding: 0; }
+        .detail-row td { background: #0b1220; padding: 12px 16px; white-space: normal; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px 18px; font-size: 11px; }
+        .detail-grid span.k { color: #64748b; margin-right: 6px; }
     </style>
 </head>
 <body>
@@ -67,6 +85,11 @@
             </div>
         </div>
         <div class="ms-subtitle" style="margin: -8px 0 18px;" id="ms-exec-note"></div>
+
+        <div class="ms-health" id="ms-health">
+            <div class="ms-health-chip"><span class="ms-health-label">Webhook Secret</span><span class="ms-health-dot" id="ms-health-secret-dot"></span><span id="ms-health-secret-text">--</span></div>
+            <div class="ms-health-chip"><span class="ms-health-label">Last Signal Received</span><span class="ms-health-dot" id="ms-health-signal-dot"></span><span id="ms-health-signal-text">--</span></div>
+        </div>
 
         <div class="ms-stats" id="ms-stats">
             <div class="ms-stat"><div class="ms-stat-label">Cash Balance</div><div class="ms-stat-value" id="st-cash">--</div></div>
@@ -111,9 +134,26 @@
             <div class="card-body">
                 <table>
                     <thead>
-                        <tr><th>Time</th><th>Symbol</th><th>Strategy</th><th>Timeframe</th><th>Verdict</th><th>Reason</th><th>Status</th></tr>
+                        <tr><th>Time</th><th>Symbol</th><th>Strategy</th><th>Timeframe</th><th>Verdict</th><th>Reason</th><th>Status</th><th>Detail</th></tr>
                     </thead>
-                    <tbody id="ms-triage"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+                    <tbody id="ms-triage"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Full Audit Ledger -- added 2026-11-05. metasignals_radar.
+             get_admin_status() already computed this (every cash/equity-
+             affecting event, with notes) but had no route exposing it --
+             confirmed via grep before building this; see
+             /api/metasignals/admin-status. -->
+        <div class="card">
+            <div class="card-header"><span class="card-title">Full Audit Ledger</span></div>
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr><th>Time</th><th>Event</th><th>Amount</th><th>Cash After</th><th>Equity After</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody id="ms-ledger"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -138,15 +178,30 @@
             return (s === null || s === undefined) ? '' : String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
         }
 
+        const OPEN_ORDER_STATES = ['PENDING_LIMIT', 'OPEN', 'HALF_CLOSED_BE'];
+
+        // 2026-11-05 -- switched from /api/metasignals/snapshot to the
+        // richer /api/metasignals/admin-status: this page is already
+        // admin-gated server-side (page_metasignals_desk()), so there's
+        // no new exposure in reading the admin-only endpoint -- it's a
+        // strict superset (full pillar detail per plan, every order not
+        // just the last 20 closed, the full ledger, webhook health).
+        // data.orders here isn't pre-split into open/closed the way the
+        // old snapshot's positions/trade_history were -- split client-side.
         async function refresh() {
             let data;
             try {
-                const resp = await fetch('/api/metasignals/snapshot');
+                const resp = await fetch('/api/metasignals/admin-status');
                 data = await resp.json();
             } catch (e) {
                 return;
             }
             if (!data || !data.ok || !data.account) return;
+
+            data.positions = (data.orders || []).filter(o => OPEN_ORDER_STATES.includes(o.state));
+            data.trade_history = (data.orders || []).filter(o => !OPEN_ORDER_STATES.includes(o.state));
+            renderHealth(data);
+            renderLedger(data.ledger || []);
 
             const a = data.account;
             document.getElementById('st-cash').textContent = fmtUsd(a.cash_balance);
@@ -215,9 +270,12 @@
 
             const triageBody = document.getElementById('ms-triage');
             if (!data.recent_triage || data.recent_triage.length === 0) {
-                triageBody.innerHTML = '<tr class="empty-row"><td colspan="7">No alerts received yet.</td></tr>';
+                triageBody.innerHTML = '<tr class="empty-row"><td colspan="8">No alerts received yet.</td></tr>';
             } else {
-                triageBody.innerHTML = data.recent_triage.map(p => `
+                _triagePlans = {};
+                triageBody.innerHTML = data.recent_triage.map(p => {
+                    _triagePlans[p.id] = p;
+                    return `
                     <tr>
                         <td>${p.created_at ? new Date(p.created_at + 'Z').toLocaleString() : '--'}</td>
                         <td>${esc(p.symbol)}</td>
@@ -226,9 +284,88 @@
                         <td><span class="badge ${p.triage_verdict === 'YES' ? 'badge-yes' : 'badge-no'}">${esc(p.triage_verdict)}</span></td>
                         <td>${esc(p.triage_reason)}</td>
                         <td><span class="badge badge-state">${esc(p.status)}</span></td>
+                        <td><button class="detail-btn" id="ms-triage-toggle-${p.id}" onclick="toggleTriageDetail(${p.id})">Show</button></td>
                     </tr>
-                `).join('');
+                    <tr class="detail-row" id="ms-triage-detail-${p.id}" style="display:none;"><td colspan="8"></td></tr>
+                `;
+                }).join('');
             }
+        }
+
+        // Full pillar detail per plan -- macro/RSI/extension/funding/ATR
+        // and the computed entry geometry, from the SAME admin-status
+        // payload (full=True plan dicts) -- no extra fetch per row.
+        let _triagePlans = {};
+
+        function toggleTriageDetail(planId) {
+            const row = document.getElementById(`ms-triage-detail-${planId}`);
+            const btn = document.getElementById(`ms-triage-toggle-${planId}`);
+            if (row.style.display === 'table-row') {
+                row.style.display = 'none';
+                btn.textContent = 'Show';
+                return;
+            }
+            const p = _triagePlans[planId] || {};
+            const fields = [
+                ['Side', p.side], ['Alert Price', p.alert_price], ['Soft Stop', p.alert_soft_stop],
+                ['Alert TP1/TP2/TP3', [p.alert_tp1, p.alert_tp2, p.alert_tp3].map(v => v ?? '--').join(' / ')],
+                ['BTC Daily Close', p.btc_daily_close], ['BTC SMA200', p.btc_sma200],
+                ['Asset Daily Close', p.asset_daily_close], ['Asset SMA200', p.asset_sma200], ['Asset EMA55', p.asset_ema55],
+                ['RSI (4H)', p.rsi_4h], ['Live Price @ Alert', p.live_price_at_alert], ['Extension (R)', p.extension_r],
+                ['Funding Rate', p.funding_rate], ['ATR14 (4H)', p.atr14_4h],
+                ['Entry Mode', p.entry_mode], ['Hard Stop', p.hard_stop], ['Risk (USD)', p.risk_usd],
+                ['Position Size', p.position_size], ['TP1 (computed)', p.tp1_price], ['TP2 (computed)', p.tp2_price],
+            ];
+            row.querySelector('td').innerHTML = `<div class="detail-grid">${
+                fields.map(([k, v]) => `<div><span class="k">${esc(k)}</span>${v === null || v === undefined ? '--' : esc(v)}</div>`).join('')
+            }</div>`;
+            row.style.display = 'table-row';
+            btn.textContent = 'Hide';
+        }
+
+        function renderHealth(data) {
+            const secretDot = document.getElementById('ms-health-secret-dot');
+            const secretText = document.getElementById('ms-health-secret-text');
+            if (data.webhook_secret_configured) {
+                secretDot.className = 'ms-health-dot dot-ok';
+                secretText.textContent = 'Configured';
+            } else {
+                secretDot.className = 'ms-health-dot dot-bad';
+                secretText.textContent = 'NOT CONFIGURED';
+            }
+
+            const signalDot = document.getElementById('ms-health-signal-dot');
+            const signalText = document.getElementById('ms-health-signal-text');
+            if (!data.last_raw_alert_at) {
+                signalDot.className = 'ms-health-dot dot-warn';
+                signalText.textContent = 'No signal ever received';
+                return;
+            }
+            const lastAt = new Date(data.last_raw_alert_at + 'Z');
+            const minutesAgo = (Date.now() - lastAt.getTime()) / 60000;
+            // Not a true heartbeat -- the Pi only POSTs when a real Discord
+            // alert fires, not on a fixed interval. A long gap here means
+            // "no alerts lately," not necessarily "daemon is down."
+            signalDot.className = 'ms-health-dot ' + (minutesAgo < 240 ? 'dot-ok' : (minutesAgo < 1440 ? 'dot-warn' : 'dot-bad'));
+            signalText.textContent = lastAt.toLocaleString() + ' (not a live heartbeat -- last real alert only)';
+        }
+
+        function renderLedger(ledger) {
+            const body = document.getElementById('ms-ledger');
+            if (!ledger || ledger.length === 0) {
+                body.innerHTML = '<tr class="empty-row"><td colspan="6">No ledger events yet.</td></tr>';
+                return;
+            }
+            body.innerHTML = ledger.map(r => `
+                <tr>
+                    <td>${r.created_at ? new Date(r.created_at + 'Z').toLocaleString() : '--'}</td>
+                    <td>${esc(r.event_type)}</td>
+                    <td class="${pnlClass(r.amount)}">${fmtUsd(r.amount)}</td>
+                    <td>${fmtUsd(r.cash_balance_after)}</td>
+                    <td>${fmtUsd(r.equity_after)}</td>
+                    <td style="white-space:normal;">${esc(r.notes)}</td>
+                </tr>
+            `).join('');
         }
 
         async function saveExecMode() {

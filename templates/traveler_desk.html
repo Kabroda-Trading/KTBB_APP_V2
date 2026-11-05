@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KABRODA // TRAVELER DESK</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css">
+    <style>
+        /* Distinct visual identity from suite_dashboard.html's warm "espresso"
+           palette and market_radar.html's cool slate -- a deep-space/terminal
+           blue-cyan, matching a "live Bitcoin terminal" feel. Per-desk visual
+           identity is Andy's own explicit call (2026-11-05), not drift. */
+        body { background: #04090f; color: #cdeaf5; font-family: 'Inter', sans-serif; padding: 20px; }
+        .tdesk-header { display: flex; justify-content: space-between; align-items: center; margin: 30px 0 18px; flex-wrap: wrap; gap: 12px; }
+        .tdesk-title { font-family: 'JetBrains Mono'; font-size: 15px; font-weight: 800; color: #7dd3fc; text-transform: uppercase; letter-spacing: 1.5px; }
+        .tdesk-sub { font-family: 'JetBrains Mono'; font-size: 11px; color: #3f6b7d; margin-top: 2px; }
+
+        .card { background: #081621; border: 1px solid #113045; border-radius: 8px; margin-bottom: 18px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        .card-header { background: #0d2335; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 800; color: #7dd3fc; text-transform: uppercase; letter-spacing: 1px; }
+        .card-body { padding: 16px 18px; }
+
+        .row-line { display: flex; justify-content: space-between; font-family: 'JetBrains Mono'; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #0d2335; }
+        .row-line:last-child { border-bottom: none; }
+        .row-line span:first-child { color: #3f6b7d; }
+        .row-line span:last-child { color: #cdeaf5; font-weight: 700; }
+
+        .badge { padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; text-transform: uppercase; }
+        .badge-ok { background: rgba(45,212,191,0.12); color: #2dd4bf; border: 1px solid rgba(45,212,191,0.35); }
+        .badge-warn { background: rgba(250,204,21,0.12); color: #facc15; border: 1px solid rgba(250,204,21,0.35); }
+        .badge-danger { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.35); }
+        .badge-neutral { background: rgba(148,163,184,0.12); color: #7dd3fc; border: 1px solid rgba(125,211,252,0.3); }
+
+        .btn { background: #0d2335; border: 1px solid #1a4a66; color: #7dd3fc; font-family: 'JetBrains Mono'; font-size: 10px; font-weight: 800;
+               letter-spacing: 0.5px; padding: 7px 12px; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
+        .btn:hover { background: #12354d; }
+        .btn-danger { background: #3a1414; border-color: #6b2323; color: #fca5a5; }
+        .btn-danger:hover { background: #4a1a1a; }
+        .btn-ok { background: #0f3a30; border-color: #1a6b55; color: #5eead4; }
+        .btn-ok:hover { background: #134a3d; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+        @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+        .empty { font-family: 'JetBrains Mono'; font-size: 11px; color: #3f6b7d; padding: 10px 0; }
+
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+        th { color: #3f6b7d; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #113045; }
+        td { padding: 9px 10px; border-bottom: 1px solid #0d2335; color: #cdeaf5; font-family: 'JetBrains Mono'; font-size: 12px; }
+        tr:last-child td { border-bottom: none; }
+        .r-pos { color: #2dd4bf; } .r-neg { color: #f87171; } .r-flat { color: #7dd3fc; }
+    </style>
+</head>
+<body>
+
+    {% include 'nav.html' %}
+
+    <div class="tdesk-header">
+        <div>
+            <div class="tdesk-title">Traveler Desk — BTC/USDT</div>
+            <div class="tdesk-sub" id="tdeskAccountLabel">GATE_TRAVELER / MGMT_E1_STACK · Bitunix</div>
+        </div>
+        <div id="tdeskControls" style="display:flex; gap:8px; align-items:center;"></div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header"><span class="card-title">Today's Session</span></div>
+            <div class="card-body" id="tdeskSession">
+                <div class="empty">Loading…</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><span class="card-title">Journey State</span></div>
+            <div class="card-body" id="tdeskJourney">
+                <div class="empty">Loading…</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent Closed Trades</span></div>
+        <div class="card-body" id="tdeskHistory">
+            <div class="empty">Loading…</div>
+        </div>
+    </div>
+
+    <script>
+    const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+    let _tdeskAccount = null;
+
+    async function _api(url, opts) {
+        const r = await fetch(url, opts || {});
+        return await r.json();
+    }
+
+    function _fmtUsd(n) {
+        if (n == null) return '—';
+        return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+    function _fmtR(n) {
+        if (n == null) return '—';
+        const v = Number(n);
+        return (v >= 0 ? '+' : '') + v.toFixed(2) + 'R';
+    }
+    function _rClass(n) { if (n == null) return 'r-flat'; return n > 0 ? 'r-pos' : (n < 0 ? 'r-neg' : 'r-flat'); }
+
+    // ── CONTROL STRIP (reuses existing executor account routes verbatim --
+    //    no new backend. Finds the first Bitunix account the logged-in user
+    //    can see, same self-scoped /api/executor/accounts every other page
+    //    tonight already relies on.) ──────────────────────────────────
+    async function loadControls() {
+        const d = await _api('/api/executor/accounts');
+        if (!d.ok) return;
+        const accts = (d.accounts || []).filter(a => (a.exchange || '').toLowerCase() === 'bitunix');
+        if (!accts.length) {
+            document.getElementById('tdeskControls').innerHTML = '<span class="empty">No Bitunix account configured for this user.</span>';
+            return;
+        }
+        _tdeskAccount = accts[0];
+        renderControls();
+    }
+
+    function renderControls() {
+        const a = _tdeskAccount;
+        document.getElementById('tdeskAccountLabel').textContent =
+            `GATE_TRAVELER / MGMT_E1_STACK · Bitunix · ${a.label || ('Account #' + a.id)}`;
+        const modeBadge = a.mode === 'LIVE' ? 'badge-danger' : 'badge-neutral';
+        const killBadge = a.kill_switch_engaged ? 'badge-danger' : 'badge-ok';
+        document.getElementById('tdeskControls').innerHTML = `
+            <span class="badge ${modeBadge}">${a.mode || '—'}</span>
+            <span class="badge ${killBadge}">${a.kill_switch_engaged ? 'KILL SWITCH ON' : 'ACTIVE'}</span>
+            ${a.kill_switch_engaged
+                ? `<button class="btn btn-ok" onclick="releaseKillSwitch()">RELEASE</button>`
+                : `<button class="btn btn-danger" onclick="engageKillSwitch()">ENGAGE KILL SWITCH</button>`}
+        `;
+    }
+
+    async function engageKillSwitch() {
+        if (!_tdeskAccount) return;
+        const reason = prompt('Reason for engaging the kill switch:');
+        if (reason === null) return;
+        const d = await _api(`/api/executor/accounts/${_tdeskAccount.id}/kill-switch`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({reason: reason || 'manual'}),
+        });
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        _tdeskAccount = d.account || _tdeskAccount;
+        _tdeskAccount.kill_switch_engaged = true;
+        renderControls();
+    }
+
+    async function releaseKillSwitch() {
+        if (!_tdeskAccount) return;
+        const d = await _api(`/api/executor/accounts/${_tdeskAccount.id}/kill-switch/release`, { method: 'POST' });
+        if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+        _tdeskAccount = d.account || _tdeskAccount;
+        _tdeskAccount.kill_switch_engaged = false;
+        renderControls();
+    }
+
+    // ── TODAY'S SESSION + JOURNEY STATE (reuses the existing public
+    //    traveler-snapshot route; admin-plan-status adds the D3 management
+    //    detail for admins -- same data traveler_radar.py already computes,
+    //    not duplicated here). ───────────────────────────────────────
+    async function loadSession() {
+        try {
+            const d = await _api('/api/radar/traveler-snapshot');
+            if (!d.ok) throw new Error(d.error || 'unknown error');
+            const l = d.levels || {};
+            document.getElementById('tdeskSession').innerHTML = `
+                <div class="row-line"><span>Locked</span><span>${d.locked ? 'Yes' : 'No'}</span></div>
+                <div class="row-line"><span>Anchor price (at lock)</span><span>${_fmtUsd(d.price)}</span></div>
+                <div class="row-line"><span>Breakout trigger (bo)</span><span>${_fmtUsd(l.breakout_trigger)}</span></div>
+                <div class="row-line"><span>Breakdown trigger (bd)</span><span>${_fmtUsd(l.breakdown_trigger)}</span></div>
+                <div class="row-line"><span>30m range high / low</span><span>${_fmtUsd(l.range30m_high)} / ${_fmtUsd(l.range30m_low)}</span></div>
+                <div class="row-line"><span>Daily resistance / support</span><span>${_fmtUsd(l.daily_resistance)} / ${_fmtUsd(l.daily_support)}</span></div>
+            `;
+        } catch (e) {
+            document.getElementById('tdeskSession').innerHTML = '<div class="empty" style="color:#f87171;">Failed to load session levels.</div>';
+            console.error('loadSession failed', e);
+        }
+    }
+
+    function _journeyBadge(status) {
+        if (!status) return 'badge-neutral';
+        if (status.startsWith('CLOSED')) return 'badge-ok';
+        if (status === 'WAITING_CROSS') return 'badge-neutral';
+        return 'badge-warn';
+    }
+
+    async function loadJourney() {
+        const el = document.getElementById('tdeskJourney');
+        try {
+            // Admins get the richer D3-management-included view; everyone
+            // else falls back to the public snapshot's own plan block --
+            // same two-route split traveler_radar.py/main.py already use
+            // elsewhere, not a new access model. The two routes' response
+            // shapes genuinely differ (confirmed by reading main.py directly,
+            // not assumed): the admin route returns {rows: [...]} (most
+            // recent TravelerPlan row, any symbol/date), the public one
+            // returns {plan: {...}|null} (today's row only).
+            const d = IS_ADMIN ? await _api('/api/admin/traveler-plan-status') : await _api('/api/radar/traveler-snapshot');
+            if (!d.ok) throw new Error(d.error || 'unknown error');
+            const p = IS_ADMIN ? (d.rows && d.rows[0]) : d.plan;
+            if (!p) { el.innerHTML = '<div class="empty">No journey yet today — waiting for a confirmed cross.</div>'; return; }
+            let html = `
+                <div class="row-line"><span>Status</span><span class="badge ${_journeyBadge(p.status)}">${p.status || '—'}</span></div>
+                <div class="row-line"><span>Direction</span><span>${p.direction || '—'}</span></div>
+                <div class="row-line"><span>Cross</span><span>${_fmtUsd(p.cross_price)} ${p.cross_time ? '@ ' + p.cross_time : ''}</span></div>
+                <div class="row-line"><span>Stop / T1</span><span>${_fmtUsd(p.stop_price)} / ${_fmtUsd(p.t1_price)}</span></div>
+            `;
+            if (p.fill_time) {
+                html += `<div class="row-line"><span>Filled</span><span>${_fmtUsd(p.fill_price)} @ ${p.fill_time}</span></div>`;
+            }
+            if (p.mgmt_state) {
+                html += `
+                    <div class="row-line"><span>Management state</span><span>${p.mgmt_state}</span></div>
+                    <div class="row-line"><span>Exit</span><span>${p.mgmt_exit_reason || '—'} @ ${_fmtUsd(p.mgmt_exit_price)}</span></div>
+                    <div class="row-line"><span>Realized</span><span class="${_rClass(p.mgmt_realized_pnl_r)}">${_fmtR(p.mgmt_realized_pnl_r)}${p.mgmt_exit_approximated ? ' (approx.)' : ''}</span></div>
+                `;
+            }
+            if (p.rearm_status) {
+                html += `<div class="row-line" style="margin-top:6px; border-top:1px solid #113045; padding-top:8px;"><span>Re-arm status</span><span>${p.rearm_status}</span></div>`;
+                if (p.rearm_mgmt_realized_pnl_r != null) {
+                    html += `<div class="row-line"><span>Re-arm realized</span><span class="${_rClass(p.rearm_mgmt_realized_pnl_r)}">${_fmtR(p.rearm_mgmt_realized_pnl_r)}</span></div>`;
+                }
+            }
+            el.innerHTML = html;
+        } catch (e) {
+            el.innerHTML = '<div class="empty" style="color:#f87171;">Failed to load journey state.</div>';
+            console.error('loadJourney failed', e);
+        }
+    }
+
+    // ── RECENT CLOSED TRADES (reuses the existing dashboard mas-history
+    //    route -- already scoped to the logged-in user, no new backend).
+    //    Real response shape confirmed by reading main.py directly:
+    //    trades: [{date_key, direction, status, exit_reason, realized_pnl}],
+    //    where realized_pnl is ALREADY a formatted string (e.g. "+0.52R")
+    //    or null -- not a raw number, so it's rendered as-is, not through
+    //    _fmtR(). The route returns the 50 most recent TravelerPlan rows
+    //    regardless of outcome (including ones that never got an order/
+    //    exit at all) -- filtered here to only rows that actually closed,
+    //    matching this panel's own "Recent Closed Trades" title. ──────
+    function _rClassFromString(s) {
+        if (!s) return 'r-flat';
+        return s.startsWith('-') ? 'r-neg' : (s.startsWith('+') ? 'r-pos' : 'r-flat');
+    }
+
+    async function loadHistory() {
+        const el = document.getElementById('tdeskHistory');
+        try {
+            const d = await _api('/api/dashboard/mas-history');
+            if (!d.ok) throw new Error(d.error || 'unknown error');
+            const rows = (d.trades || []).filter(t => t.realized_pnl != null).slice(0, 10);
+            if (!rows.length) { el.innerHTML = '<div class="empty">No closed trades yet.</div>'; return; }
+            el.innerHTML = `
+                <table>
+                    <thead><tr><th>Date</th><th>Direction</th><th>Exit Reason</th><th>R</th></tr></thead>
+                    <tbody>
+                        ${rows.map(t => `
+                            <tr>
+                                <td>${t.date_key || '—'}</td>
+                                <td>${t.direction || '—'}</td>
+                                <td>${t.exit_reason || '—'}</td>
+                                <td class="${_rClassFromString(t.realized_pnl)}">${t.realized_pnl}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } catch (e) {
+            el.innerHTML = '<div class="empty" style="color:#f87171;">Failed to load trade history.</div>';
+            console.error('loadHistory failed', e);
+        }
+    }
+
+    async function initAll() {
+        await Promise.all([
+            loadControls().catch(e => console.error('loadControls failed', e)),
+            loadSession().catch(e => console.error('loadSession failed', e)),
+            loadJourney().catch(e => console.error('loadJourney failed', e)),
+            loadHistory().catch(e => console.error('loadHistory failed', e)),
+        ]);
+    }
+    document.addEventListener('DOMContentLoaded', initAll);
+    setInterval(() => { loadSession(); loadJourney(); }, 60000);
+    </script>
+</body>
+</html>

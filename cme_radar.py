@@ -125,6 +125,14 @@ def get_admin_cme_status(db: Session, recent_transitions_limit: int = 20) -> Dic
             "daily_risk_budget_usd": cfg.daily_risk_budget_usd, "contracts_cap": cfg.contracts_cap,
             "trailing_dd_limit_usd": cfg.trailing_dd_limit_usd, "profit_target_usd": cfg.profit_target_usd,
             "high_water_mark_usd": account.high_water_mark_usd if account is not None else None,
+            # 2026-11-05 -- execution_provider/crosstrade_account_id were
+            # added to ExecutorAccount the same night CrossTrade was wired
+            # in as a working execution path, but never surfaced here --
+            # the CME desk page needs to show which path an account is
+            # actually using.
+            "execution_provider": (account.execution_provider or "tradovate") if account is not None else None,
+            "crosstrade_account_id": account.crosstrade_account_id if account is not None else None,
+            "tradovate_account_id": account.tradovate_account_id if account is not None else None,
         })
 
     for t in db.query(CMETransition).order_by(CMETransition.id.desc()).limit(recent_transitions_limit).all():

@@ -1437,6 +1437,48 @@ def test_audit_log_respects_limit_and_orders_most_recent_first(db):
     assert audit["alerts"][0]["symbol"] == "SOL2USDT"   # most recent first
 
 
+def test_admin_status_includes_the_full_ledger_and_every_order(db):
+    # get_admin_status() existed with zero route calling it anywhere
+    # before 2026-11-05 (confirmed via grep) -- the MetaSignals Desk page
+    # had no way to reach this data. Added /api/metasignals/admin-status
+    # and wired the desk page to it; this covers the data layer itself.
+    plan = _approved_plan(db)
+    engine.open_paper_trade(db, plan)   # _approved_plan() only creates the plan row, not the order
+    status = radar.get_admin_status(db)
+    assert status["ok"] is True
+    assert len(status["orders"]) == 1
+    assert len(status["recent_triage"]) == 1
+    assert status["recent_triage"][0]["hard_stop"] == pytest.approx(150.0)   # full detail, not trimmed
+    ledger_types = {r["event_type"] for r in status["ledger"]}
+    assert "INITIAL_DEPOSIT" in ledger_types
+    assert "ENTRY_FEE" in ledger_types
+
+
+def test_admin_status_reports_webhook_secret_configured(db, monkeypatch):
+    monkeypatch.setenv("METASIGNALS_SECRET_KEY", "test-secret")
+    assert radar.get_admin_status(db)["webhook_secret_configured"] is True
+
+
+def test_admin_status_reports_webhook_secret_not_configured(db, monkeypatch):
+    monkeypatch.delenv("METASIGNALS_SECRET_KEY", raising=False)
+    monkeypatch.delenv("METASIGNALS_INGEST_SECRET", raising=False)
+    assert radar.get_admin_status(db)["webhook_secret_configured"] is False
+
+
+def test_admin_status_last_raw_alert_at_is_none_when_nothing_received(db):
+    assert radar.get_admin_status(db)["last_raw_alert_at"] is None
+
+
+def test_admin_status_last_raw_alert_at_reflects_the_most_recent_row(db):
+    db.add(MetaSignalsRawAlert(channel_name="c1", content="first"))
+    db.commit()
+    newest = MetaSignalsRawAlert(channel_name="c2", content="second")
+    db.add(newest)
+    db.commit()
+    status = radar.get_admin_status(db)
+    assert status["last_raw_alert_at"] == newest.created_at.isoformat()
+
+
 # ============================================================== HTTP routes
 
 sys.modules.setdefault("yfinance", MagicMock())

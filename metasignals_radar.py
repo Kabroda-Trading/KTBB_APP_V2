@@ -20,12 +20,13 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from database import MetaSignalsPaperAccount, MetaSignalsPlan, MetaSignalsPaperOrder, MetaSignalsPaperLedger
+from database import MetaSignalsPaperAccount, MetaSignalsPlan, MetaSignalsPaperOrder, MetaSignalsPaperLedger, MetaSignalsRawAlert
 import metasignals_paper_engine
 
 _OPEN_STATES = ("PENDING_LIMIT", "OPEN", "HALF_CLOSED_BE")
@@ -134,11 +135,19 @@ def get_admin_status(db: Session, recent_ledger_limit: int = 30) -> Dict[str, An
     """Admin-only (caller checks login/is_admin) -- adds the full
     geometry on every recent plan and the raw ledger rows for real
     audit visibility, same "D3 close detail belongs in the admin
-    surface" split main.py's other admin radar routes already use."""
+    surface" split main.py's other admin radar routes already use.
+
+    This function existed with zero route calling it anywhere in
+    main.py before 2026-11-05 (confirmed via grep, not assumed) -- the
+    admin desk page had no way to reach the full ledger/pillar-detail
+    data it already computes. Added here, not in main.py, because it's
+    still a pure read (env var + one more query), consistent with this
+    module's own "pure DB reads" charter."""
     account = metasignals_paper_engine.get_or_init_paper_account(db)
     all_orders = db.query(MetaSignalsPaperOrder).order_by(MetaSignalsPaperOrder.id.desc()).limit(30).all()
     recent_plans = db.query(MetaSignalsPlan).order_by(MetaSignalsPlan.id.desc()).limit(30).all()
     ledger_rows = db.query(MetaSignalsPaperLedger).order_by(MetaSignalsPaperLedger.id.desc()).limit(recent_ledger_limit).all()
+    last_raw_alert = db.query(MetaSignalsRawAlert).order_by(MetaSignalsRawAlert.id.desc()).first()
 
     return {
         "ok": True,
@@ -154,4 +163,13 @@ def get_admin_status(db: Session, recent_ledger_limit: int = 30) -> Dict[str, An
             }
             for r in ledger_rows
         ],
+        # 2026-11-05 -- never the secret value itself, same discipline as
+        # every credential on this site. "last_raw_alert_at" is the real
+        # last-signal-received time, not a true heartbeat/ping -- the Pi
+        # only POSTs when a real Discord alert fires, not on a regular
+        # interval, so a long gap here means "no alerts," not necessarily
+        # "daemon down." Labeled as such in the UI, not implied as live
+        # health monitoring it isn't.
+        "webhook_secret_configured": bool(os.getenv("METASIGNALS_SECRET_KEY") or os.getenv("METASIGNALS_INGEST_SECRET")),
+        "last_raw_alert_at": _iso(last_raw_alert.created_at) if last_raw_alert else None,
     }
