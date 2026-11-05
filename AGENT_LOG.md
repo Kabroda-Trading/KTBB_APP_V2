@@ -9722,3 +9722,122 @@ Following Andy's strategic guidance on operational confidence, visibility, and m
   2. Mobile PWA packaging (manifest.json, mobile home screen launcher, full-screen UI without browser chrome).
   3. Real-time push notification architecture (In-app desktop toasts + instant mobile lock-screen alerts for Fills, Breakeven Ratchets, and Stand-Downs).
   4. Three-phase non-disruptive implementation roadmap for CC and design auditors.
+
+## 2026-11-05 (fifth entry) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — desk-page "run it from Kabroda" build shipped (site commit `2840941`); plus two process notes, not code
+
+Andy's ask after the four desk pages shipped earlier today: he shouldn't
+have to log into Bitunix/Tradovate/CrossTrade at all — balance, P&L,
+exports, and the ability to actually cancel/close something, all from
+Kabroda itself. Full plan written and executed (Claude Code plan-mode
+file, now superseded/cleared):
+
+1. **Per-order cancel/close** — `POST /api/executor/orders/{id}/cancel`
+   (Traveler), `/api/cme/orders/{id}/cancel` (CME), `/api/alt-matrix/
+   orders/{id}/cancel` (Alt Matrix). None of the three had a human-
+   reachable cancel route before today — Traveler's only caller of
+   `_cancel_expired_traveler_entry_order()` was the automated expiry
+   loop; CME's only cancel call was a deliberately-unfillable admin test
+   tool; Alt Matrix had no cancel entry point of any kind. Generalized
+   the Traveler function (`cancel_traveler_entry_order()`, parameterized
+   `close_reason`) and factored CME's cancel/close branch out of
+   `emergency_flatten()`'s own loop (`cancel_or_close_order()`) so the
+   single-order route and the fleet-wide flatten share one copy of the
+   logic. Every route has a real double-click/race test against a fake
+   exchange client proving a second near-simultaneous request 400s
+   instead of double-cancelling or double-closing.
+2. **CME desk**: its own kill-switch + Fleet Flatten control strip
+   (`kill_switch_engaged` turned out to already be a generic
+   `ExecutorAccount` column, not Traveler-specific — zero new backend,
+   just a UI gap) plus the Executive Cockpit redesign from your fourth
+   AGENT_LOG entry below this one (today, third entry) — verified your
+   field names against the real `CMEPlan` columns and
+   `cme_signals.REACHABILITY_MAX` before building, all correct.
+3. **Balance/P&L reporting** — new `/api/dashboard/cme-overview`,
+   `/cme-history`, `/alt-matrix-overview`, `/alt-matrix-history` (neither
+   desk had any aggregation before — `cme_radar.py`/`alt_matrix_radar.py`
+   only ever exposed raw recent-10-orders). Added a real `days=` date-
+   range filter to the existing Traveler/MetaSignals routes too — every
+   one of them was "last 50 rows" or "last 30 rows," never actually
+   date-windowed, despite "last 30 days" being the literal ask. New
+   `ExecutorAccountBalanceSnapshot` table + `account_balance_snapshot.py`
+   background loop (15 min) write a real balance/equity reading for
+   every active account, Bitunix and Tradovate/CrossTrade alike — CME's
+   existing `high_water_mark_usd` is a single overwritten peak with no
+   timestamps, and neither Traveler nor Alt Matrix had anything at all.
+4. **CSV exports** for all four desks, reusing the existing `csv.writer`/
+   `io.StringIO`/`Response` generation shape but a NEW auth check
+   (`_executor_owner_or_admin`, the same gate kill-switch/flatten already
+   use) — not the existing flat `GATE_LOG_EXPORT_API_KEY` gate, which is
+   a machine-to-machine secret, the wrong tool for a logged-in user's own
+   download button. `/api/export/traveler-log.csv` is untouched; the new
+   `/api/export/traveler-trades.csv` is a separate route.
+5. **"What's open everywhere"** panel on `suite_dashboard.html` — plain
+   data view, `Promise.all` over the four existing public snapshot
+   routes, zero AI. Andy was explicit this stays a simple status check,
+   not a chatbot, given this project's own history of removing LLM/agent
+   tooling twice already.
+
+**Two real bugs caught during the build, not after:**
+- `ExecutorOrder.realized_pnl_usd`/`entry_fee_usd` had the `ALTER TABLE`
+  migration in `init_db()` but no matching `Column` declaration on the
+  ORM class itself — a write to `order_row.realized_pnl_usd` would have
+  silently set a plain Python attribute that never reaches the database,
+  no error, no warning. Caught by a CSV-export test failing with "invalid
+  keyword argument," confirmed fixed with a direct round-trip test
+  (fresh session, fresh query) before trusting it.
+- Adding `tests/test_account_balance_snapshot.py` made it the
+  alphabetically-first test module in `tests/`, displacing
+  `test_admin_plan_status.py` — which has held that position, and with
+  it the one real SQLite file the WHOLE `pytest tests/` run actually
+  binds to (this suite's `database.py` reads `DATABASE_URL` once at
+  import time; every test file's own `os.environ["DATABASE_URL"] = ...`
+  after that point is a no-op), for the project's entire history. That
+  displacement caused 6 unrelated failures elsewhere in the full suite
+  that didn't reproduce when the file was run alone or combined with
+  just the new/related files — only in the full 1150-test run. Renamed
+  to `test_balance_snapshot_loop.py`; full suite confirmed green,
+  1150/1150, twice.
+
+**Process note, flagging rather than fixing silently**: partway through
+this build, whatever committed your fourth AGENT_LOG entry (just above)
+also swept up all of my uncommitted code changes at that point into the
+same commit (`00e4943`, titled after your blueprint entry, not my code).
+Checked the actual diff against what I'd written — content is intact and
+correct, confirmed by every test passing afterward — just misattributed.
+Left it as-is rather than rewriting local history without being asked;
+my own remaining work is in a separate, correctly-labeled commit
+(`2840941`). Worth being aware that committing broadly (e.g. `git add -A`)
+in a shared working tree can pick up the other agent's in-progress,
+uncommitted work — scoping commits to the specific files just touched
+avoids this.
+
+**Blueprint audit (your fourth entry, read directly from
+`kabroda_executive_lifecycle_and_mobile_blueprint.md` — it isn't in
+either repo, only in your own Antigravity artifact folder; flagging that
+the same way CLAUDE.md's own documented failure mode describes), done at
+Andy's explicit request before anyone builds on it twice:**
+- Phase 1's own action item "enrich snapshot routes" for CME is already
+  done (`cme_radar.py`'s `atr14`/`box_max_allowed`/stop/target fields,
+  item 2 above) — no need to redo it.
+- The push-notification triggers (fill, breakeven ratchet, exit) you
+  listed are exactly the points that already call `_notify_account(...)`
+  and send real emails today (`cme_executor.py`/`alt_matrix_executor.py`/
+  `executor_live_e1_engine.py`) — Phase 2 is a second delivery channel at
+  existing call sites, not new detection logic.
+- Genuinely new, no overlap: the unified `_renderLifecycleStepper(state)`
+  visual component across all four templates (CME has a status badge/
+  checklist/verdict now, but not this component, and Traveler/Alt
+  Matrix/the dashboard have neither); push delivery itself (Telegram/
+  Pushover/Web Push); PWA packaging (manifest.json, service worker, app
+  icon, mobile CSS).
+- Andy's own framing for push notifications, worth building to directly
+  rather than DeepSeek's four-fixed-triggers list: per-category opt-in
+  (e.g. "only tell me on entry," not every paper-trade/noise event mixed
+  together) — today's e-mail alerts already have exactly this "too much
+  mixed in" problem.
+
+Full suite: 1150 passed, 0 failed. Site commits `2840941` (the build)
+and this entry's own commit, both pushed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
