@@ -9899,3 +9899,13 @@ Following Andy's strategic guidance mapping his enterprise multi-agent Copilot S
      - "CME" (MNQ/MES) -> **TradFi Index Velocity Desk** (or **CME Futures Desk**)
      - "Alt Matrix" -> **Digital Asset Momentum Matrix**
      - "MetaSignals" -> **Tactical Signal Dispatch Desk**
+
+
+## 2026-11-05 (eighth entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Design Directive: Token-Light Communicator Pattern (Sub-200 Tokens via Deterministic Microservices)
+
+Andy issued an explicit operational requirement for the Multi-Agent Slack Gateway:
+- **Zero Heavy-Lifting by LLMs:** The AI model must NOT burn tokens doing math, calculating averages, parsing raw log lines, or querying raw candle data.
+- **Deterministic Backend Services:** Specialist "agents" in the database/backend are compiled Python/SQL functions that perform all calculations for free at database speeds, returning compact JSON facts (e.g. `{"trades":14, "win_rate":0.643, "baseline":0.62}`).
+- **Lightweight Communicator Role:** The AI's role is strictly conversational routing and formatting (~25 tokens in, ~50 tokens JSON context, ~120 tokens response = <200 tokens total per query).
+- Documented in Section 7 of `kabroda_multi_agent_slack_gateway_and_desk_naming_architecture.md`.
