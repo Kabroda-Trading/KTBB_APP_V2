@@ -569,9 +569,17 @@
             const remaining = cfg.trailing_dd_limit_usd;
             document.getElementById('deskDdRemaining').textContent = '$' + remaining.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' cushion';
             const fillEl = document.getElementById('deskDdFill');
-            const pct = Math.max(0, Math.min(100, (remaining / cfg.high_water_mark_usd) * 100));
-            fillEl.style.width = pct + '%';
-            fillEl.className = 'dd-gauge-fill ' + (remaining < 1000 ? 'dd-danger' : (remaining < cfg.trailing_dd_limit_usd ? 'dd-warn' : 'dd-ok'));
+            const cushionPct = cfg.high_water_mark_usd > 0 ? (remaining / cfg.high_water_mark_usd) * 100 : 0;
+            fillEl.style.width = Math.max(0, Math.min(100, cushionPct)) + '%';
+            // Color reflects how tight the configured cushion is relative
+            // to account size -- a static risk-profile read, not a live
+            // depletion state (nothing here changes until the next daily
+            // lock or a config edit, per the caveat above). Audit fix
+            // 2026-11-04: the original logic compared `remaining` to
+            // itself (cfg.trailing_dd_limit_usd), making the warn branch
+            // dead/unreachable -- this metric can now only ever render
+            // 'danger' or 'ok', never the state its own name implied.
+            fillEl.className = 'dd-gauge-fill ' + (cushionPct < 5 ? 'dd-danger' : (cushionPct < 10 ? 'dd-warn' : 'dd-ok'));
             document.getElementById('deskCmeDdGauge').style.display = 'block';
         } catch (e) {
             console.error('Failed to load CME trailing-DD gauge:', e);
@@ -600,20 +608,37 @@
         }
     }
 
+    // Audit fix 2026-11-04: the original version interpolated the raw
+    // account label directly into both innerHTML (unescaped -- a self-XSS
+    // risk if a label ever contained HTML, since account labels are
+    // user-settable via self-service account creation) and an inline
+    // onclick string (only quote-stripped, not properly escaped). Account
+    // labels never leave this user's own view here (/api/executor/accounts
+    // is already self-scoped, zero admin bypass), so the risk was narrow,
+    // but cheap to close properly: escape for display, and never embed the
+    // label in an attribute at all -- confirmFlatten() looks it up by id.
+    function _escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+
     function toggleFleetFlattenMenu() {
         const menu = document.getElementById('fleetFlattenMenu');
         const isOpen = menu.style.display === 'block';
         if (isOpen) { menu.style.display = 'none'; return; }
         menu.innerHTML = _fleetAccounts.map(a => `
             <div class="flatten-row">
-                <span>${a.label || ('Account #' + a.id)}</span>
-                <button class="flatten-confirm-btn" onclick="confirmFlatten(${a.id}, '${(a.label || '').replace(/'/g, "")}')">FLATTEN</button>
+                <span>${_escapeHtml(a.label || ('Account #' + a.id))}</span>
+                <button class="flatten-confirm-btn" onclick="confirmFlatten(${a.id})">FLATTEN</button>
             </div>
         `).join('') || '<div class="flatten-row">No Tradovate/CME accounts.</div>';
         menu.style.display = 'block';
     }
 
-    async function confirmFlatten(accountId, label) {
+    async function confirmFlatten(accountId) {
+        const acct = _fleetAccounts.find(a => a.id === accountId);
+        const label = (acct && acct.label) || ('Account #' + accountId);
         if (!confirm(`FLATTEN ${label}?\n\nThis cancels every open order and market-closes every open position on this account immediately. This cannot be undone.`)) return;
         try {
             const r = await fetch(`/api/tradovate/flatten_all?account_id=${accountId}`, { method: 'POST' });
