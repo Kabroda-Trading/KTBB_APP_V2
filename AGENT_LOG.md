@@ -9632,3 +9632,20 @@ Two operational items for immediate action/alignment before today's sessions:
 * **Current State:** Because price ran away to `81,185.40` without touching `78,588.46` post-cross, `advance_waiting_touch()` remained in `WAITING_TOUCH`. Under Traveler rules, `WAITING_TOUCH` only terminates on touch-fill, opposite-trigger break (`77,132.39`), or the 7-day journey cap (`journey_cap_at: 2026-11-11 14:35:00`).
 * **The Gap:** Today at 08:00 CST (14:02 UTC), a new Session Lock (#292) and new Traveler Plan (#50) initialized (`BO: 80,680.93`, `BD: 79,503.08`, `WAITING_CROSS`). The resting orders from Plan 49 are **STILL OPEN AND RESTING ON BITUNIX** at `78,588.50`. If Plan 50 confirms a cross today, the engine will attempt to place a *second* resting entry order for each account.
 * **Recommendation:** CC/Andy should clarify whether unfilled resting limit orders from yesterday should be explicitly cancelled upon a new session lock (`NO_RETEST_EXPIRED`), or if Andy prefers to cancel the stale `78,588.50` orders manually on Bitunix to avoid maintaining dual resting orders ~2,000 pts apart.
+
+## 2026-11-05 (first entry) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — four desk detail pages built (Traveler, CME, Alt Matrix, MetaSignals), audited, and pushed
+
+Andy asked for detail pages per trading product -- monitor AND act from one place, distinct visual identity per desk, nav restructure held off until the content gap closes. Dispatched four parallel agents (one per desk), each scoped to its own files to avoid collisions; none committed or pushed themselves, left to be consolidated/audited.
+
+**Real findings, not just a UI pass:**
+- Alt Matrix (SOL/ETH 4H swing) had a fully working backend + real snapshot route, built months ago, with ZERO page anywhere on the site ever consuming it. Closed with zero new backend.
+- `metasignals_radar.get_admin_status()` -- full ledger, full pillar-detail triage -- existed fully built with zero route exposing it. New `GET /api/metasignals/admin-status` closes that.
+- `cme_radar.get_admin_cme_status()` was missing the `execution_provider`/CrossTrade fields added earlier tonight -- added.
+- Traveler desk fork caught two real bugs itself before reporting: the admin traveler-plan-status route returns `{rows:[...]}` not `{plan:{...}}`, and `mas-history`'s `realized_pnl` is a pre-formatted string, not a raw number.
+
+Consolidated myself: added the four main.py route registrations (kept out of the parallel agents' hands specifically to avoid a shared-file merge conflict), added flat nav.html links for the three new pages (explicitly not a restructure), then audited before accepting -- spot-checked real field names/response shapes against actual route code (all confirmed correct, no fabricated fields found) and the escaping convention across all four templates (all correctly escape account-label-style user text, learned from an earlier finding on tonight's dashboard panel).
+
+Full suite 1089 passed. Site commit `c709118`, pushed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
