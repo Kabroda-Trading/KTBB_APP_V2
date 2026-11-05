@@ -1716,6 +1716,40 @@ from database import (
     ExecutorSizingPolicy as _ExecutorSizingPolicy, AltMatrixConfig as _AltMatrixConfig,
     CMEConfig as _CMEConfig,
 )
+
+
+@app.get("/api/admin/traveler-plan-orders/{traveler_plan_id}")
+async def api_admin_traveler_plan_orders(traveler_plan_id: int, request: Request, db: Session = Depends(get_db)):
+    """Admin-only, read-only. ALL ExecutorOrder rows for one TravelerPlan,
+    across every account -- /api/admin/traveler-plan-status's own
+    _select_mgmt_fields() deliberately picks only ONE 'best' order per
+    plan (LIVE preferred over DRY_RUN), which is right for that panel's
+    own purpose but cannot confirm multiple real accounts' orders
+    independently. Added 2026-11-05 for exactly that need: confirming,
+    for real, that a fix actually took effect across every account it
+    should have -- not assumed from the fix shipping."""
+    ctx = get_user_context(request, db)
+    if not ctx.get("is_admin"):
+        return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
+    try:
+        rows = db.query(_ExecutorOrder).filter_by(traveler_plan_id=traveler_plan_id).order_by(_ExecutorOrder.account_id).all()
+        out = []
+        for o in rows:
+            account = db.query(_ExecutorAccount).filter_by(id=o.account_id).first()
+            out.append({
+                "order_id": o.id, "account_id": o.account_id,
+                "account_label": account.label if account is not None else None,
+                "mode": o.mode, "direction": o.direction,
+                "management_state": o.management_state,
+                "entry_exchange_order_id": o.entry_exchange_order_id,
+                "entry_fill_price": o.entry_fill_price,
+                "close_reason": o.close_reason, "closed_at": o.closed_at.isoformat() if o.closed_at else None,
+                "exit_reason": o.exit_reason, "exit_price": o.exit_price,
+            })
+        return JSONResponse({"ok": True, "traveler_plan_id": traveler_plan_id, "orders": out})
+    except Exception as e:
+        print(f"[ADMIN] traveler-plan-orders failed: {e}")
+        return JSONResponse({"ok": False, "error": str(e)})
 import executor_accounts as _executor_accounts
 import executor_control as _executor_control
 import executor_plan_builder as _executor_plan_builder

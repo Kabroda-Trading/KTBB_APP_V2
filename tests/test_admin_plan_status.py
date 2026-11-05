@@ -429,3 +429,49 @@ def test_traveler_plan_status_mgmt_falls_back_to_most_recent_dry_run_when_no_liv
     assert row["mgmt_mode"] == "DRY_RUN"
     assert row["mgmt_state"] == "ENTRY_FILLED_ORDERS_PLACED"
     assert row["mgmt_exit_reason"] is None  # still open, no exit yet
+
+
+# ------------------------------------------------------------------ GET /api/admin/traveler-plan-orders/{id}
+# 2026-11-05 -- the route above (_select_mgmt_fields()) deliberately picks
+# only ONE "best" order per plan; it cannot confirm multiple real accounts'
+# orders independently (the exact need that came up for real: three
+# accounts, one plan, confirming a fix actually cancelled all three).
+
+def test_traveler_plan_orders_requires_admin(env):
+    client = _login("radar_nonadmin@kabroda.com", "plainpass123")
+    resp = client.get("/api/admin/traveler-plan-orders/1")
+    assert resp.status_code == 403
+
+
+def test_traveler_plan_orders_returns_every_account_independently(env):
+    plan = _make_plan(env["db"])
+    admin_user = env["db"].query(UserModel).filter_by(email="radar_admin@kabroda.com").first()
+    acct_a = _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+    acct_b = _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+    acct_c = _make_account(env["db"], admin_user.id, mode="LIVE", gate_profile="GATE_TRAVELER")
+    _make_order(env["db"], plan.id, acct_a.id, mode="LIVE", management_state="PENDING_ENTRY", entry_exchange_order_id="eo-a")
+    _make_order(env["db"], plan.id, acct_b.id, mode="LIVE", management_state="CLOSED_EXPIRED",
+                entry_exchange_order_id="eo-b", close_reason="EXPIRED", closed_at=dt.datetime(2026, 11, 5, 15, 0, 0))
+    _make_order(env["db"], plan.id, acct_c.id, mode="LIVE", management_state="CLOSED_EXPIRED",
+                entry_exchange_order_id="eo-c", close_reason="EXPIRED", closed_at=dt.datetime(2026, 11, 5, 15, 0, 1))
+
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get(f"/api/admin/traveler-plan-orders/{plan.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert len(body["orders"]) == 3   # all three, independently -- not just one "best" pick
+    states = {o["account_id"]: o["management_state"] for o in body["orders"]}
+    assert states[acct_a.id] == "PENDING_ENTRY"
+    assert states[acct_b.id] == "CLOSED_EXPIRED"
+    assert states[acct_c.id] == "CLOSED_EXPIRED"
+    reasons = {o["account_id"]: o["close_reason"] for o in body["orders"]}
+    assert reasons[acct_b.id] == "EXPIRED"
+    assert reasons[acct_a.id] is None   # still resting -- no close reason yet
+
+
+def test_traveler_plan_orders_empty_for_an_unknown_plan(env):
+    client = _login("radar_admin@kabroda.com", "adminpass123")
+    resp = client.get("/api/admin/traveler-plan-orders/999999")
+    assert resp.status_code == 200
+    assert resp.json()["orders"] == []
