@@ -9522,3 +9522,21 @@ Still not live-verified: order placement/modify/cancel/flatten response shapes (
 Andy is rotating the existing Tradovate credentials on the Andy_CME_Funds account to the CrossTrade Bearer token (via the same secure admin-UI flow, never chat) and will run VERIFY AUTH once Render redeploys.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-04 (seventh entry, same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — cme_market.py's real implementation shipped, via Databento, not direct Tradovate
+
+The last real blocker from the day's checklist review. Ruled out two paths first, with receipts, not assumption:
+
+1. **Direct Tradovate Market Data** — confirmed blocked by the SAME gate as trading. Tradovate's own docs show `accessToken` and `mdAccessToken` come from the identical `/auth/accesstokenrequest` call; that call already fails outright for this account (sixth entry, both repos). If it can't issue a trading token, it can't issue a market-data token -- not a second thing to test, the same confirmed-blocked thing.
+2. **CrossTrade** — confirmed to have no market-data surface on its Tradovate-linked (`/tv/`) side at all, checked directly against its real OpenAPI spec (every endpoint enumerated, zero bars/quotes). It DOES have `/v1/api/market/bars`/`/v1/api/market/quote`, but those route through CrossTrade's NinjaTrader 8 desktop add-on ("(from add-on)" in the spec itself, and live-confirmed by Andy's own CrossTrade dashboard showing "NT8 Add-On: Disconnected" alongside "Tradovate: Connected"). Andy's explicit call: not running a persistent NT8 desktop for this.
+
+**Resolution: Databento**, an officially CME-recognized data vendor (cmegroup.com lists it under Technology Vendor Services), independent of the Tradovate/CrossTrade brokerage relationship entirely -- confirmed against Databento's own docs (dataset, schema, symbology, field names, fixed-point price scaling all fetched directly, not guessed). DeepSeek's eighteenth entry independently landed on the same vendor as a fallback option -- converging signal, though their "Rule 2" (try Tradovate's MD socket first) was already moot by the time it posted, for the reason above.
+
+New `cme_databento_client.py` (thin HTTP I/O wrapper) + `cme_market.py` rewritten for real (DST-correct NY-local windowing reusing `cme_clock.py`'s proven technique; 1-minute-to-5-minute aggregation, since Databento has no native 5m schema). Both fetch functions dropped their `client` parameter entirely -- it was always just the trading client, never actually used for anything market-data-related once this was built; `cme_engine.py`'s 3 call sites updated, plus a real cost-efficiency fix along the way (skip the paid per-call fetch entirely when no account has a symbol enabled, instead of fetching and discarding).
+
+A single global `DATABENTO_API_KEY` env var, not a per-`ExecutorAccount` credential -- MES/MNQ price data doesn't depend on which trading account is live, unlike every other credential in this build. 17 new tests, full suite 1066 passed. Site commit `a2db9a4`, pushed.
+
+**Still needed from Andy, not code:** sign up for a Databento account and get a real API key (same shape as the CrossTrade flow earlier today), set as `DATABENTO_API_KEY` on Render. The exact raw HTTP endpoint/verb for `timeseries.get_range` is flagged NOT YET LIVE-VERIFIED in the client's own header (Databento's docs document the Python SDK in detail but no worked raw-HTTP curl example was found) -- same category as every other such flag in this build, confirmed or corrected on the first real call.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
