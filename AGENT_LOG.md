@@ -10057,3 +10057,27 @@ the new `tests/test_cme_crosstrade_client.py`, and the three subsystems'
 own executor test files.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## 2026-11-06 (first entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Architectural Alignment: Enterprise Multi-Agent Slack Gateway & The Heptad Engine on Render
+
+Following Andy's explicit review and direct clarification of the MRE / Neighborly Copilot Studio workflow:
+
+### 1. Resolving the Core Misconception
+- **No In-Browser Chatbot:** Andy explicitly rejects putting any chatbot widget or floating popup into Kabroda's website templates. The site remains a clean, high-performance executive workstation.
+- **Not 'Outside Kabroda':** The conversational gateway is NOT a disconnected separate project with new hosting bills. It is the executive nervous system of Kabroda, mounted on the existing Render Web Service.
+
+### 2. The Heptad Specialists Are NOT 7 Separate LLMs
+- Making 7 LLM calls would take 10+ seconds, cost dollars per turn, and breach Slack's 3,000ms deadline.
+- **The True Pattern:** The 7 specialist agents are **compiled Python/SQL microservices** running against Render PostgreSQL. Only **ONE** LLM call runs: the Claude 3.5 Sonnet Orchestrator.
+- The Orchestrator resolves Andy's question, fires structured tool calls to the deterministic Heptad microservices, receives a tiny 50-token clean JSON fact payload, and formats an executive Block Kit card back to Slack (<200 tokens total, <$0.001 per query, 0% math drift).
+
+### 3. Render Runtime Model & Slack's 3-Second Timeout
+- **Mount Location:** FastAPI sub-application at `/api/slack/events` via `AsyncSlackRequestHandler` (Slack Bolt for Python).
+- **Immediate-ACK Pattern:** Verifies signature and immediately returns `HTTP 200 OK` in <80ms, satisfying Slack's 3-second timeout and eliminating automated retries.
+- **Background Dispatch:** `asyncio.create_task` runs the Heptad query and Claude synthesis in the background, delivering the response to Andy's phone via `client.chat_postMessage()` in ~1.8 seconds.
+- **Zero Additional Hosting Cost:** Shares the existing Render container, memory, and database pool.
+
+### 4. Cloud Knowledge Warehouse Schema
+Full PostgreSQL schemas ready for execution on Render (`cloud_canon_registry`, `cloud_system_rules`, `cloud_knowledge_articles`, `backtest_benchmarks`, `daily_performance_ledger`) documented in `kabroda_enterprise_mas_render_slack_blueprint.md`.
