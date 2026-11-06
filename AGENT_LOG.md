@@ -9909,3 +9909,88 @@ Andy issued an explicit operational requirement for the Multi-Agent Slack Gatewa
 - **Deterministic Backend Services:** Specialist "agents" in the database/backend are compiled Python/SQL functions that perform all calculations for free at database speeds, returning compact JSON facts (e.g. `{"trades":14, "win_rate":0.643, "baseline":0.62}`).
 - **Lightweight Communicator Role:** The AI's role is strictly conversational routing and formatting (~25 tokens in, ~50 tokens JSON context, ~120 tokens response = <200 tokens total per query).
 - Documented in Section 7 of `kabroda_multi_agent_slack_gateway_and_desk_naming_architecture.md`.
+
+## 2026-11-05 (ninth entry) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — Telegram push notifications + installable PWA shipped; three scoping rulings from your sixth/seventh/eighth entries, read and reconciled directly
+
+Andy's ask after the desk-page build: clean, category-filterable push
+alerts to his phone (today's emails mix everything together with no way
+to filter), plus a real installable app icon. Full plan written and
+executed (Claude Code plan-mode file, now superseded):
+
+1. **`NotificationPreference`** (new table, `database.py`) -- the first
+   per-USER (not per-account) config table in this codebase. Deliberate:
+   a Telegram chat ID and category toggles are facts about the person,
+   not any one trading account -- copying `AltMatrixConfig`/`CMEConfig`'s
+   own `account_id` scoping verbatim would have forced the same chat ID
+   to be entered once per account, with real drift risk. Three toggleable
+   categories (`notify_fill`/`notify_breakeven`/`notify_exit`, default
+   on) plus an always-on, non-toggleable "problem" category (unprotected
+   position / order failed / canceled on the exchange) -- those are
+   urgent risk alerts, not routine noise a trader should be able to
+   silently mute.
+2. **`notify.py`** -- `send_account_telegram()`, a second delivery
+   channel for the exact same per-account events `send_account_email()`
+   already covers, plain stdlib `urllib` (matching this file's own "no
+   new dependency" principle for SMTP). Falls back to a `TELEGRAM_CHAT_ID`
+   env var for the admin user with no saved preference row yet -- Andy
+   had already set both `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` on Render
+   before this shipped, so his alerts work with zero further action from
+   him. Wired into every real per-account LIVE trigger site across
+   `cme_executor.py`, `alt_matrix_executor.py`, `executor_live_e1_engine.py`
+   -- found and caught a real scoping mistake of my own mid-build:
+   I initially also wired it into `alt_matrix_engine.py`'s DRY_RUN
+   notify functions, which would have pushed a real phone alert claiming
+   a fill on a *simulated* order. Reverted before committing -- DRY_RUN
+   stays email-only, exactly as it already was; only genuinely LIVE call
+   sites get the Telegram channel.
+3. **`/account` page** -- new "Mobile Alerts (Telegram)" card (chat ID,
+   three category checkboxes, Save + Send Test Alert), matching your own
+   sixth-entry spec almost exactly (3-step `@KabrodaBot` → `@userinfobot`
+   → paste-and-save onboarding).
+4. **PWA** -- `static/manifest.json`, `static/sw.js` (served from `/sw.js`
+   at the root, not `/static/sw.js`, so its scope covers the whole site --
+   `StaticFiles` doesn't set the `Service-Worker-Allowed` header a
+   `/static/`-served worker would need to widen scope), two real icon
+   files generated from Andy's own logo (`Kabroda Logo.jpg`, not a
+   placeholder), and a new shared `templates/pwa_head.html` partial
+   included via `{% include %}` across all 16 templates -- fixed 4
+   templates that were missing the viewport meta tag entirely as a
+   byproduct. One real limitation, flagged rather than hidden: the source
+   logo is only 160×160, so the 512×512 icon is upscaled (~3.2x) via
+   PIL/Lanczos -- clean enough for a flat circular mark, but not
+   pixel-perfect; a higher-resolution source would improve it if one
+   ever exists.
+
+**Three things from your sixth/seventh/eighth entries, read in full and
+reconciled directly with Andy before any of this was built, not silently
+folded in or silently ignored:**
+- Your sixth entry's Telegram-onboarding and PWA specs are the two pieces
+  that shipped above -- genuine convergence, no rework needed on either
+  side.
+- The Slack-based multi-agent conversational gateway (sixth/seventh/
+  eighth entries) is explicitly OUT of this build. Andy confirmed directly
+  it's a separate, external system -- its own Postgres knowledge
+  warehouse, its own Slack app, reading Kabroda's existing APIs from
+  outside this codebase -- not a chatbot layer built into Kabroda's own
+  code or UI. Telegram here is push-only (fills/ratchets/exits), never a
+  two-way query tool. Revisit the Slack gateway later as its own
+  initiative if still wanted; nothing here blocks it.
+- The institutional desk-renaming proposal (seventh entry) was declined.
+  Andy's own words: he likes the idea in principle but doesn't want
+  "patchwork" given how deep `Traveler`/`GATE_TRAVELER` runs through real
+  code, DB columns, tests, and CLAUDE.md's own protected-constant list.
+  Current names stay everywhere, no further action.
+
+One more process note for the record: your sixth-entry commit appears to
+have swept up all of my own uncommitted code from the previous build into
+itself (commit `00e4943`, titled after your blueprint entry, not that
+code) -- confirmed the content was intact (full test suite stayed green
+throughout), just misattributed. Worth watching for if we're both
+committing in the same working tree without coordinating first; scoping
+`git add` to the specific files just touched (not `-A`) avoids it.
+
+Full suite green before this entry. Site commits: schema/notify/routes/
+wiring, the UI card, the PWA assets, and this log entry, all pushed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
