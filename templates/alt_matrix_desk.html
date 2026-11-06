@@ -32,6 +32,14 @@
         /* Data cards -- Market Radar's own cool-slate component palette */
         .sym-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         @media (max-width: 800px) { .sym-row { grid-template-columns: 1fr; } }
+        /* Mobile build (2026-11-xx): .hdr never wrapped -- on a narrow
+           screen the long subtitle and the "Last refreshed" label ran
+           into each other on the same line with no break. */
+        @media (max-width: 600px) {
+            .hdr { flex-wrap: wrap; gap: 10px; }
+            .hdr > div:first-child { width: 100%; }
+            #asOfLabel { margin-top: 0; }
+        }
         .sym-card { background: #0f172a; border: 1px solid #334155; border-left-width: 4px; border-radius: 6px; padding: 18px 20px; }
         .sym-card.active { border-left-color: #22c55e; }
         .sym-card.inactive { border-left-color: #64748b; }

@@ -41,6 +41,15 @@
         .badge-closed-loss { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
 
         .ms-select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 7px 10px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; max-width: 320px; }
+
+        /* Mobile build (2026-11-xx): .ms-exec-controls never wrapped --
+           the 320px-wide select alone nearly filled a phone screen,
+           squeezing the Save button and mode badge off into a cut-off
+           sliver instead of onto their own line. */
+        @media (max-width: 480px) {
+            .ms-exec-controls { flex-wrap: wrap; width: 100%; }
+            .ms-select { max-width: 100%; flex: 1 1 100%; }
+        }
         .btn { border: 1px solid #475569; color: #cbd5e1; background: transparent; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .btn:hover { background: #334155; color: #fff; }
 
@@ -72,7 +81,7 @@
                 <h1 class="ms-title">MetaSignals Paper Desk</h1>
                 <div class="ms-subtitle">5-pillar triage gate &middot; live Bitunix price tracking</div>
             </div>
-            <div style="display:flex; align-items:center; gap:10px;">
+            <div class="ms-exec-controls" style="display:flex; align-items:center; gap:10px;">
                 <select id="ms-exec-mode" class="ms-select">
                     <option value="PAPER">Standalone Paper Trading Desk ($500 Virtual Balance)</option>
                     {% for acc in executor_accounts %}

@@ -5,7 +5,17 @@
             KABRODA
         </a>
 
-        <ul class="nav-links">
+        <!-- Mobile build (2026-11-xx): with 4 desk pages now in the nav on
+             top of everything already there, a flat horizontal list wraps
+             to 3-4 lines on a phone -- real screen real estate lost before
+             any page content shows (confirmed on a real device). Hidden
+             behind this toggle below ~768px; completely unused/invisible
+             at desktop widths, so desktop nav is pixel-identical to
+             before. -->
+        <button type="button" class="nav-toggle" id="navToggleBtn" aria-label="Toggle menu"
+                onclick="document.getElementById('navLinks').classList.toggle('nav-open'); this.classList.toggle('nav-toggle-open');">☰</button>
+
+        <ul class="nav-links" id="navLinks">
             {% if is_logged_in %}
                 <li><a href="/suite/radar" style="color: #06b6d4; font-weight: 800;">MARKET RADAR</a></li>
                 <li><a href="/suite/gravity-map" style="color: #eab308; font-weight: 800;">GRAVITY MAP</a></li>
@@ -31,7 +41,14 @@
                 {% if is_admin %}
                 <li><a href="/admin/metasignals" style="color: #f472b6; font-weight: 800;">METASIGNALS DESK</a></li>
                 <li class="dropdown">
-                    <a href="#" class="dropbtn" style="color: #facc15;">ADMIN ▼</a>
+                    <!-- Mobile build (2026-11-xx): this used to open on :hover
+                         only, which never fires on a touch device at all --
+                         a tap just followed href="#" to the top of the page.
+                         Added a click toggle (preventDefault stops that jump)
+                         alongside the existing hover behavior, so desktop
+                         hover-to-open is completely unchanged. -->
+                    <a href="#" class="dropbtn" style="color: #facc15;"
+                       onclick="event.preventDefault(); this.nextElementSibling.classList.toggle('show');">ADMIN ▼</a>
                     <div class="dropdown-content">
                         <!-- EXPORT DIAGNOSTIC VAULT link removed 2026-09-23
                              (V2 Crown retirement, Audit-AI surface retirement)
