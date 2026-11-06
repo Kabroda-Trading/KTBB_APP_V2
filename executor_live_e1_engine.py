@@ -65,6 +65,7 @@ import datetime
 import json
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import executor_accounts
@@ -357,6 +358,19 @@ async def _cancel_expired_traveler_entry_order(
         pass
 
 
+async def _fetch_traveler_entry_fee(client: "executor_bitunix_client.BitunixClient", order_row: ExecutorOrder) -> None:
+    """Looks up and writes order_row.entry_fee_usd for one freshly-filled
+    Traveler entry. Its own try/except -- a fee-fetch failure must never
+    block real stop placement. Shared between the real-time call site and
+    run_executor_live_e1_loop()'s 48h retry sweep."""
+    try:
+        fee_resp = await client.get_history_trades(order_id=order_row.entry_exchange_order_id)
+        trades = (fee_resp.get("data") or {}).get("tradeList") or []
+        order_row.entry_fee_usd = executor_bitunix_client.sum_trade_fees_and_pnl(trades)["fee"]
+    except Exception as e:
+        print(f"|| EXECUTOR LIVE E1 || entry fee-fetch failed for order {order_row.id}: {e}")
+
+
 async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAccount, traveler_plan_row: TravelerPlan, order_row: ExecutorOrder) -> None:
     """ONE on-demand check per tick, mirrors executor_live_engine.py's own
     check_entry_fill_and_place_exits() -- but places ONLY the exchange stop
@@ -444,6 +458,13 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
     order_row.position_id = position["positionId"]
     order_row.entry_fill_price = float(position["avgOpenPrice"])
     order_row.entry_fill_time = datetime.datetime.utcnow()
+
+    # Fee capture (2026-11-xx) -- deliberately BEFORE stop placement below:
+    # this file already tolerates one more network call before protection
+    # (_get_pair_precision does too), and placing it here guarantees the
+    # entry fee is captured even if the stop/T1 leg that follows
+    # subsequently fails (ENTRY_FILLED_UNPROTECTED).
+    await _fetch_traveler_entry_fee(client, order_row)
 
     pair = await _get_pair_precision(client, symbol)
     qty_str = executor_sizing.round_qty_to_precision(order_row.qty, pair["base_precision"])
@@ -682,6 +703,47 @@ async def _finalize_traveler_close(
                 print(f"|| EXECUTOR LIVE E1 (RE-ARM) || Watch-entered notification failed: {e}")
     except Exception as e:
         print(f"|| EXECUTOR LIVE E1 (RE-ARM) || start_rearm_watch_if_eligible failed for order {order_row.id}: {e}")
+
+    # Fee capture (2026-11-xx) -- deliberately the LAST thing this function
+    # does, after both the notify block above and the re-arm block above
+    # it. Exit-time has three real concerns ahead of this one: closure
+    # bookkeeping (must never roll back), the notify email/Telegram
+    # (time-sensitive), and the re-arm deadline computation (this file
+    # already fixed a real bug, 2026-10-11 above, from computing a time-
+    # sensitive value at the wrong moment). Fee capture is reporting-only
+    # and the least time-critical of the four -- a slow/failing exchange
+    # call here must never add latency ahead of either of the other two.
+    await _fetch_traveler_exit_fee(db, account, order_row, exit_reason)
+
+
+async def _fetch_traveler_exit_fee(db: Session, account: ExecutorAccount, order_row: ExecutorOrder, exit_reason: str) -> None:
+    """Looks up and writes order_row.exit_fee_usd for one closed Traveler
+    order. Its own try/except -- a failure here must never roll back the
+    real closure bookkeeping already committed for this tick. Shared
+    between the real-time call site above and run_executor_live_e1_loop()'s
+    48h retry sweep so the branching logic lives in exactly one place."""
+    try:
+        client = _client_for(account)
+        if exit_reason == "T1" and order_row.t1_exchange_order_id:
+            fee_resp = await client.get_history_trades(order_id=order_row.t1_exchange_order_id)
+            trades = (fee_resp.get("data") or {}).get("tradeList") or []
+            fee = executor_bitunix_client.sum_trade_fees_and_pnl(trades)["fee"]
+        elif exit_reason == "STOP" and order_row.sl_exchange_order_id:
+            fee_resp = await client.get_history_trades(order_id=order_row.sl_exchange_order_id)
+            trades = (fee_resp.get("data") or {}).get("tradeList") or []
+            fee = executor_bitunix_client.sum_trade_fees_and_pnl(trades)["fee"]
+        else:
+            # C5_EXIT / BBWP_EXIT / TIME -- flash_close_position(), no
+            # distinct order id. Query by position_id, excluding the
+            # entry fill's own trade(s) so it's never double-counted
+            # into the exit fee.
+            fee_resp = await client.get_history_trades(position_id=order_row.position_id)
+            trades = (fee_resp.get("data") or {}).get("tradeList") or []
+            fee = executor_bitunix_client.sum_trade_fees_and_pnl(
+                trades, exclude_order_ids=[order_row.entry_exchange_order_id])["fee"]
+        order_row.exit_fee_usd = fee
+    except Exception as e:
+        print(f"|| EXECUTOR LIVE E1 || exit fee-fetch failed for order {order_row.id} ({exit_reason}): {e}")
 
 
 async def _market_close_traveler_order(
@@ -983,6 +1045,37 @@ async def run_executor_live_e1_loop() -> None:
                     db.rollback()
                     print(f"|| EXECUTOR LIVE E1 (RE-ARM) || plan {traveler_plan_row.id} watch poll failed: {e}")
                     traceback.print_exc()
+
+            # Fee-capture retry sweep (2026-11-xx) -- reuses THIS loop's
+            # own cadence/per-row commit skeleton, no new background task.
+            # Catches entry/exit fees that weren't available yet at the
+            # real-time call site (lag, transient failure). After 48h with
+            # no fee found, a row naturally falls out of this query and
+            # stays permanently NULL -- an honest gap, not a guessed value.
+            fee_cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+            fee_retry_rows = db.query(ExecutorOrder).filter(
+                ExecutorOrder.mode == "LIVE",
+                ExecutorOrder.closed_at.isnot(None),
+                ExecutorOrder.closed_at > fee_cutoff,
+                or_(ExecutorOrder.entry_fee_usd.is_(None), ExecutorOrder.exit_fee_usd.is_(None)),
+            ).all()
+            for order_row in fee_retry_rows:
+                try:
+                    account = db.query(ExecutorAccount).filter_by(id=order_row.account_id).first()
+                    if account is None:
+                        continue
+                    client = _client_for(account)
+                    if order_row.entry_fee_usd is None and order_row.entry_exchange_order_id:
+                        await asyncio.wait_for(_fetch_traveler_entry_fee(client, order_row), timeout=_ROW_TIMEOUT_SECONDS)
+                    if order_row.exit_fee_usd is None and order_row.exit_reason:
+                        await asyncio.wait_for(
+                            _fetch_traveler_exit_fee(db, account, order_row, order_row.exit_reason),
+                            timeout=_ROW_TIMEOUT_SECONDS,
+                        )
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print(f"|| EXECUTOR LIVE E1 (FEE RETRY) || order {order_row.id} failed: {e}")
         except Exception as e:
             print(f"|| EXECUTOR LIVE E1 ENGINE ERROR || {e}")
             traceback.print_exc()

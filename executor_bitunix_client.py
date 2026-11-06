@@ -71,7 +71,7 @@ import random
 import string
 import time
 import weakref
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import aiohttp
 
@@ -159,6 +159,41 @@ def sign_request(nonce: str, timestamp: str, api_key: str, secret: str,
     return hashlib.sha256((digest + secret).encode("utf-8")).hexdigest()
 
 
+def sum_trade_fees_and_pnl(
+    trades: List[Dict[str, Any]], exclude_order_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, float]:
+    """Sums fee/realizedPNL across a get_history_trades() tradeList,
+    skipping any trade whose orderId is in exclude_order_ids -- the
+    de-dup guard a positionId-scoped (no distinct order id) contingency-
+    close query needs so the entry fill's own trade(s) are never
+    double-counted into the exit's fee/pnl. A precise order_id-scoped
+    query needs no exclusion (every returned trade IS that leg's own
+    fill(s)) -- callers pass exclude_order_ids=None there.
+
+    Bitunix's own `fee`/`realizedPNL` fields are undocumented past their
+    bare names (bitunix.com/api-docs/futures/trade/get_history_trades.html,
+    confirmed 2026-11-05) -- sign/accumulation semantics unverified beyond
+    the docs' own example showing a positive fee value. Verify against a
+    real fill before trusting this downstream."""
+    exclude = {str(x) for x in (exclude_order_ids or ()) if x}
+    total_fee = 0.0
+    total_pnl = 0.0
+    counted = 0
+    for t in trades:
+        if str(t.get("orderId")) in exclude:
+            continue
+        try:
+            total_fee += float(t.get("fee") or 0.0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            total_pnl += float(t.get("realizedPNL") or 0.0)
+        except (TypeError, ValueError):
+            pass
+        counted += 1
+    return {"fee": total_fee, "realized_pnl": total_pnl, "trade_count": float(counted)}
+
+
 class BitunixClient:
     """Constructed per-account (api_key/api_secret from executor_accounts.
     get_decrypted_credentials() -- never called from anywhere but
@@ -214,6 +249,37 @@ class BitunixClient:
         if client_id:
             query["clientId"] = client_id
         return await self._request("GET", "/api/v1/futures/trade/get_order_detail", query=query)
+
+    async def get_history_trades(
+        self, order_id: Optional[str] = None, symbol: Optional[str] = None,
+        position_id: Optional[str] = None, start_time: Optional[int] = None,
+        end_time: Optional[int] = None, skip: Optional[int] = None, limit: int = 100,
+    ) -> Dict[str, Any]:
+        """GET /api/v1/futures/trade/get_history_trades -- verified against
+        bitunix.com/api-docs/futures/trade/get_history_trades.html,
+        2026-11-05. Per-FILL (own tradeId, distinct from orderId), unlike
+        get_order_detail's per-ORDER status -- THE source for real fee/
+        realized-pnl data (fee-capture build, 2026-11-xx). All filters
+        optional on the wire; every real caller here passes order_id OR
+        position_id (never neither) to avoid pulling this account's
+        entire trade ledger. Response: data.tradeList[], each item
+        carrying tradeId/orderId/symbol/qty/price/side/orderType/fee
+        (string, undocumented sign/units)/realizedPNL (string)/ctime
+        (int64 ms)/roleType (TAKER/MAKER). limit max 100 per the docs."""
+        query: Dict[str, Any] = {"limit": limit}
+        if order_id:
+            query["orderId"] = order_id
+        if symbol:
+            query["symbol"] = symbol
+        if position_id:
+            query["positionId"] = position_id
+        if start_time is not None:
+            query["startTime"] = start_time
+        if end_time is not None:
+            query["endTime"] = end_time
+        if skip is not None:
+            query["skip"] = skip
+        return await self._request("GET", "/api/v1/futures/trade/get_history_trades", query=query)
 
     async def get_position(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """GET /api/v1/futures/position/get_pending_positions -- verified

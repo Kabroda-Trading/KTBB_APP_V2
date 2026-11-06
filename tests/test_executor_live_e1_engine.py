@@ -139,9 +139,13 @@ def _close_position_response():
     return {"code": 0, "data": {}, "msg": "Success"}
 
 
+def _history_trades_response(trades):
+    return {"code": 0, "data": {"tradeList": trades}, "msg": "Success"}
+
+
 def _install(monkeypatch, **fakes):
     for name in ("get_position", "get_trading_pairs", "place_order", "get_order_detail",
-                 "set_position_tpsl", "cancel_orders", "close_position"):
+                 "set_position_tpsl", "cancel_orders", "close_position", "get_history_trades"):
         fake = fakes.get(name)
         if fake is None:
             async def _unexpected(self, *a, __name=name, **kw):
@@ -1717,3 +1721,218 @@ def test_db_rejects_a_second_primary_order_for_the_same_plan_and_account(db):
     with pytest.raises(Exception):
         _order_row(db, account, plan, is_rearm=False)
     db.rollback()
+
+
+# ------------------------------------------------------------------ fee capture (2026-11-xx)
+
+def test_entry_fill_sets_entry_fee_usd(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="FILLED")),
+             get_position=_async(_one_position_response()),
+             get_trading_pairs=_async(_trading_pairs_response()),
+             set_position_tpsl=_async(_tpsl_response()),
+             place_order=_async(_place_order_response(order_id="t1-order")),
+             get_history_trades=_async(_history_trades_response([{"orderId": "entry-order-1", "fee": "0.01"}])))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.entry_fee_usd == pytest.approx(0.01)
+
+
+def test_entry_fee_fetch_failure_does_not_block_stop_placement(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+
+    async def _raise(self, *a, **kw):
+        raise RuntimeError("exchange unavailable")
+
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="FILLED")),
+             get_position=_async(_one_position_response()),
+             get_trading_pairs=_async(_trading_pairs_response()),
+             set_position_tpsl=_async(_tpsl_response()),
+             place_order=_async(_place_order_response(order_id="t1-order")),
+             get_history_trades=_raise)
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.entry_fee_usd is None
+    assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"   # stop/T1 still placed
+
+
+def test_t1_exit_sets_exit_fee_usd_from_the_t1_order_id(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    calls = []
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        calls.append({"order_id": order_id, "position_id": position_id})
+        return _history_trades_response([{"orderId": "t1-1", "fee": "0.05"}])
+
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1-1")),
+             get_history_trades=_history)
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_T1"
+    assert order.exit_fee_usd == pytest.approx(0.05)
+    assert calls == [{"order_id": "t1-1", "position_id": None}]
+
+
+def test_stop_exit_sets_exit_fee_usd_from_the_stop_order_id(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1",
+                        sl_exchange_order_id="sl-1")
+    calls = []
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        calls.append({"order_id": order_id, "position_id": position_id})
+        return _history_trades_response([{"orderId": "sl-1", "fee": "0.07"}])
+
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             get_history_trades=_history)
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_STOP"
+    assert order.exit_fee_usd == pytest.approx(0.07)
+    assert calls == [{"order_id": "sl-1", "position_id": None}]
+
+
+def test_c5_exit_sets_exit_fee_usd_via_position_id_excluding_entry_order(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1",
+                        entry_exchange_order_id="entry-order-1")
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    calls = []
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        calls.append({"order_id": order_id, "position_id": position_id})
+        return _history_trades_response([
+            {"orderId": "entry-order-1", "fee": "0.02"},   # must be excluded
+            {"orderId": "close-order-9", "fee": "0.03"},
+        ])
+
+    _install(monkeypatch,
+             get_position=_async_seq([_one_position_response(), _no_position_response()]),
+             close_position=_async(_close_position_response()),
+             get_order_detail=_async(_order_detail_response(status="NEW", order_id="t1-1")),
+             cancel_orders=_async(_cancel_orders_response(order_id="t1-1")),
+             get_history_trades=_history)
+
+    async def _fake_1h(symbol, target_bars=200):
+        return _fake_candles()
+
+    async def _fake_4h(symbol, target_bars=200):
+        return _fake_candles()
+
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_1h", _fake_1h)
+    monkeypatch.setattr(e1e.market_data, "fetch_bitunix_4h", _fake_4h)
+    monkeypatch.setattr(e1e, "_current_live_price", lambda symbol: asyncio.sleep(0, result=104.5))
+
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_C5_EXIT"
+    assert order.exit_fee_usd == pytest.approx(0.03)   # entry's own fee excluded
+    assert calls == [{"order_id": None, "position_id": "pos1"}]
+
+
+def test_exit_fee_fetch_failure_does_not_break_closure_bookkeeping(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+
+    async def _raise(self, *a, **kw):
+        raise RuntimeError("exchange unavailable")
+
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1-1")),
+             get_history_trades=_raise)
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+    assert order.management_state == "CLOSED_T1"
+    assert order.realized_pnl_r == pytest.approx((106.18 - 100.0) / 10.0)
+    assert order.exit_fee_usd is None
+
+
+def test_fee_retry_sweep_retries_a_recently_closed_row_missing_fees(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="CLOSED_T1", mode="LIVE",
+                        entry_fill_price=100.0, t1_exchange_order_id="t1-1",
+                        exit_reason="T1", closed_at=datetime.datetime.utcnow(),
+                        entry_exchange_order_id="entry-order-1")
+    db.commit()
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        return _history_trades_response([{"orderId": order_id, "fee": "0.09", "realizedPNL": "0"}])
+
+    monkeypatch.setattr(ebc.BitunixClient, "get_history_trades", _history)
+    monkeypatch.setattr(e1e, "_ROW_TIMEOUT_SECONDS", 5)
+
+    # Same "run exactly one iteration" idiom as test_executor_live_loop_
+    # survives_a_hung_poll_and_resumes_next_cycle above: stop the loop via
+    # its own trailing asyncio.sleep(30) call, rather than a real wall-clock
+    # wait + cancel (flaky under load).
+    sleeps = {"n": 0}
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 1:
+            raise _StopE1Loop()
+
+    monkeypatch.setattr(e1e.asyncio, "sleep", fake_sleep)
+
+    async def main():
+        try:
+            await e1e.run_executor_live_e1_loop()
+        except _StopE1Loop:
+            pass
+
+    asyncio.run(main())
+    db.refresh(order)
+    assert order.entry_fee_usd == pytest.approx(0.09)
+    assert order.exit_fee_usd == pytest.approx(0.09)
+
+
+def test_fee_retry_sweep_skips_a_row_outside_the_48h_window(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    old_time = datetime.datetime.utcnow() - datetime.timedelta(hours=72)
+    order = _order_row(db, account, plan, management_state="CLOSED_T1", mode="LIVE",
+                        entry_fill_price=100.0, t1_exchange_order_id="t1-1",
+                        exit_reason="T1", closed_at=old_time,
+                        entry_exchange_order_id="entry-order-1")
+    db.commit()
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        raise AssertionError("get_history_trades should not have been called for a row outside the 48h window")
+
+    monkeypatch.setattr(ebc.BitunixClient, "get_history_trades", _history)
+    monkeypatch.setattr(e1e, "_ROW_TIMEOUT_SECONDS", 5)
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 1:
+            raise _StopE1Loop()
+
+    monkeypatch.setattr(e1e.asyncio, "sleep", fake_sleep)
+
+    async def main():
+        try:
+            await e1e.run_executor_live_e1_loop()
+        except _StopE1Loop:
+            pass
+
+    asyncio.run(main())
+    db.refresh(order)
+    assert order.entry_fee_usd is None
+    assert order.exit_fee_usd is None

@@ -143,6 +143,9 @@ def _client_for(account: ExecutorAccount):
     2026-11-04 once a real evaluation account (MFFU) confirmed Tradovate's
     documented restriction that unfunded accounts cannot obtain direct
     API credentials -- see cme_crosstrade_client.py's own header."""
+    # fee-capture build (2026-11-xx): get_fills_for_order()/get_fills_history()
+    # are the one deliberate exception to the "identical method surface"
+    # claim above -- CrossTradeClient only, see that file's own header.
     provider = (account.execution_provider or "tradovate").strip().lower()
     if provider == "crosstrade":
         import cme_crosstrade_client
@@ -170,6 +173,48 @@ def _client_for(account: ExecutorAccount):
         # now default to via _resolve_tradovate_is_demo().
         is_demo=bool(account.tradovate_is_demo),
     )
+
+
+async def _fetch_cme_entry_fee(client, account: ExecutorAccount, order_row: CMEOrder) -> None:
+    """Looks up and writes order_row.entry_fee_usd for one freshly-filled
+    CME entry. CrossTrade accounts only -- direct-Tradovate fee capture is
+    explicitly deferred (see cme_crosstrade_client.py's module header and
+    this module's own header). Its own try/except -- a fee-fetch failure
+    must never block real fill-confirmation bookkeeping. Shared between
+    the real-time call site and cme_engine.py's 48h retry sweep."""
+    if (account.execution_provider or "tradovate").strip().lower() != "crosstrade":
+        return   # Tradovate-direct -- deferred, no call, no error
+    try:
+        import cme_crosstrade_client
+        fills = await client.get_fills_for_order(int(order_row.entry_exchange_order_id))
+        order_row.entry_fee_usd = cme_crosstrade_client.sum_fill_fees(fills)
+    except Exception as e:
+        print(f"|| CME EXECUTOR || entry fee-fetch failed for order {order_row.id}: {e}")
+
+
+async def _fetch_cme_exit_fee(client, account: ExecutorAccount, order_row: CMEOrder) -> None:
+    """Looks up and writes order_row.exit_fee_usd for one closed CME
+    order. CrossTrade accounts only (same deferred-Tradovate-direct
+    reasoning as _fetch_cme_entry_fee()). Every CME exit here is a
+    emergency_market_close()/positions-flatten close with no distinct
+    order id (place_resting_bracket() never sets sl_exchange_order_id --
+    a real, pre-existing, flagged-not-fixed gap, confirmed via direct
+    read -- so there is no stop-order-id lookup available the way
+    Traveler/Alt Matrix's STOP branch has), so this always uses the
+    windowed fills/history fallback, bounded to a narrow window around
+    the confirmed exit_time. Its own try/except -- a fee-fetch failure
+    must never roll back the real closure bookkeeping already committed."""
+    if (account.execution_provider or "tradovate").strip().lower() != "crosstrade":
+        return   # Tradovate-direct -- deferred, no call, no error
+    try:
+        import cme_crosstrade_client
+        lookback = datetime.timedelta(seconds=_CLOSE_CONFIRM_ATTEMPTS * _CLOSE_CONFIRM_INTERVAL_SEC + 5)
+        from_ts = (order_row.exit_time - lookback).replace(tzinfo=datetime.timezone.utc).isoformat()
+        to_ts = (order_row.exit_time + datetime.timedelta(seconds=5)).replace(tzinfo=datetime.timezone.utc).isoformat()
+        fills = await client.get_fills_history(from_ts, to_ts, is_demo=bool(account.tradovate_is_demo))
+        order_row.exit_fee_usd = cme_crosstrade_client.sum_fill_fees(fills)
+    except Exception as e:
+        print(f"|| CME EXECUTOR || exit fee-fetch failed for order {order_row.id}: {e}")
 
 
 async def place_resting_bracket(db: Session, account: ExecutorAccount, plan_row: CMEPlan, order_row: CMEOrder) -> None:
@@ -245,6 +290,7 @@ async def check_retest_fill_and_confirm(db: Session, account: ExecutorAccount, o
     order_row.position_id = str(position.get("id") or position.get("positionId") or "")
     order_row.entry_fill_price = float(position.get("netPrice") or position.get("avgOpenPrice") or 0.0) or order_row.entry_fill_price
     order_row.entry_fill_time = datetime.datetime.utcnow()
+    await _fetch_cme_entry_fee(client, account, order_row)
     _log_transition(db, order_row, "WAITING_RETEST", "FILLED", price=order_row.entry_fill_price)
     order_row.management_state = "FILLED"
     _audit(db, "ORDER_PLACED", f"CME order {order_row.id} entry filled at {order_row.entry_fill_price} (bracket stop/target already exchange-hosted)", account.id, order_row)
@@ -337,6 +383,7 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrde
                      realized_pnl_r=order_row.realized_pnl_r, detail={"approximated": True})
     _audit(db, "POSITION_CLOSED", f"CME order {order_row.id} closed: {exit_reason} at ~{order_row.exit_price} (approximated)", account.id, order_row)
     _notify_account(db, account, "build_cme_exit_email", order_row)
+    await _fetch_cme_exit_fee(client, account, order_row)
 
 
 _CANCELLABLE_STATES = ("WAITING_RETEST",)

@@ -25,6 +25,13 @@
 # cme_executor.py's _client_for() is the ONLY place that needs to branch on
 # which provider an account uses -- no other file changes.
 #
+# DELIBERATE EXCEPTION (fee-capture build, 2026-11-xx): get_fills_for_order()/
+# get_fills_history() are added ONLY here, not on TradovateClient -- direct-
+# Tradovate fee capture is explicitly deferred (same funded-account gate
+# that blocks direct Tradovate trading/market-data blocks any direct
+# Fill/FillFee lookup too). cme_executor.py only calls these two when
+# account.execution_provider == "crosstrade".
+#
 # Auth: a single CrossTrade Bearer token (generated on CrossTrade's own My
 # Account page, requires their Pro plan or above) -- NOT the webhook Secret
 # Key, a materially different credential (crosstrade.io/docs/api/overview:
@@ -77,6 +84,21 @@
 # resources" claim and balance's confirmed accuracy above, but confirm on
 # the first real position/order, same as every other NOT YET LIVE-VERIFIED
 # item in this build.
+#
+# FILLS ENDPOINTS (fee-capture build, 2026-11-xx) -- CONFIRMED to exist live
+# against CrossTrade's own endpoint catalog (app.crosstrade.io/v1/api/
+# _endpoints) and OpenAPI spec, 2026-11-05: GET /fills/order/{orderId}
+# ("Fills for one order (NT8 executions-by-order parity)") and GET
+# /fills/history (from/to ISO-8601 UTC, environment demo|live, account,
+# cursor -- cursor listed as REQUIRED with no doc explaining a first-page
+# value; limit optional, max 1000/default 500). **SCHEMA NOT LIVE-VERIFIED**:
+# the fill object itself is typed in the OpenAPI spec as a bare `{"type":
+# "object"}` with ZERO documented properties -- neither the human docs nor
+# the llms-full.txt reference give an example response. sum_fill_fees()'s
+# field-name guesses (commission/fees, falling back to fee/commissionFee)
+# are UNVERIFIED -- both new methods log their raw response on every call
+# specifically so this can be confirmed/corrected after the first real CME
+# fill under CrossTrade. Do not treat the guessed names as fact.
 # ==============================================================================
 
 from __future__ import annotations
@@ -91,6 +113,36 @@ BASE_URL = "https://app.crosstrade.io/v1/api/tv"
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10.0)
 
 _sessions: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _safe_float(v: Any) -> float:
+    try:
+        return float(v) if v is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def sum_fill_fees(fills: List[Dict[str, Any]]) -> float:
+    """Defensive candidate-field parsing -- CrossTrade's own OpenAPI spec
+    gives the fill object zero documented properties (see module header,
+    "FILLS ENDPOINTS"). "commission" and "fees" are presumed to be TWO
+    DISTINCT real components (broker commission + exchange/clearing fee)
+    and are SUMMED when either is present; "fee"/"commissionFee" are
+    alternate-spelling FALLBACKS used only when NEITHER presumed-real name
+    is present on a given fill, to avoid double-counting one field under
+    two guessed names. CORRECT THIS against the first real logged
+    response -- these names are a guess, not fact."""
+    total = 0.0
+    for fill in fills:
+        commission, fees = fill.get("commission"), fill.get("fees")
+        if commission is not None or fees is not None:
+            total += _safe_float(commission) + _safe_float(fees)
+        else:
+            for key in ("fee", "commissionFee"):
+                if fill.get(key) is not None:
+                    total += _safe_float(fill[key])
+                    break
+    return total
 
 
 def _get_session() -> aiohttp.ClientSession:
@@ -196,6 +248,55 @@ class CrossTradeClient:
                 raise RuntimeError(f"CrossTrade order detail query failed ({resp.status}): {await resp.text()}")
             body = await resp.json()
         return body.get("data")
+
+    async def get_fills_for_order(self, order_id: int) -> List[Dict[str, Any]]:
+        """GET /fills/order/{orderId} -- CONFIRMED LIVE against CrossTrade's
+        own endpoint catalog, 2026-11-05 (see module header, "FILLS
+        ENDPOINTS"). Deliberately NOT /accounts/{account}/... like every
+        other method in this file -- this one endpoint isn't account-scoped
+        the same way. **SCHEMA NOT LIVE-VERIFIED** -- logs the raw response
+        on every call so the field names assumed by sum_fill_fees() can be
+        confirmed/corrected against a real fill."""
+        url = f"{BASE_URL}/fills/order/{order_id}"
+        session = _get_session()
+        async with session.get(url, headers=self._headers()) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"CrossTrade fills-by-order query failed ({resp.status}): {await resp.text()}")
+            body = await resp.json()
+        if not body.get("success", True):
+            raise RuntimeError(f"CrossTrade fills-by-order query reported failure: {body}")
+        fills = body.get("data") or []
+        print(f"[CROSSTRADE] RAW fills/order/{order_id} response (verify field names against this): {fills}")
+        return fills
+
+    async def get_fills_history(self, from_ts: str, to_ts: str, is_demo: bool = False) -> List[Dict[str, Any]]:
+        """GET /fills/history -- windowed fill history, used ONLY as the
+        exit-fee fallback for a flatten-based close (positions/flatten
+        produces no distinct order id to query get_fills_for_order with).
+        from_ts/to_ts: ISO-8601 UTC strings (e.g. dt.replace(tzinfo=
+        datetime.timezone.utc).isoformat()). `environment` is a REQUIRED
+        query param per CrossTrade's own endpoint catalog -- derived from
+        is_demo, don't omit it. `cursor` is also listed as required with no
+        documented first-page value; sent as an empty string here --
+        UNCONFIRMED, flagged (see module header). Pagination beyond one
+        page is NOT handled -- only safe for a narrow time window on one
+        account. **SCHEMA NOT LIVE-VERIFIED** -- logs the raw response on
+        every call, same as get_fills_for_order()."""
+        url = f"{BASE_URL}/fills/history"
+        params = {
+            "from": from_ts, "to": to_ts, "account": self.crosstrade_account_id,
+            "environment": "demo" if is_demo else "live", "cursor": "",
+        }
+        session = _get_session()
+        async with session.get(url, headers=self._headers(), params=params) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"CrossTrade fills/history query failed ({resp.status}): {await resp.text()}")
+            body = await resp.json()
+        if not body.get("success", True):
+            raise RuntimeError(f"CrossTrade fills/history query reported failure: {body}")
+        fills = body.get("data") or []
+        print(f"[CROSSTRADE] RAW fills/history response (verify field names against this): {fills}")
+        return fills
 
     async def place_bracket_limit_order(
         self, symbol: str, action: str, qty: int,

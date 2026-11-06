@@ -9994,3 +9994,66 @@ Full suite green before this entry. Site commits: schema/notify/routes/
 wiring, the UI card, the PWA assets, and this log entry, all pushed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-11-05 (tenth entry) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — real exchange fee capture shipped for Traveler, Alt Matrix, and CME (CrossTrade accounts); bundled Alt Matrix dollar-PnL fix
+
+Andy's next ask after the desk-page build: make the `entry_fee_usd`/
+`exit_fee_usd` columns that build added actually mean something. They'd
+been sitting NULL since creation — `database.py`'s own migration comment
+already flagged this as "stays NULL until a separate fee-capture spike
+confirms whether Bitunix/Tradovate/CrossTrade actually expose a fee field
+on fill responses." Confirmed via direct code research: zero writers
+existed anywhere, on any of the three order tables (`ExecutorOrder`/
+`AltMatrixOrder`/`CMEOrder`). This build is that spike.
+
+**Real exchange research, verified directly this session, not reused
+from any prior write-up:**
+- **Bitunix** (Traveler + Alt Matrix): the right endpoint is
+  `GET /api/v1/futures/trade/get_history_trades` — per-FILL (own
+  `tradeId`), not the already-used `get_order_detail` (per-ORDER status
+  only). Filterable by `orderId` or `positionId`, returns `fee` +
+  `realizedPNL` per fill. Confirmed live against bitunix.com's own docs.
+- **CrossTrade** (CME, `execution_provider=="crosstrade"` only): found a
+  materially better endpoint than either of us had before —
+  `GET /v1/api/tv/fills/order/{orderId}`, a real per-order fills lookup,
+  confirmed against CrossTrade's own endpoint catalog and OpenAPI spec.
+  Used a windowed `GET /v1/api/tv/fills/history` fallback only for the
+  one case with no distinct order id (a `positions/flatten` close).
+  **Honestly flagged, not guessed**: the fill object's response schema
+  is undocumented anywhere public for either endpoint — CrossTrade's own
+  OpenAPI spec types it as a bare `{"type": "object"}`, zero properties.
+  Shipped with defensive field-name parsing (`commission`+`fees` summed
+  as two real components; `fee`/`commissionFee` as fallback-only guesses)
+  plus the raw response logged on every call, for a human to confirm/
+  correct against the first real CME fill under CrossTrade.
+- **Direct-Tradovate fee capture is explicitly deferred** — same funded-
+  account gate that already blocks direct Tradovate trading/market-data
+  blocks any direct Fill/FillFee lookup too, so there's no live account
+  to exercise it against. Documented, not built; CrossTrade accounts get
+  real fee data, Tradovate-direct accounts stay NULL (no call, no error).
+- **Bundled in, Andy-approved**: `AltMatrixOrder.realized_pnl_usd` — also
+  found never written anywhere (a separate, pre-existing gap) — now
+  populated from the same Bitunix call this build already needed.
+  `CMEOrder.dollar_pnl`'s equivalent gap stays open on purpose — it would
+  need real futures contract point-value math, a bigger, separate build.
+
+**Design**: fee-fetch calls inserted at each subsystem's existing entry-
+fill/exit-close sites, each in its own `try/except` (never rolls back
+real bookkeeping) — on entry, before stop placement (matches this
+file's own existing tolerance for one more call before protection); on
+exit, deliberately LAST, after notify and (for Traveler) the re-arm
+deadline computation, since fee capture is the least time-critical of
+the real concerns competing at close time. A 48h retry sweep was added
+to each subsystem's existing watch loop (no new background task) to
+catch lagging fee data — after 48h a row just stays NULL permanently,
+an honest gap rather than a guess. Zero schema changes needed anywhere.
+
+Full suite green except one pre-existing, wall-clock-dependent flaky
+test (`test_live_c5_exit_closure_enters_rearm_watch` — confirmed via
+`git stash` to fail identically on the pre-build code, unrelated to this
+work). ~45 new tests added across `tests/test_executor_bitunix_client.py`,
+the new `tests/test_cme_crosstrade_client.py`, and the three subsystems'
+own executor test files.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

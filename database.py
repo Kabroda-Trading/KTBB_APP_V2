@@ -591,10 +591,16 @@ def init_db():
     # _finalize_traveler_close() (executor_live_e1_engine.py) already
     # COMPUTES pnl_usd -- this just gives it somewhere to live; see that
     # function's own write right after this computes. entry_fee_usd
-    # mirrors exit_fee_usd's existing (currently always-NULL, zero writers
-    # repo-wide as of this build) shape -- stays NULL until a separate
-    # fee-capture spike confirms whether Bitunix/Tradovate/CrossTrade
-    # actually expose a fee field on fill responses and wires a writer. ---
+    # mirrors exit_fee_usd's shape. UPDATE (fee-capture build, 2026-11-xx,
+    # same month): both columns on all three order tables (ExecutorOrder/
+    # AltMatrixOrder/CMEOrder) now have real writers -- Bitunix's
+    # get_history_trades() (executor_bitunix_client.py) for Traveler/Alt
+    # Matrix, CrossTrade's get_fills_for_order()/get_fills_history()
+    # (cme_crosstrade_client.py) for CME CrossTrade accounts. Direct-
+    # Tradovate CME accounts still get no fee data (deferred -- see
+    # cme_crosstrade_client.py's own header for why). This comment is
+    # kept as the historical record of the gap this build closed, not a
+    # live "still NULL" warning. ---
     for _col in ["realized_pnl_usd FLOAT", "entry_fee_usd FLOAT"]:
         try:
             with engine.begin() as conn:
@@ -2830,10 +2836,10 @@ class ExecutorOrder(Base):
     # CMEOrder.dollar_pnl/AltMatrixOrder.realized_pnl_usd, which already
     # had both. _finalize_traveler_close() (executor_live_e1_engine.py)
     # already computes pnl_usd -- this just gives it somewhere to live.
-    # entry_fee_usd mirrors exit_fee_usd's existing shape (both stay NULL
-    # until a separate fee-capture spike confirms Bitunix exposes a fee
-    # field on fill responses and wires a writer -- a known, flagged gap,
-    # not fabricated data).
+    # entry_fee_usd mirrors exit_fee_usd's shape. Fee-capture build
+    # (2026-11-xx, same month): both now have real writers via Bitunix's
+    # get_history_trades() -- see executor_live_e1_engine.py's
+    # _fetch_traveler_entry_fee()/_fetch_traveler_exit_fee().
     realized_pnl_usd = Column(Float, nullable=True)
     entry_fee_usd = Column(Float, nullable=True)
 

@@ -38,6 +38,7 @@ import datetime
 import traceback
 from typing import List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import cme_clock
@@ -304,6 +305,40 @@ async def run_cme_watch_loop() -> None:
             ).all()
             for order_row in rows:
                 await _advance_one_row(db, order_row)
+
+            # Fee-capture retry sweep (2026-11-xx) -- reuses this loop's
+            # own cadence/per-row commit skeleton, no new background task.
+            # Matters MOST here of the three subsystems, given CrossTrade's
+            # confirmed fills-schema/lag risk -- this is the real safety
+            # net for CME. After 48h with no fee found, a row naturally
+            # falls out of this query and stays permanently NULL.
+            fee_cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+            fee_retry_rows = db.query(CMEOrder).filter(
+                CMEOrder.mode == "LIVE",
+                CMEOrder.closed_at.isnot(None),
+                CMEOrder.closed_at > fee_cutoff,
+                or_(CMEOrder.entry_fee_usd.is_(None), CMEOrder.exit_fee_usd.is_(None)),
+            ).all()
+            for order_row in fee_retry_rows:
+                try:
+                    account = db.query(ExecutorAccount).filter_by(id=order_row.account_id).first()
+                    if account is None:
+                        continue
+                    client = cme_executor._client_for(account)
+                    if order_row.entry_fee_usd is None and order_row.entry_exchange_order_id:
+                        await asyncio.wait_for(
+                            cme_executor._fetch_cme_entry_fee(client, account, order_row),
+                            timeout=_ROW_TIMEOUT_SECONDS,
+                        )
+                    if order_row.exit_fee_usd is None and order_row.exit_time:
+                        await asyncio.wait_for(
+                            cme_executor._fetch_cme_exit_fee(client, account, order_row),
+                            timeout=_ROW_TIMEOUT_SECONDS,
+                        )
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print(f"|| CME WATCH (FEE RETRY) || order {order_row.id} failed: {e}")
         except Exception as e:
             print(f"|| CME WATCH LOOP ERROR: {e}")
             traceback.print_exc()

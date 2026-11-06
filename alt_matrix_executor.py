@@ -201,6 +201,54 @@ async def _get_pair_precision(client, symbol: str) -> Dict[str, Any]:
     raise ValueError(f"no trading pair entry found for symbol {symbol!r} in get_trading_pairs response")
 
 
+async def _fetch_alt_matrix_entry_fee(db: Session, account: ExecutorAccount, client, order_row: AltMatrixOrder) -> None:
+    """Looks up and writes order_row.entry_fee_usd for one freshly-filled
+    Alt Matrix entry. Its own try/except -- a fee-fetch failure must never
+    block real stop placement. Shared between the real-time call site and
+    run_alt_matrix_signal_loop()'s 48h retry sweep (alt_matrix_engine.py)."""
+    import executor_bitunix_client
+    try:
+        fee_resp = await client.get_history_trades(order_id=order_row.entry_exchange_order_id)
+        trades = (fee_resp.get("data") or {}).get("tradeList") or []
+        order_row.entry_fee_usd = executor_bitunix_client.sum_trade_fees_and_pnl(trades)["fee"]
+    except Exception as e:
+        _audit(db, "ERROR", f"entry fee-fetch failed for Alt Matrix order {order_row.id}: {e}", account.id, order_row)
+
+
+async def _fetch_alt_matrix_exit_fee(db: Session, account: ExecutorAccount, client, order_row: AltMatrixOrder) -> None:
+    """Looks up and writes order_row.exit_fee_usd AND order_row.
+    realized_pnl_usd (the bundled dollar-PnL fix, 2026-11-xx -- Andy-
+    approved, since this same call already returns realizedPNL per fill)
+    for one closed Alt Matrix order. Branches on order_row.exit_reason,
+    which both market_close() and check_for_manual_closure() already set
+    before calling this. Its own try/except -- a fee-fetch failure must
+    never roll back the real closure bookkeeping already committed.
+    Shared between both real-time call sites and run_alt_matrix_signal_
+    loop()'s 48h retry sweep."""
+    import executor_bitunix_client
+    try:
+        exit_reason = order_row.exit_reason
+        if exit_reason in ("STOP", "BE_STOP") and order_row.sl_exchange_order_id:
+            fee_resp = await client.get_history_trades(order_id=order_row.sl_exchange_order_id)
+            trades = (fee_resp.get("data") or {}).get("tradeList") or []
+            summed = executor_bitunix_client.sum_trade_fees_and_pnl(trades)
+        else:
+            # MANUAL, or any flash_close_position() exit -- no distinct
+            # order id. Query by position_id, excluding every leg's own
+            # order id already known so the entry fill (and the stop
+            # order, if one was ever placed) is never double-counted.
+            exclude = [order_row.entry_exchange_order_id]
+            if order_row.sl_exchange_order_id:
+                exclude.append(order_row.sl_exchange_order_id)
+            fee_resp = await client.get_history_trades(position_id=order_row.position_id)
+            trades = (fee_resp.get("data") or {}).get("tradeList") or []
+            summed = executor_bitunix_client.sum_trade_fees_and_pnl(trades, exclude_order_ids=exclude)
+        order_row.exit_fee_usd = summed["fee"]
+        order_row.realized_pnl_usd = summed["realized_pnl"]
+    except Exception as e:
+        _audit(db, "ERROR", f"exit fee-fetch failed for Alt Matrix order {order_row.id}: {e}", account.id, order_row)
+
+
 async def query_real_leverage(account: ExecutorAccount, symbol: str) -> Dict[str, Any]:
     """Returns {"leverage": int, "source": str}. Same never-crash-on-
     network-hiccup fallback pattern as executor_plan_builder.py's own
@@ -344,6 +392,12 @@ async def place_entry_and_protect(db: Session, account: ExecutorAccount, order_r
     order_row.entry_fill_price = float(position["avgOpenPrice"])
     order_row.entry_fill_time = datetime.datetime.utcnow()
 
+    # Fee capture (2026-11-xx) -- deliberately BEFORE stop placement below,
+    # same reasoning as executor_live_e1_engine.py's own entry fee-fetch:
+    # guarantees the entry fee is captured even if the stop that follows
+    # subsequently fails (ENTRY_FILLED_UNPROTECTED).
+    await _fetch_alt_matrix_entry_fee(db, account, client, order_row)
+
     sl_str = executor_sizing.round_price_to_precision(order_row.sl_price_initial, pair["quote_precision"])
     try:
         sl_resp = await client.set_position_tpsl(symbol=symbol, position_id=order_row.position_id, sl_price=sl_str, sl_stop_type="LAST_PRICE")
@@ -484,6 +538,7 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: AltMatr
                      detail={"approximated": True})
     _audit(db, "POSITION_CLOSED", f"Alt Matrix order {order_row.id} closed: {exit_reason} at {exit_price} (approximated at last known live price -- close_position() carries no reliable fill price)", account.id, order_row)
     _notify_account(db, account, "build_alt_matrix_exit_email", order_row, is_live=True)
+    await _fetch_alt_matrix_exit_fee(db, account, client, order_row)
 
 
 async def check_for_manual_closure(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> bool:
@@ -555,4 +610,5 @@ async def check_for_manual_closure(db: Session, account: ExecutorAccount, order_
         f"attributed to {label}. Exit approximated at {exit_price}.",
         account.id, order_row)
     _notify_account(db, account, "build_alt_matrix_exit_email", order_row, is_live=True)
+    await _fetch_alt_matrix_exit_fee(db, account, client, order_row)
     return True

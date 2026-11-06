@@ -287,6 +287,78 @@ def test_get_order_detail_raises_when_neither_id_given(monkeypatch):
     assert calls == []
 
 
+# ------------------------------------------------------------------ fee capture (2026-11-xx):
+# get_history_trades() request construction + sum_trade_fees_and_pnl()
+# pure-function tests (no network).
+
+def test_get_history_trades_by_order_id_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_history_trades(order_id="12345"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/trade/get_history_trades",
+                       "query": {"limit": 100, "orderId": "12345"}, "body": None}]
+
+
+def test_get_history_trades_by_position_id_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_history_trades(position_id="pos1"))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/trade/get_history_trades",
+                       "query": {"limit": 100, "positionId": "pos1"}, "body": None}]
+
+
+def test_get_history_trades_with_all_filters_calls_the_right_endpoint(monkeypatch):
+    import asyncio
+    client = ebc.BitunixClient("key", "secret")
+    calls = _capture_request(monkeypatch, client)
+    asyncio.run(client.get_history_trades(
+        order_id="12345", symbol="BTCUSDT", position_id="pos1",
+        start_time=1000, end_time=2000, skip=5, limit=50))
+    assert calls == [{"method": "GET", "path": "/api/v1/futures/trade/get_history_trades",
+                       "query": {"limit": 50, "orderId": "12345", "symbol": "BTCUSDT",
+                                 "positionId": "pos1", "startTime": 1000, "endTime": 2000, "skip": 5},
+                       "body": None}]
+
+
+def test_sum_trade_fees_and_pnl_empty_list():
+    assert ebc.sum_trade_fees_and_pnl([]) == {"fee": 0.0, "realized_pnl": 0.0, "trade_count": 0.0}
+
+
+def test_sum_trade_fees_and_pnl_missing_keys_default_to_zero():
+    result = ebc.sum_trade_fees_and_pnl([{"orderId": "1"}])
+    assert result == {"fee": 0.0, "realized_pnl": 0.0, "trade_count": 1.0}
+
+
+def test_sum_trade_fees_and_pnl_sums_multiple_trades():
+    trades = [
+        {"orderId": "1", "fee": "0.01", "realizedPNL": "1.50"},
+        {"orderId": "1", "fee": "0.02", "realizedPNL": "2.00"},
+    ]
+    result = ebc.sum_trade_fees_and_pnl(trades)
+    assert result["fee"] == pytest.approx(0.03)
+    assert result["realized_pnl"] == pytest.approx(3.50)
+    assert result["trade_count"] == 2.0
+
+
+def test_sum_trade_fees_and_pnl_excludes_matching_order_ids():
+    trades = [
+        {"orderId": "entry-1", "fee": "0.01", "realizedPNL": "0.0"},
+        {"orderId": "exit-2", "fee": "0.02", "realizedPNL": "5.00"},
+    ]
+    result = ebc.sum_trade_fees_and_pnl(trades, exclude_order_ids=["entry-1"])
+    assert result["fee"] == pytest.approx(0.02)
+    assert result["realized_pnl"] == pytest.approx(5.00)
+    assert result["trade_count"] == 1.0
+
+
+def test_sum_trade_fees_and_pnl_tolerates_non_numeric_values():
+    trades = [{"orderId": "1", "fee": "not-a-number", "realizedPNL": None}]
+    result = ebc.sum_trade_fees_and_pnl(trades)
+    assert result == {"fee": 0.0, "realized_pnl": 0.0, "trade_count": 1.0}
+
+
 def test_get_pending_tp_sl_order_calls_the_right_endpoint(monkeypatch):
     import asyncio
     client = ebc.BitunixClient("key", "secret")

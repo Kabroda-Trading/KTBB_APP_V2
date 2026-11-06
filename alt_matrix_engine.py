@@ -39,6 +39,7 @@ import json
 import traceback
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import alt_matrix_clock
@@ -549,6 +550,41 @@ async def run_alt_matrix_watch_loop() -> None:
                     db.rollback()
                     print(f"|| ALT MATRIX WATCH || order {order_row.id} confirm failed: {e}")
                     traceback.print_exc()
+
+            # Fee-capture retry sweep (2026-11-xx) -- hung off THIS loop
+            # (30-60s cadence) rather than the 4H-anchored signal loop, for
+            # tighter fee-retry latency, matching the other two
+            # subsystems' own ~30s sweep cadence. Reuses the existing
+            # per-row commit skeleton, no new background task. After 48h
+            # with no fee found, a row naturally falls out of this query
+            # and stays permanently NULL -- an honest gap, not a guess.
+            fee_cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+            fee_retry_rows = db.query(AltMatrixOrder).filter(
+                AltMatrixOrder.mode == "LIVE",
+                AltMatrixOrder.closed_at.isnot(None),
+                AltMatrixOrder.closed_at > fee_cutoff,
+                or_(AltMatrixOrder.entry_fee_usd.is_(None), AltMatrixOrder.exit_fee_usd.is_(None)),
+            ).all()
+            for order_row in fee_retry_rows:
+                try:
+                    account = db.query(ExecutorAccount).filter_by(id=order_row.account_id).first()
+                    if account is None:
+                        continue
+                    client = alt_matrix_executor._client_for(account)
+                    if order_row.entry_fee_usd is None and order_row.entry_exchange_order_id:
+                        await asyncio.wait_for(
+                            alt_matrix_executor._fetch_alt_matrix_entry_fee(db, account, client, order_row),
+                            timeout=_ROW_TIMEOUT_SECONDS,
+                        )
+                    if order_row.exit_fee_usd is None and order_row.exit_reason:
+                        await asyncio.wait_for(
+                            alt_matrix_executor._fetch_alt_matrix_exit_fee(db, account, client, order_row),
+                            timeout=_ROW_TIMEOUT_SECONDS,
+                        )
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print(f"|| ALT MATRIX WATCH (FEE RETRY) || order {order_row.id} failed: {e}")
         except Exception as e:
             print(f"|| ALT MATRIX WATCH LOOP ERROR: {e}")
             traceback.print_exc()

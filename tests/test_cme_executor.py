@@ -18,6 +18,7 @@ from database import SessionLocal, ExecutorAccount, CMEPlan, CMEOrder, CMETransi
 import executor_accounts as ea
 import executor_control as ec
 import cme_tradovate_client as tvc
+import cme_crosstrade_client as ctc
 import cme_executor as cx
 
 
@@ -61,6 +62,28 @@ def _ready_account(db, label="cme_exec_test"):
     ec.enable_live_orders(db, reason="testing", by="andy@kabroda.com")
     db.commit()
     return account
+
+
+def _ready_crosstrade_account(db, label="cme_exec_crosstrade_test"):
+    # Fee capture (2026-11-xx) -- a second account flavor, execution_
+    # provider="crosstrade", for exercising cme_executor.py's CrossTrade-
+    # only fee-fetch gate. api_secret is an unused placeholder for this
+    # provider (CrossTrade needs only the bearer token) -- same convention
+    # cme_crosstrade_client.py's own header documents.
+    account = ea.create_account(db, user_id=1, label=label)
+    db.flush()
+    account.mode = "LIVE"
+    account.execution_provider = "crosstrade"
+    account.crosstrade_account_id = "acct-ct-1"
+    ea.set_credentials(db, account, api_key="fake-bearer-token", api_secret="unused", set_by="test@kabroda.com")
+    ec.enable_live_orders(db, reason="testing", by="andy@kabroda.com")
+    db.commit()
+    return account
+
+
+def _patch_crosstrade(monkeypatch, **methods):
+    for name, fn in methods.items():
+        monkeypatch.setattr(ctc.CrossTradeClient, name, fn)
 
 
 def _plan(db, symbol="MNQ", **overrides):
@@ -449,3 +472,105 @@ def test_notify_account_telegram_failure_never_blocks_the_email_send(db, monkeyp
     cx._notify_account(db, account, "build_cme_entry_email", order)   # must not raise
 
     assert len(email_calls) == 1
+
+
+# ------------------------------------------------------------------ fee capture (2026-11-xx):
+# CrossTrade accounts only -- direct-Tradovate fee capture is explicitly
+# deferred (see cme_crosstrade_client.py's own header).
+
+def test_entry_fill_sets_entry_fee_usd_for_a_crosstrade_account(db, monkeypatch):
+    account = _ready_crosstrade_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
+    _patch_crosstrade(monkeypatch,
+                       get_positions=_async([{"symbol": "MNQ", "id": "pos1", "netPrice": "4500.0"}]),
+                       get_fills_for_order=_async([{"commission": "0.35"}]))
+
+    _run(cx.check_retest_fill_and_confirm(db, account, order))
+    db.commit()
+
+    assert order.management_state == "FILLED"
+    assert order.entry_fee_usd == pytest.approx(0.35)
+
+
+def test_entry_fee_not_attempted_for_a_tradovate_direct_account(db, monkeypatch):
+    # Direct-Tradovate fee capture is explicitly deferred -- no call, no
+    # error, entry_fee_usd simply stays None.
+    account = _ready_account(db)   # plain Tradovate-direct account
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
+    _patch(monkeypatch, get_positions=_async([{"symbol": "MNQ", "id": "pos1", "netPrice": "4500.0"}]))
+
+    _run(cx.check_retest_fill_and_confirm(db, account, order))
+    db.commit()
+
+    assert order.management_state == "FILLED"
+    assert order.entry_fee_usd is None
+
+
+def test_entry_fee_fetch_failure_does_not_break_fill_confirmation(db, monkeypatch):
+    account = _ready_crosstrade_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
+    _patch_crosstrade(monkeypatch,
+                       get_positions=_async([{"symbol": "MNQ", "id": "pos1", "netPrice": "4500.0"}]),
+                       get_fills_for_order=_async(exc=RuntimeError("CrossTrade unavailable")))
+
+    _run(cx.check_retest_fill_and_confirm(db, account, order))
+    db.commit()
+
+    assert order.management_state == "FILLED"   # fill confirmation unaffected
+    assert order.entry_fee_usd is None
+
+
+def test_market_close_sets_exit_fee_usd_for_a_crosstrade_account(db, monkeypatch):
+    account = _ready_crosstrade_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4500.0)
+    calls = []
+
+    async def _fills_history(self, from_ts, to_ts, is_demo=False):
+        calls.append({"from_ts": from_ts, "to_ts": to_ts, "is_demo": is_demo})
+        return [{"commission": "0.35", "fees": "0.10"}]
+
+    _patch_crosstrade(monkeypatch,
+                       emergency_market_close=_async(True),
+                       get_positions=_async([]),
+                       get_fills_history=_fills_history)
+
+    _run(cx.market_close(db, account, order, exit_reason="TIME_FLUSH"))
+    db.commit()
+
+    assert order.management_state == "CLOSED_TIME_FLUSH"
+    assert order.exit_fee_usd == pytest.approx(0.45)
+    assert len(calls) == 1
+    assert calls[0]["is_demo"] is False
+
+
+def test_exit_fee_not_attempted_for_a_tradovate_direct_account(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4500.0)
+    _patch(monkeypatch, emergency_market_close=_async(True), get_positions=_async([]))
+
+    _run(cx.market_close(db, account, order, exit_reason="TIME_FLUSH"))
+    db.commit()
+
+    assert order.management_state == "CLOSED_TIME_FLUSH"
+    assert order.exit_fee_usd is None
+
+
+def test_exit_fee_fetch_failure_does_not_break_closure_for_a_crosstrade_account(db, monkeypatch):
+    account = _ready_crosstrade_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4500.0)
+    _patch_crosstrade(monkeypatch,
+                       emergency_market_close=_async(True),
+                       get_positions=_async([]),
+                       get_fills_history=_async(exc=RuntimeError("CrossTrade unavailable")))
+
+    _run(cx.market_close(db, account, order, exit_reason="TIME_FLUSH"))
+    db.commit()
+
+    assert order.management_state == "CLOSED_TIME_FLUSH"   # real closure unaffected
+    assert order.exit_fee_usd is None

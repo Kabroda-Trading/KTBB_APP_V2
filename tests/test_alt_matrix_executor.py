@@ -41,6 +41,15 @@ def _clean_rows(session):
 @pytest.fixture
 def db(monkeypatch):
     monkeypatch.setenv("EXECUTOR_CREDENTIAL_KEY", Fernet.generate_key().decode("utf-8"))
+    # Fee capture (2026-11-xx) added a new BitunixClient.get_history_trades()
+    # call at every entry-fill/exit-close site in alt_matrix_executor.py.
+    # Default it to a safe empty-tradeList fake here so every EXISTING test
+    # below that doesn't care about fees (the vast majority) never attempts
+    # a real network call -- individual tests override this via their own
+    # _patch(monkeypatch, get_history_trades=...) call, which runs later
+    # and wins.
+    monkeypatch.setattr(ebc.BitunixClient, "get_history_trades",
+                         _async({"code": 0, "data": {"tradeList": []}, "msg": "Success"}))
     _clean_db_files()
     database.init_db()
     session = SessionLocal()
@@ -114,6 +123,10 @@ def _tpsl_set_resp(order_id="sl1"):
 def _tpsl_pending_resp(sl_price=None):
     data = [{"slPrice": str(sl_price)}] if sl_price is not None else []
     return {"code": 0, "data": data, "msg": "Success"}
+
+
+def _history_trades_response(trades):
+    return {"code": 0, "data": {"tradeList": trades}, "msg": "Success"}
 
 
 def _patch(monkeypatch, **methods):
@@ -805,3 +818,133 @@ def test_manual_closure_sends_account_email(db, monkeypatch):
 
     assert len(calls) == 1
     assert "manual intervention" in calls[0]["body"].lower()
+
+
+# ------------------------------------------------------------------ fee capture + realized_pnl_usd (2026-11-xx)
+
+def test_entry_fill_sets_entry_fee_usd(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, entry_exchange_order_id="entry1")
+
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_position=_async(_position_resp(position_id="pos1", avg_open_price=101.5)),
+           set_position_tpsl=_async(_tpsl_set_resp("sl1")),
+           get_history_trades=_async(_history_trades_response([{"orderId": "entry1", "fee": "0.03"}])))
+
+    _run(ax.place_entry_and_protect(db, account, order))
+
+    assert order.management_state == "FILLED"
+    assert order.entry_fee_usd == pytest.approx(0.03)
+
+
+def test_entry_fee_fetch_failure_does_not_block_stop_placement(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, entry_exchange_order_id="entry1")
+
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_position=_async(_position_resp(position_id="pos1", avg_open_price=101.5)),
+           set_position_tpsl=_async(_tpsl_set_resp("sl1")),
+           get_history_trades=_async(exc=ConnectionError("blip")))
+
+    _run(ax.place_entry_and_protect(db, account, order))
+
+    assert order.management_state == "FILLED"   # stop still placed
+    assert order.entry_fee_usd is None
+
+
+def test_market_close_sets_exit_fee_usd_and_realized_pnl_usd(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="TRAILING", entry_fill_price=100.0, position_id="pos1",
+                   r_distance=2.0, entry_exchange_order_id="entry1")
+
+    _patch(monkeypatch,
+           close_position=_async({"code": 0, "data": {}}),
+           get_position=_async(_empty_position_resp()),
+           get_history_trades=_async(_history_trades_response([
+               {"orderId": "entry1", "fee": "0.02", "realizedPNL": "0.0"},   # must be excluded
+               {"orderId": "close-9", "fee": "0.05", "realizedPNL": "4.00"},
+           ])))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "104.0"}]))
+
+    _run(ax.market_close(db, account, order, exit_reason="EMA21_TRAIL"))
+
+    assert order.management_state == "CLOSED_EMA21_TRAIL"
+    assert order.exit_fee_usd == pytest.approx(0.05)
+    assert order.realized_pnl_usd == pytest.approx(4.00)
+
+
+def test_market_close_exit_fee_fetch_failure_does_not_break_closure(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="TRAILING", entry_fill_price=100.0, position_id="pos1", r_distance=2.0)
+
+    _patch(monkeypatch,
+           close_position=_async({"code": 0, "data": {}}),
+           get_position=_async(_empty_position_resp()),
+           get_history_trades=_async(exc=ConnectionError("blip")))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "104.0"}]))
+
+    _run(ax.market_close(db, account, order, exit_reason="EMA21_TRAIL"))
+
+    assert order.management_state == "CLOSED_EMA21_TRAIL"   # real closure unaffected
+    assert order.realized_pnl_r == pytest.approx((104.0 - 100.0) / 2.0)
+    assert order.exit_fee_usd is None
+
+
+def test_manual_closure_stop_branch_queries_history_by_sl_order_id(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id="sl1", be_amended=False)
+    calls = []
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        calls.append({"order_id": order_id, "position_id": position_id})
+        return _history_trades_response([{"orderId": "sl1", "fee": "0.04", "realizedPNL": "-1.00"}])
+
+    _patch(monkeypatch,
+           get_position=_async(_empty_position_resp()),
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_history_trades=_history)
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+
+    assert result is True
+    assert order.management_state == "CLOSED_STOP"
+    assert order.exit_fee_usd == pytest.approx(0.04)
+    assert order.realized_pnl_usd == pytest.approx(-1.00)
+    assert calls == [{"order_id": "sl1", "position_id": None}]
+
+
+def test_manual_closure_manual_branch_queries_history_by_position_id_excluding_known_legs(db, monkeypatch):
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, sl_price_current=90.0,
+                    r_distance=10.0, position_id="pos1", sl_exchange_order_id="sl1",
+                    entry_exchange_order_id="entry1")
+    calls = []
+
+    async def _history(self, order_id=None, symbol=None, position_id=None, **kw):
+        calls.append({"order_id": order_id, "position_id": position_id})
+        return _history_trades_response([
+            {"orderId": "entry1", "fee": "0.02"},
+            {"orderId": "sl1", "fee": "0.03"},
+            {"orderId": "manual-close-1", "fee": "0.06"},
+        ])
+
+    _patch(monkeypatch,
+           get_position=_async(_empty_position_resp()),
+           get_order_detail=_async(_order_detail_resp("NEW")),
+           get_history_trades=_history)
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "95.0"}]))
+
+    result = _run(ax.check_for_manual_closure(db, account, order))
+
+    assert result is True
+    assert order.management_state == "CLOSED_MANUAL"
+    assert order.exit_fee_usd == pytest.approx(0.06)   # entry + stop legs excluded
+    assert calls == [{"order_id": None, "position_id": "pos1"}]
