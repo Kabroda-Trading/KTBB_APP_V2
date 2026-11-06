@@ -10081,3 +10081,12 @@ Following Andy's explicit review and direct clarification of the MRE / Neighborl
 
 ### 4. Cloud Knowledge Warehouse Schema
 Full PostgreSQL schemas ready for execution on Render (`cloud_canon_registry`, `cloud_system_rules`, `cloud_knowledge_articles`, `backtest_benchmarks`, `daily_performance_ledger`) documented in `kabroda_enterprise_mas_render_slack_blueprint.md`.
+
+
+## 2026-11-06 (second entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Canonical Blueprint Committed to docs/KABRODA_ENTERPRISE_MAS_SLACK_BLUEPRINT.md
+
+Per Andy's directive to ensure zero friction for Claude Code:
+- The full Multi-Agent Architecture specification is now committed directly into the repository:
+  `docs/KABRODA_ENTERPRISE_MAS_SLACK_BLUEPRINT.md` (commit `ffb5fb0` in site repo, `e4c6ca1` in Brain repo).
+- CC does not need to search any external or temp paths. All schemas, contracts, and architecture are directly in-tree.
