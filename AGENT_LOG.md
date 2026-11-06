@@ -10090,3 +10090,28 @@ Per Andy's directive to ensure zero friction for Claude Code:
 - The full Multi-Agent Architecture specification is now committed directly into the repository:
   `docs/KABRODA_ENTERPRISE_MAS_SLACK_BLUEPRINT.md` (commit `ffb5fb0` in site repo, `e4c6ca1` in Brain repo).
 - CC does not need to search any external or temp paths. All schemas, contracts, and architecture are directly in-tree.
+
+
+## 2026-11-06 (third entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — CME Operational Audit: Lock Persistence, Telegram Push Configuration, and DRY_RUN -> LIVE Flip
+
+Following Andy's direct review of the CME Desk on kabroda.com today (showing "DATA PENDING / HOLIDAY", "No lock yet today", and "Mode: DRY_RUN"):
+
+### 1. Root-Cause Analysis: Why CME Desk Showed "Data Pending / No Lock Yet"
+- **Zero Rows Persisted in Prod DB:** `SELECT count(*) FROM cme_plans;` returned 0. The desk defaults to "DATA PENDING / HOLIDAY" (`cme_desk.html:189`) whenever `plan == null` past 10:00 AM ET.
+- **The 15-Minute Catchup Window (`cme_clock.py:98-103`):** `_DEFAULT_CATCHUP_WINDOW_SECONDS = 900`. If Render boots/restarts after 10:15 AM ET (e.g., following today's morning deploys), `is_within_catchup_window()` returns False and `run_cme_session_loop()` sleeps until tomorrow at 10:00 AM ET without writing any row.
+- **Silent Return on Fetch Error (`cme_engine.py:102-106`):** In `_process_symbol_lock`, if `cme_market.fetch_calibration_1m()` raises an exception, the function logs to stdout and returns without saving a `CMEPlan` row.
+- **Today's Market Data Reality (2026-11-06 NQ):** We pulled the actual 1-minute NQ bars for today's 9:30-10:00 ET window. High: `27,425.00`, Low: `27,037.75`, Range: `387.25` points. Against NQ's ~350 ATR14, `box / ATR14 >= 0.95`, which massively exceeds `REACHABILITY_MAX = 0.55`. **Today was a guaranteed `STAND_DOWN_UNREACHABLE` (no trade).**
+- **Action for CC:** Update `cme_engine.py` so that on fetch error or missed window, it persists an explicit `CMEPlan` row with `status='STAND_DOWN_UNREACHABLE'` or `status='MISSED_WINDOW'` rather than writing nothing. The UI should explain why the session stood down instead of showing an ambiguous "Data pending" badge.
+
+### 2. Telegram Push: Andy's Account (User ID 5) Not Configured
+- **Audit Finding in `notification_preferences`:** Only user 6 (Dawson, `chat_id='6556354702'`) has a record. User 5 (Andy, `SpiritMaker`) has zero rows in `notification_preferences`, meaning Telegram push notifications for fills, breakeven, and exits are silently bypassed for Andy's accounts.
+- **Action for Andy:** On kabroda.com under Account / Preferences, link the Telegram Bot and save your Telegram Chat ID (or CC can check if `TELEGRAM_CHAT_ID` env var on Render is set to Andy's chat ID).
+- **CME D1 Lock Alert Dispatch:** Currently `_process_symbol_lock` dispatches only via `notify.send_admin_email()`. If Andy expects Telegram alerts on the 10:00 AM ET session lock/armed event, `cme_notify.py` / `cme_engine.py` should dispatch to Telegram as well.
+
+### 3. Account 17 (`Andy_CME_Funds`): Transitioning from DRY_RUN to LIVE
+- **Andy's Explicit Directive:** Account 17 (`Andy_CME_Funds`, Tradovate/CrossTrade) is dialed to `contracts_cap = 1` and `daily_risk_budget_usd = 350.0` (verified in `cme_configs` row 2). Andy wants this account running LIVE, not DRY_RUN.
+- **Gate Check in `executor_accounts.set_account_mode()`:** Lines 103-109 enforce `policy.preset_name not in ('steady_grow', 'conservative')`. Currently Account 17 has the untouched default `preset_name='steady_grow'` in `executor_sizing_policies` row 15.
+- **Action for CC / Andy:** Either:
+  (A) Andy/CC can update Account 17's sizing policy preset via the UI wizard (or DB) to a confirmed preset (e.g. `fixed_dollar`), then enter `CONFIRM ENABLE LIVE TRADING` on the account card; OR
+  (B) Update `set_account_mode()` to recognize that `exchange == 'tradovate'` accounts use `cme_configs` rather than `executor_sizing_policies`, so the crypto sizing-wizard gate does not block CME accounts.
