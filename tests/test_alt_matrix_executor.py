@@ -504,6 +504,16 @@ def _capture_account_email(monkeypatch):
     return calls
 
 
+def _capture_account_telegram(monkeypatch):
+    import notify
+    calls = []
+    def _fake(category, text, account_id):
+        calls.append({"category": category, "text": text, "account_id": account_id})
+        return True
+    monkeypatch.setattr(notify, "send_account_telegram", _fake)
+    return calls
+
+
 def test_place_entry_and_protect_happy_path_sends_entry_email(db, monkeypatch):
     account = _ready_account(db)
     order = _order(db, account)
@@ -522,6 +532,26 @@ def test_place_entry_and_protect_happy_path_sends_entry_email(db, monkeypatch):
     assert calls[0]["account_id"] == account.id
     assert "Position Opened" in calls[0]["subject"]
     assert "101.5" in calls[0]["body"]
+
+
+def test_place_entry_and_protect_happy_path_dispatches_telegram_fill_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx).
+    account = _ready_account(db)
+    order = _order(db, account)
+    tg_calls = _capture_account_telegram(monkeypatch)
+
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           place_order=_async({"code": 0, "data": {"orderId": "entry1"}}),
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_position=_async(_position_resp(position_id="pos1", avg_open_price=101.5)),
+           set_position_tpsl=_async(_tpsl_set_resp("sl1")))
+
+    _run(ax.place_entry_and_protect(db, account, order))
+
+    assert len(tg_calls) == 1
+    assert tg_calls[0]["category"] == "fill"
+    assert tg_calls[0]["account_id"] == account.id
 
 
 def test_place_entry_and_protect_stop_failure_sends_unprotected_alert(db, monkeypatch):
@@ -543,6 +573,25 @@ def test_place_entry_and_protect_stop_failure_sends_unprotected_alert(db, monkey
     assert "CHECK THE EXCHANGE DIRECTLY" in calls[0]["body"]
 
 
+def test_place_entry_and_protect_stop_failure_dispatches_telegram_problem_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx) -- always-on "problem" category.
+    account = _ready_account(db)
+    order = _order(db, account)
+    tg_calls = _capture_account_telegram(monkeypatch)
+
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           place_order=_async({"code": 0, "data": {"orderId": "entry1"}}),
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_position=_async(_position_resp()),
+           set_position_tpsl=_async({"code": 10002, "msg": "rate limited", "data": None}))
+
+    _run(ax.place_entry_and_protect(db, account, order))
+
+    assert len(tg_calls) == 1
+    assert tg_calls[0]["category"] == "problem"
+
+
 def test_amend_to_breakeven_happy_path_sends_breakeven_email(db, monkeypatch):
     account = _ready_account(db)
     order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, position_id="pos1")
@@ -557,6 +606,23 @@ def test_amend_to_breakeven_happy_path_sends_breakeven_email(db, monkeypatch):
 
     assert len(calls) == 1
     assert "Breakeven" in calls[0]["subject"]
+
+
+def test_amend_to_breakeven_happy_path_dispatches_telegram_breakeven_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx).
+    account = _ready_account(db)
+    order = _order(db, account, management_state="FILLED", entry_fill_price=100.0, position_id="pos1")
+    tg_calls = _capture_account_telegram(monkeypatch)
+
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           modify_position_tp_sl_order=_async({"code": 0, "data": {}}),
+           get_pending_tp_sl_order=_async(_tpsl_pending_resp(sl_price=100.2)))
+
+    _run(ax.amend_to_breakeven(db, account, order, be_price=100.2))
+
+    assert len(tg_calls) == 1
+    assert tg_calls[0]["category"] == "breakeven"
 
 
 def test_market_close_happy_path_sends_exit_email_with_approximation_note(db, monkeypatch):
@@ -576,6 +642,24 @@ def test_market_close_happy_path_sends_exit_email_with_approximation_note(db, mo
     assert "Alt Matrix Closed" in calls[0]["subject"]
     assert "Real order -- live money." in calls[0]["body"]
     assert "Note:" in calls[0]["body"]   # LIVE market_close() always approximates
+
+
+def test_market_close_happy_path_dispatches_telegram_exit_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx).
+    account = _ready_account(db)
+    order = _order(db, account, management_state="TRAILING", entry_fill_price=100.0, position_id="pos1", r_distance=2.0)
+    tg_calls = _capture_account_telegram(monkeypatch)
+
+    _patch(monkeypatch,
+           close_position=_async({"code": 0, "data": {}}),
+           get_position=_async(_empty_position_resp()))
+    import market_data
+    monkeypatch.setattr(market_data, "fetch_bitunix_5m", _async_fn_returning([{"close": "104.0"}]))
+
+    _run(ax.market_close(db, account, order, exit_reason="EMA21_TRAIL"))
+
+    assert len(tg_calls) == 1
+    assert tg_calls[0]["category"] == "exit"
 
 
 def test_notify_failure_never_breaks_real_order_placement(db, monkeypatch):

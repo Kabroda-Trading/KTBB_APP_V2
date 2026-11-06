@@ -30,11 +30,13 @@
 # pattern used everywhere else in this system (audit/monitor writes, macro
 # engine subprocess launch). A failed send is logged and never raised further.
 # ==============================================================================
+import json
 import os
 import smtplib
 import ssl
+import urllib.request
 from email.mime.text import MIMEText
-from typing import List
+from typing import List, Optional
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -220,3 +222,145 @@ def send_account_email(subject: str, body: str, account_id: int) -> bool:
         _log_send(subject, body, [], "SKIPPED", reason)
         return False
     return _send(subject, body, [owner_email])
+
+
+# ==============================================================================
+# TELEGRAM PUSH (2026-11-xx) -- a second delivery channel for the exact same
+# per-account events send_account_email() above already covers (fill,
+# breakeven ratchet, exit/close, and an always-on "problem" category for
+# unprotected positions/failed orders/exchange-side cancels). Never a new
+# decision point: every call site already computes this data for its email;
+# this just gives it a second, shorter, phone-friendly destination. Plain
+# stdlib urllib, matching this file's own "no new dependency" principle for
+# SMTP above. The radar/admin class (send_admin_email()) is deliberately
+# NOT extended here -- Andy's L4 ruling (see send_account_email()'s own
+# docstring) is a routing boundary, not just an email-specific one.
+# ==============================================================================
+
+def _send_telegram_raw(chat_id: str, text: str) -> bool:
+    """POSTs to Telegram's Bot API sendMessage endpoint. Fails closed --
+    logs and returns False, never raises -- if TELEGRAM_BOT_TOKEN is
+    unset or the call fails, matching send_admin_email()/send_account_
+    email()'s own never-raise contract. Same global-env-var, fail-closed
+    convention as METASIGNALS_SECRET_KEY/DATABENTO_API_KEY (CLAUDE.md) --
+    one bot token for the whole site, not per-account, since a Telegram
+    bot token has no per-account dimension (one bot, many chat_ids)."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token or not chat_id:
+        print(f"[NOTIFY] Telegram skipped — TELEGRAM_BOT_TOKEN not configured, or no chat_id.")
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status != 200:
+                print(f"[NOTIFY ERROR] Telegram send failed (HTTP {resp.status}): {text}")
+                return False
+        print(f"[NOTIFY] Telegram sent to chat_id={chat_id}: {text}")
+        return True
+    except Exception as e:
+        print(f"[NOTIFY ERROR] Telegram send failed: {e}")
+        return False
+
+
+def _resolve_account_owner_user_id(account_id: int) -> Optional[int]:
+    """Same self-contained lazy-import/short-lived-session pattern as
+    _resolve_account_owner_email() above, but returns the user_id itself
+    (needed to look up NotificationPreference) rather than the email."""
+    try:
+        from database import SessionLocal, ExecutorAccount
+        db = SessionLocal()
+        try:
+            account = db.query(ExecutorAccount).filter(ExecutorAccount.id == account_id).first()
+            return account.user_id if account is not None else None
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[NOTIFY] Account-owner user_id lookup failed for account_id={account_id}: {e}")
+        return None
+
+
+def _is_admin_user_id(user_id: int) -> bool:
+    """Only consulted for the TELEGRAM_CHAT_ID env-var fallback below --
+    not a general admin check, and never used to grant visibility into
+    another user's account (that mutual-isolation rule is unrelated and
+    untouched by this)."""
+    try:
+        from database import SessionLocal, UserModel
+        db = SessionLocal()
+        try:
+            user = db.query(UserModel).filter(UserModel.id == user_id).first()
+            return bool(user and user.is_admin)
+        finally:
+            db.close()
+    except Exception:
+        return False
+
+
+def send_account_telegram(category: str, text: str, account_id: int) -> bool:
+    """category is one of "fill"/"breakeven"/"exit" (gated by that user's
+    own NotificationPreference toggle, default-on) or "problem"
+    (unprotected position / order failed / canceled on the exchange --
+    always sent once a chat_id resolves, no opt-out, since these are
+    urgent risk alerts, not routine noise a trader should be able to
+    silently mute). Never raises -- wrap at the call site the same way
+    the existing send_account_email() call already is.
+
+    If no NotificationPreference row/chat_id exists yet for this user AND
+    they're the admin user, falls back to the TELEGRAM_CHAT_ID env var --
+    Andy already set this on Render, so his alerts work with zero further
+    action from him; Dawson/Terry set their own chat_id through the
+    account page's Mobile Alerts card instead."""
+    user_id = _resolve_account_owner_user_id(account_id)
+    if user_id is None:
+        return False
+
+    chat_id = None
+    toggle = True
+    try:
+        from database import SessionLocal, NotificationPreference
+        db = SessionLocal()
+        try:
+            pref = db.query(NotificationPreference).filter_by(user_id=user_id).first()
+            if pref is not None:
+                chat_id = pref.telegram_chat_id
+                toggle = {
+                    "fill": pref.notify_fill,
+                    "breakeven": pref.notify_breakeven,
+                    "exit": pref.notify_exit,
+                }.get(category, True)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[NOTIFY] NotificationPreference lookup failed for user_id={user_id}: {e}")
+
+    if not chat_id and _is_admin_user_id(user_id):
+        chat_id = os.getenv("TELEGRAM_CHAT_ID", "") or None
+
+    if not chat_id or not toggle:
+        return False
+    return _send_telegram_raw(chat_id, text)
+
+
+def _telegram_fill_text(desk: str, symbol: str, direction: str, price: float, stop: Optional[float] = None) -> str:
+    stop_part = f" (stop {stop:g})" if stop is not None else ""
+    return f"✅ {desk}: {symbol} {direction} filled @ {price:g}{stop_part}"
+
+
+def _telegram_breakeven_text(desk: str, symbol: str, be_price: float) -> str:
+    return f"🛡️ {desk}: {symbol} stop moved to breakeven ({be_price:g}) — risk-free"
+
+
+def _telegram_exit_text(desk: str, symbol: str, exit_reason: str, r: Optional[float] = None, usd: Optional[float] = None) -> str:
+    parts = []
+    if r is not None:
+        parts.append(f"{'+' if r >= 0 else ''}{r:.2f}R")
+    if usd is not None:
+        parts.append(f"{'+' if usd >= 0 else '-'}${abs(usd):.2f}")
+    detail = f" ({' / '.join(parts)})" if parts else ""
+    return f"🏁 {desk}: {symbol} closed via {exit_reason}{detail}"
+
+
+def _telegram_problem_text(desk: str, symbol: str, detail: str) -> str:
+    return f"⚠️ {desk}: {symbol} — {detail}"

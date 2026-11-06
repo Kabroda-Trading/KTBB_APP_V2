@@ -96,6 +96,12 @@ def _order_dict_for_notify(order_row: AltMatrixOrder, account: ExecutorAccount, 
 
 
 def _notify_dry_run_entry(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> None:
+    # Telegram push build (2026-11-xx): deliberately NOT wired here -- this
+    # is the DRY_RUN-only notification path (see this module's own header
+    # and the function name itself). A phone push claiming a real fill on
+    # a simulated order would be actively misleading; LIVE's own path
+    # (alt_matrix_executor.py's _notify_account()) gets the Telegram call
+    # instead. Email stays as-is for both modes, unchanged.
     try:
         import notify
         import alt_matrix_notify
@@ -107,6 +113,8 @@ def _notify_dry_run_entry(db: Session, account: ExecutorAccount, order_row: AltM
 
 
 def _notify_dry_run_breakeven(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> None:
+    # Telegram push build (2026-11-xx): DRY_RUN-only path, deliberately not
+    # wired -- see _notify_dry_run_entry()'s own comment above.
     try:
         import notify
         import alt_matrix_notify
@@ -118,6 +126,8 @@ def _notify_dry_run_breakeven(db: Session, account: ExecutorAccount, order_row: 
 
 
 def _notify_dry_run_exit(db: Session, account: ExecutorAccount, order_row: AltMatrixOrder) -> None:
+    # Telegram push build (2026-11-xx): DRY_RUN-only path, deliberately not
+    # wired -- see _notify_dry_run_entry()'s own comment above.
     try:
         import notify
         import alt_matrix_notify

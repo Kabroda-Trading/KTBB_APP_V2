@@ -75,6 +75,19 @@ DATABENTO_API_KEY     # Optional -- required only for cme_market.py's real D1/D2
                       # A single global key, not per-ExecutorAccount -- MES/MNQ price data doesn't
                       # depend on which Tradovate/CrossTrade account is trading it. Without this set,
                       # cme_market.py's fetch functions raise a clear RuntimeError (not a silent gap).
+TELEGRAM_BOT_TOKEN    # Optional -- required for any Telegram push to actually send (notify.py's
+                      # _send_telegram_raw()). Fails closed (logs, returns False, never raises) if
+                      # unset -- same convention as METASIGNALS_SECRET_KEY/DATABENTO_API_KEY. A single
+                      # global token (one bot, @KabrodaBot), not per-account -- matches how a Telegram
+                      # bot actually works (one bot, many chat_ids). Added 2026-11-xx alongside
+                      # NotificationPreference (database.py), the first per-USER (not per-account)
+                      # config table in this codebase -- a Telegram chat ID and category preferences
+                      # are facts about the person, not any one trading account.
+TELEGRAM_CHAT_ID      # Optional -- the admin/primary user's own fallback chat ID, used by notify.
+                      # send_account_telegram()/the /api/account/telegram-test route only when that
+                      # user hasn't yet saved one of their own via /account's Mobile Alerts card.
+                      # Already set by Andy on Render. Dawson/Terry set their own chat_id through the
+                      # UI instead (NotificationPreference.telegram_chat_id), never this env var.
 ```
 
 ---

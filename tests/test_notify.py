@@ -10,6 +10,7 @@ list entry to smtplib.sendmail() -- which most SMTP servers reject
 outright as a single malformed address, meaning NEITHER address
 reliably received mail. Fixed to parse SMTP_DEST into a real list.
 """
+import json
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -460,3 +461,228 @@ def test_send_account_email_logs_a_skipped_row_for_an_unresolvable_account(smtp_
     assert len(rows) == 1
     assert rows[0].outcome == "SKIPPED"
     assert "999999" in rows[0].detail
+
+
+# ------------------------------------------------------------------ Telegram push (2026-11-xx)
+# Second delivery channel for the exact same per-account events send_
+# account_email() above already covers. Mocks urllib.request.urlopen
+# entirely, same "no real network call" discipline as the SMTP tests
+# above -- no existing precedent for mocking urllib in this repo, written
+# from scratch the same way test_send_admin_email's smtplib mocking was.
+
+@pytest.fixture
+def telegram_account_and_owner(monkeypatch):
+    """Real ExecutorAccount + UserModel rows, same shape as
+    account_and_owner above, but also cleans up any NotificationPreference
+    row so each test starts from a known-empty state."""
+    import database
+    database.init_db()
+    db = database.SessionLocal()
+    db.query(database.ExecutorAccount).filter(database.ExecutorAccount.label == "test_telegram_account").delete()
+    db.query(database.UserModel).filter(database.UserModel.email == "tg_owner@test.com").delete()
+    db.commit()
+    user = database.UserModel(email="tg_owner@test.com", password_hash="x", is_admin=False)
+    db.add(user)
+    db.flush()
+    user_id = user.id
+    account = database.ExecutorAccount(user_id=user_id, label="test_telegram_account")
+    db.add(account)
+    db.commit()
+    account_id = account.id
+    db.query(database.NotificationPreference).filter_by(user_id=user_id).delete()
+    db.commit()
+    db.close()
+    yield {"account_id": account_id, "user_id": user_id}
+    db = database.SessionLocal()
+    db.query(database.ExecutorAccount).filter(database.ExecutorAccount.id == account_id).delete()
+    db.query(database.UserModel).filter(database.UserModel.id == user_id).delete()
+    db.query(database.NotificationPreference).filter_by(user_id=user_id).delete()
+    db.commit()
+    db.close()
+
+
+def _set_pref(user_id, **fields):
+    import database
+    db = database.SessionLocal()
+    pref = db.query(database.NotificationPreference).filter_by(user_id=user_id).first()
+    if pref is None:
+        pref = database.NotificationPreference(user_id=user_id)
+        db.add(pref)
+        db.flush()
+    for k, v in fields.items():
+        setattr(pref, k, v)
+    db.commit()
+    db.close()
+
+
+class _FakeHttpResponse:
+    def __init__(self, status=200):
+        self.status = status
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+def test_send_telegram_raw_skips_when_token_unset(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        ok = notify._send_telegram_raw("12345", "hello")
+    assert ok is False
+    mock_urlopen.assert_not_called()
+
+
+def test_send_telegram_raw_skips_when_no_chat_id(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        ok = notify._send_telegram_raw("", "hello")
+    assert ok is False
+    mock_urlopen.assert_not_called()
+
+
+def test_send_telegram_raw_posts_to_the_real_bot_api_url(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    with patch("urllib.request.urlopen", return_value=_FakeHttpResponse(200)) as mock_urlopen:
+        ok = notify._send_telegram_raw("12345", "hello world")
+    assert ok is True
+    req = mock_urlopen.call_args[0][0]
+    assert req.full_url == "https://api.telegram.org/botfake-token/sendMessage"
+    payload = json.loads(req.data.decode("utf-8"))
+    assert payload == {"chat_id": "12345", "text": "hello world"}
+
+
+def test_send_telegram_raw_returns_false_on_non_200(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    with patch("urllib.request.urlopen", return_value=_FakeHttpResponse(500)):
+        ok = notify._send_telegram_raw("12345", "hello")
+    assert ok is False
+
+
+def test_send_telegram_raw_returns_false_on_exception_never_raises(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    with patch("urllib.request.urlopen", side_effect=RuntimeError("network down")):
+        ok = notify._send_telegram_raw("12345", "hello")
+    assert ok is False
+
+
+def test_send_account_telegram_sends_when_chat_id_set_and_category_on(telegram_account_and_owner, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    _set_pref(telegram_account_and_owner["user_id"], telegram_chat_id="999", notify_fill=True)
+    with patch("urllib.request.urlopen", return_value=_FakeHttpResponse(200)) as mock_urlopen:
+        ok = notify.send_account_telegram("fill", "test message", telegram_account_and_owner["account_id"])
+    assert ok is True
+    mock_urlopen.assert_called_once()
+
+
+def test_send_account_telegram_respects_the_category_toggle_off(telegram_account_and_owner, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    _set_pref(telegram_account_and_owner["user_id"], telegram_chat_id="999", notify_fill=False)
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        ok = notify.send_account_telegram("fill", "test message", telegram_account_and_owner["account_id"])
+    assert ok is False
+    mock_urlopen.assert_not_called()
+
+
+def test_send_account_telegram_problem_category_always_sends_even_if_other_toggles_off(telegram_account_and_owner, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    _set_pref(telegram_account_and_owner["user_id"], telegram_chat_id="999",
+              notify_fill=False, notify_breakeven=False, notify_exit=False)
+    with patch("urllib.request.urlopen", return_value=_FakeHttpResponse(200)) as mock_urlopen:
+        ok = notify.send_account_telegram("problem", "unprotected position", telegram_account_and_owner["account_id"])
+    assert ok is True
+    mock_urlopen.assert_called_once()
+
+
+def test_send_account_telegram_no_chat_id_and_not_admin_does_not_send(telegram_account_and_owner, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    # No NotificationPreference row at all for this non-admin user.
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        ok = notify.send_account_telegram("fill", "test message", telegram_account_and_owner["account_id"])
+    assert ok is False
+    mock_urlopen.assert_not_called()
+
+
+def test_send_account_telegram_admin_falls_back_to_env_var_chat_id(monkeypatch):
+    """Andy's own already-configured Render setup: no NotificationPreference
+    row yet, but he's the admin user -- TELEGRAM_CHAT_ID env var covers him
+    with zero further action."""
+    import database
+    database.init_db()
+    db = database.SessionLocal()
+    db.query(database.ExecutorAccount).filter(database.ExecutorAccount.label == "test_telegram_admin_acct").delete()
+    db.query(database.UserModel).filter(database.UserModel.email == "tg_admin@test.com").delete()
+    db.commit()
+    user = database.UserModel(email="tg_admin@test.com", password_hash="x", is_admin=True)
+    db.add(user)
+    db.flush()
+    account = database.ExecutorAccount(user_id=user.id, label="test_telegram_admin_acct")
+    db.add(account)
+    db.commit()
+    account_id = account.id
+    user_id = user.id
+    db.close()
+    try:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "admin-chat-id")
+        with patch("urllib.request.urlopen", return_value=_FakeHttpResponse(200)) as mock_urlopen:
+            ok = notify.send_account_telegram("fill", "test message", account_id)
+        assert ok is True
+        req = mock_urlopen.call_args[0][0]
+        payload = json.loads(req.data.decode("utf-8"))
+        assert payload["chat_id"] == "admin-chat-id"
+    finally:
+        db = database.SessionLocal()
+        db.query(database.ExecutorAccount).filter(database.ExecutorAccount.id == account_id).delete()
+        db.query(database.UserModel).filter(database.UserModel.id == user_id).delete()
+        db.commit()
+        db.close()
+
+
+def test_send_account_telegram_unresolvable_account_returns_false(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        ok = notify.send_account_telegram("fill", "test message", 999999)
+    assert ok is False
+    mock_urlopen.assert_not_called()
+
+
+# ------------------------------------------------------------------ Telegram message builders
+
+def test_telegram_fill_text_includes_stop_when_given():
+    text = notify._telegram_fill_text("CME", "MNQ", "LONG", 20450.5, stop=20405.0)
+    assert text == "✅ CME: MNQ LONG filled @ 20450.5 (stop 20405)"
+
+
+def test_telegram_fill_text_omits_stop_when_not_given():
+    text = notify._telegram_fill_text("Traveler", "BTC/USDT", "LONG", 90000.0)
+    assert "stop" not in text
+    assert "90000" in text
+
+
+def test_telegram_breakeven_text():
+    text = notify._telegram_breakeven_text("CME", "MNQ", 20451.0)
+    assert "MNQ" in text and "20451" in text and "breakeven" in text.lower()
+
+
+def test_telegram_exit_text_with_both_r_and_usd():
+    text = notify._telegram_exit_text("CME", "MNQ", "T1", r=1.0, usd=142.50)
+    assert "+1.00R" in text
+    assert "+$142.50" in text
+    assert "T1" in text
+
+
+def test_telegram_exit_text_negative_values_show_sign():
+    text = notify._telegram_exit_text("Alt Matrix", "SOL/USDT", "STOP", r=-1.0, usd=-100.0)
+    assert "-1.00R" in text
+    assert "-$100.00" in text
+
+
+def test_telegram_exit_text_with_neither_r_nor_usd():
+    text = notify._telegram_exit_text("Traveler", "BTC/USDT", "TIME")
+    assert text == "🏁 Traveler: BTC/USDT closed via TIME"
+
+
+def test_telegram_problem_text():
+    text = notify._telegram_problem_text("CME", "MNQ", "entry filled but stop placement failed")
+    assert "MNQ" in text and "entry filled but stop placement failed" in text

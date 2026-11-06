@@ -327,6 +327,22 @@ def test_place_traveler_entry_order_places_a_resting_post_only_limit(db, monkeyp
     assert order.entry_exchange_order_id == "order2"
 
 
+def test_place_traveler_entry_order_failure_dispatches_telegram_problem_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx) -- the "problem" category, always-on.
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state=None)
+    tg_calls = []
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
+    monkeypatch.setattr("notify.send_account_telegram", lambda cat, text, acct_id: tg_calls.append((cat, text, acct_id)))
+    _install(monkeypatch, get_trading_pairs=_async(_trading_pairs_response()),
+             place_order=_async({"code": 1, "msg": "boom", "data": {}}))
+    _run(e1e.place_traveler_entry_order(db, account, plan, order))
+    assert order.management_state == "CLOSED_ERROR"
+    assert len(tg_calls) == 1
+    assert tg_calls[0][0] == "problem"
+
+
 # ------------------------------------------------------------------ check_traveler_entry_fill_and_protect
 
 def test_entry_not_yet_filled_makes_no_state_change_when_plan_not_expired(db, monkeypatch):
@@ -434,6 +450,54 @@ def test_entry_protection_failure_lands_in_unprotected_state(db, monkeypatch):
     assert order.management_state == "ENTRY_FILLED_UNPROTECTED"
 
 
+def test_entry_fill_dispatches_telegram_fill_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx).
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1",
+                        stop_price=84657.86, t1_price=86311.56)
+    tg_calls = []
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
+    monkeypatch.setattr("notify.send_account_telegram", lambda cat, text, acct_id: tg_calls.append((cat, text, acct_id)))
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="FILLED")),
+             get_position=_async(_one_position_response()),
+             get_trading_pairs=_async(_trading_pairs_response()),
+             set_position_tpsl=_async(_tpsl_response()),
+             place_order=_async(_place_order_response(order_id="t1-order")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+
+    assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
+    assert len(tg_calls) == 1
+    cat, text, acct_id = tg_calls[0]
+    assert cat == "fill"
+    assert acct_id == account.id
+
+
+def test_entry_protection_failure_dispatches_telegram_problem_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx) -- always-on "problem" category.
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+
+    async def _tpsl_fail(self, *a, **kw):
+        return {"code": 1, "msg": "boom", "data": {}}
+
+    tg_calls = []
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
+    monkeypatch.setattr("notify.send_account_telegram", lambda cat, text, acct_id: tg_calls.append((cat, text, acct_id)))
+    _install(monkeypatch,
+             get_order_detail=_async(_order_detail_response(status="FILLED")),
+             get_position=_async(_one_position_response()),
+             get_trading_pairs=_async(_trading_pairs_response()),
+             set_position_tpsl=_tpsl_fail,
+             place_order=_async(_place_order_response(order_id="t1-order")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert order.management_state == "ENTRY_FILLED_UNPROTECTED"
+    assert len(tg_calls) == 1
+    assert tg_calls[0][0] == "problem"
+
+
 # ------------------------------------------------------------------ item 4 (2026-09-27): reconciliation for a non-expiry exchange-side cancel
 
 def test_entry_canceled_on_exchange_before_expiry_reconciles_not_a_loss(db, monkeypatch):
@@ -467,6 +531,20 @@ def test_entry_canceled_on_exchange_before_expiry_reconciles_not_a_loss(db, monk
     assert order.management_state in e1e._E1_LIVE_TERMINAL_STATES   # the poll loop must stop re-checking it
     assert len(sent) == 1
     assert "canceled on the exchange" in sent[0][0].lower()
+
+
+def test_entry_canceled_on_exchange_dispatches_telegram_exit_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx).
+    account = _ready_account(db)
+    plan = _traveler_plan(db, journey_cap_at=_FAR_FUTURE)
+    order = _order_row(db, account, plan, entry_exchange_order_id="entry-order-1")
+    tg_calls = []
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
+    monkeypatch.setattr("notify.send_account_telegram", lambda cat, text, acct_id: tg_calls.append((cat, text, acct_id)))
+    _install(monkeypatch, get_order_detail=_async(_order_detail_response(status="CANCELED")))
+    _run(e1e.check_traveler_entry_fill_and_protect(db, account, plan, order))
+    assert len(tg_calls) == 1
+    assert tg_calls[0][0] == "exit"
 
 
 def test_init_db_backfills_exit_reason_on_historical_entry_canceled_rows(db):
@@ -921,6 +999,27 @@ def test_normal_t1_fill_sends_a_management_event_email(db, monkeypatch):
     assert "target hit (T1)" in body
     assert "Real order -- live money." in body   # LIVE, not the DRY_RUN caveat
     assert "approximated" not in body.lower()  # T1 is a real resting-limit fill, never approximated
+
+
+def test_normal_t1_fill_dispatches_telegram_exit_category(db, monkeypatch):
+    # Telegram push build (2026-11-xx).
+    account = _ready_account(db)
+    plan = _traveler_plan(db)
+    order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
+                        entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
+    tg_calls = []
+    monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: True)
+    monkeypatch.setattr("notify.send_account_telegram", lambda cat, text, acct_id: tg_calls.append((cat, text, acct_id)))
+    _install(monkeypatch,
+             get_position=_async(_no_position_response()),
+             get_order_detail=_async(_order_detail_response(status="FILLED", order_id="t1-1")))
+    _run(e1e.poll_traveler_position(db, account, plan, order))
+
+    assert len(tg_calls) == 1
+    cat, text, acct_id = tg_calls[0]
+    assert cat == "exit"
+    assert "T1" in text
+    assert acct_id == account.id
 
 
 def test_stop_exit_email_has_no_approximated_caveat(db, monkeypatch):

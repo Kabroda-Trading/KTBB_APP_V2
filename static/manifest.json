@@ -1,0 +1,24 @@
+{
+    "name": "Kabroda Trading Desk",
+    "short_name": "Kabroda",
+    "description": "Live trading desks, balances, and alerts for Kabroda.",
+    "start_url": "/suite/dashboard",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#1a120d",
+    "theme_color": "#c9a880",
+    "icons": [
+        {
+            "src": "/static/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/static/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        }
+    ]
+}

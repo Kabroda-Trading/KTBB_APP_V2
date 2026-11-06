@@ -1065,6 +1065,38 @@ class UserModel(Base):
     is_admin = Column(Boolean, default=False)
     operator_flex = Column(Boolean, default=False)
 
+
+class NotificationPreference(Base):
+    """One row per UserModel -- Telegram push build (2026-11-xx). A
+    deliberate deviation from AltMatrixConfig/CMEConfig's own account_id-
+    scoped shape: a Telegram chat ID and category preferences are facts
+    about the PERSON, not any one trading account (one owner's two
+    accounts would otherwise need the same chat ID entered twice, with
+    real drift risk). First user-scoped (not account-scoped) config table
+    in this codebase -- lazy-created on first POST to
+    /api/account/notification-preferences, same idiom CMEConfig already
+    uses, just keyed by user_id instead of account_id.
+
+    No "problem" (unprotected position / order failed / canceled) column
+    on purpose -- that category is always-on whenever telegram_chat_id is
+    set, no opt-out, since those are urgent risk alerts, not routine
+    noise a trader should be able to silently mute.
+
+    New table -- picked up by Base.metadata.create_all() on deploy. No
+    ALTER TABLE needed."""
+    __tablename__ = "notification_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True)  # users.id
+    telegram_chat_id = Column(String, nullable=True)
+    notify_fill = Column(Boolean, nullable=False, default=True)
+    notify_breakeven = Column(Boolean, nullable=False, default=True)
+    notify_exit = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
 # ---------------------------------------------------------
 # EXISTING: GRAVITY GRID MEMORY VAULT
 # ---------------------------------------------------------

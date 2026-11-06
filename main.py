@@ -13,7 +13,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
@@ -829,6 +829,16 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """PWA build (2026-11-xx) -- served from the root, not /static/sw.js,
+    so its default scope covers the whole site. StaticFiles doesn't set
+    the Service-Worker-Allowed header needed to widen a /static/-served
+    worker's scope to "/" -- serving from root avoids needing that header
+    at all, the standard PWA convention."""
+    return FileResponse(os.path.join(BASE_DIR, "static", "sw.js"), media_type="application/javascript")
 
 app.include_router(auth.router)
 
@@ -3531,6 +3541,9 @@ async def indicators(request: Request, db: Session = Depends(get_db)):
 async def account(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
+    from database import NotificationPreference as _NotificationPreference
+    pref = db.query(_NotificationPreference).filter_by(user_id=ctx["user"].id).first()
+    ctx["notification_prefs"] = _notification_preference_dict(pref, ctx["user"].id)
     return _template_or_fallback(request, templates, "account.html", ctx)
 
 @app.post("/account/profile")
@@ -3567,6 +3580,80 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
         user.operator_flex = bool(data.get("operator_flex", False))
         db.commit()
     return {"status": "ok"}
+
+
+# Telegram push build (2026-11-xx) -- per-user (not per-account) mobile
+# alert preferences. Same uid = request.session.get(auth.SESSION_KEY)
+# auth shape as the three /account/* routes directly above -- no
+# account_id, no owner-or-admin check needed, since this mutates only the
+# logged-in user's own row.
+def _notification_preference_dict(pref, user_id: int) -> Dict[str, Any]:
+    if pref is None:
+        return {"user_id": user_id, "telegram_chat_id": None,
+                 "notify_fill": True, "notify_breakeven": True, "notify_exit": True}
+    return {
+        "user_id": pref.user_id, "telegram_chat_id": pref.telegram_chat_id,
+        "notify_fill": pref.notify_fill, "notify_breakeven": pref.notify_breakeven, "notify_exit": pref.notify_exit,
+    }
+
+
+@app.get("/api/account/notification-preferences")
+async def get_notification_preferences(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get(auth.SESSION_KEY)
+    if not uid: raise HTTPException(status_code=401)
+    from database import NotificationPreference as _NotificationPreference
+    pref = db.query(_NotificationPreference).filter_by(user_id=uid).first()
+    return {"ok": True, "preferences": _notification_preference_dict(pref, uid)}
+
+
+@app.post("/api/account/notification-preferences")
+async def update_notification_preferences(request: Request, payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """Independent-field, omitted-leaves-unchanged body, same convention
+    as CMEConfigRequest/AltMatrixConfigRequest -- lazy-creates the row on
+    first write."""
+    uid = request.session.get(auth.SESSION_KEY)
+    if not uid: raise HTTPException(status_code=401)
+    from database import NotificationPreference as _NotificationPreference
+    pref = db.query(_NotificationPreference).filter_by(user_id=uid).first()
+    if pref is None:
+        pref = _NotificationPreference(user_id=uid)
+        db.add(pref)
+        db.flush()
+    if "telegram_chat_id" in payload:
+        raw = payload["telegram_chat_id"]
+        pref.telegram_chat_id = str(raw).strip() or None if raw is not None else None
+    if "notify_fill" in payload: pref.notify_fill = bool(payload["notify_fill"])
+    if "notify_breakeven" in payload: pref.notify_breakeven = bool(payload["notify_breakeven"])
+    if "notify_exit" in payload: pref.notify_exit = bool(payload["notify_exit"])
+    db.commit()
+    return {"ok": True, "preferences": _notification_preference_dict(pref, uid)}
+
+
+@app.post("/api/account/telegram-test")
+async def telegram_test_alert(request: Request, db: Session = Depends(get_db)):
+    """Sends one real test message to the logged-in user's own configured
+    chat ID right now -- same "fire a real test now" precedent as the
+    existing admin-only /api/admin/test-notify, just per-user instead of
+    admin-only, and Telegram instead of email. Falls back to the
+    TELEGRAM_CHAT_ID env var for the admin user with no saved chat_id yet,
+    same as send_account_telegram()'s own fallback."""
+    uid = request.session.get(auth.SESSION_KEY)
+    if not uid: raise HTTPException(status_code=401)
+    from database import NotificationPreference as _NotificationPreference
+    pref = db.query(_NotificationPreference).filter_by(user_id=uid).first()
+    chat_id = pref.telegram_chat_id if pref is not None else None
+    if not chat_id:
+        user = db.query(UserModel).filter(UserModel.id == uid).first()
+        if user is not None and user.is_admin:
+            chat_id = os.getenv("TELEGRAM_CHAT_ID", "") or None
+    if not chat_id:
+        return JSONResponse({"ok": False, "error": "No Telegram chat ID configured yet -- save one above first."}, status_code=400)
+    import notify
+    ok = notify._send_telegram_raw(chat_id, "✅ Kabroda test alert — if you can see this, push notifications are working.")
+    if not ok:
+        return JSONResponse({"ok": False, "error": "Telegram send failed -- check TELEGRAM_BOT_TOKEN is set and the chat ID is correct."}, status_code=502)
+    return {"ok": True}
+
 
 # --- ADMIN ROUTES ---
 # /admin/simulator + market_simulator.py archived 2026-08-28 -- Andy's call:

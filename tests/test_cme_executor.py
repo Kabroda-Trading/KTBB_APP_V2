@@ -358,3 +358,94 @@ def test_cancel_or_close_order_double_cancel_second_call_raises_not_double_cance
     # Second call sees the now-terminal state and must raise, not re-cancel.
     with pytest.raises(ValueError):
         _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
+
+
+# ------------------------------------------------------------------ Telegram push wiring (2026-11-xx)
+# _notify_account()/_notify_unprotected() already send email unconditionally
+# in these tests' environment (no real SMTP/Telegram creds set -- both fail
+# closed silently, caught by the enclosing try/except). These tests mock
+# notify.send_account_telegram() directly to prove the NEW dispatch wiring
+# itself: the right category fires for each real event, with a real
+# non-empty message built from the order's own fields.
+
+def test_notify_account_fill_dispatches_the_right_telegram_category(db, monkeypatch):
+    import notify
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, entry_fill_price=4500.0, sl_price_initial=4480.0)
+    calls = []
+    monkeypatch.setattr(notify, "send_account_telegram", lambda cat, text, acct_id: calls.append((cat, text, acct_id)))
+
+    cx._notify_account(db, account, "build_cme_entry_email", order)
+
+    assert len(calls) == 1
+    cat, text, acct_id = calls[0]
+    assert cat == "fill"
+    assert "MNQ" in text and "4500" in text
+    assert acct_id == account.id
+
+
+def test_notify_account_breakeven_dispatches_the_right_telegram_category(db, monkeypatch):
+    import notify
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, be_price=4502.0)
+    calls = []
+    monkeypatch.setattr(notify, "send_account_telegram", lambda cat, text, acct_id: calls.append((cat, text, acct_id)))
+
+    cx._notify_account(db, account, "build_cme_breakeven_email", order)
+
+    assert len(calls) == 1
+    cat, text, _ = calls[0]
+    assert cat == "breakeven"
+    assert "4502" in text
+
+
+def test_notify_account_exit_dispatches_the_right_telegram_category(db, monkeypatch):
+    import notify
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, exit_reason="T1", exit_price=4540.0, realized_pnl_r=1.0, dollar_pnl=142.50)
+    calls = []
+    monkeypatch.setattr(notify, "send_account_telegram", lambda cat, text, acct_id: calls.append((cat, text, acct_id)))
+
+    cx._notify_account(db, account, "build_cme_exit_email", order)
+
+    assert len(calls) == 1
+    cat, text, _ = calls[0]
+    assert cat == "exit"
+    assert "T1" in text and "+1.00R" in text
+
+
+def test_notify_unprotected_dispatches_the_problem_category(db, monkeypatch):
+    import notify
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, sl_price_initial=4480.0, position_id="pos1")
+    calls = []
+    monkeypatch.setattr(notify, "send_account_telegram", lambda cat, text, acct_id: calls.append((cat, text, acct_id)))
+
+    cx._notify_unprotected(db, account, order, "stop placement failed")
+
+    assert len(calls) == 1
+    cat, text, _ = calls[0]
+    assert cat == "problem"
+    assert "stop placement failed" in text
+
+
+def test_notify_account_telegram_failure_never_blocks_the_email_send(db, monkeypatch):
+    """A broken Telegram call must never prevent the existing email send
+    -- both are inside the same try/except, but Telegram is dispatched
+    AFTER email, so email must have already gone out by the time Telegram
+    breaks."""
+    import notify
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, entry_fill_price=4500.0)
+    email_calls = []
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, acct_id: email_calls.append(subject))
+    monkeypatch.setattr(notify, "send_account_telegram", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("telegram down")))
+
+    cx._notify_account(db, account, "build_cme_entry_email", order)   # must not raise
+
+    assert len(email_calls) == 1

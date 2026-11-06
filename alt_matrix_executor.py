@@ -114,12 +114,22 @@ def _order_dict_for_notify(db: Session, order_row: AltMatrixOrder, account: Exec
     }
 
 
+_TELEGRAM_CATEGORY_BY_BUILDER = {
+    "build_alt_matrix_entry_email": "fill",
+    "build_alt_matrix_breakeven_email": "breakeven",
+    "build_alt_matrix_exit_email": "exit",
+}
+
+
 def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_row: AltMatrixOrder, **extra) -> None:
     """send_account_email() wrapper, same never-let-a-notification-failure-
     interrupt-real-execution convention as every notify call site in
     executor_live_e1_engine.py -- `builder` names the alt_matrix_notify.py
     function to call (imported lazily, matching this file's own existing
-    lazy-import convention for executor_bitunix_client)."""
+    lazy-import convention for executor_bitunix_client). Telegram push
+    (2026-11-xx): second delivery channel for the same event, dispatched
+    from this one shared call site the same way cme_executor.py's own
+    _notify_account() does."""
     try:
         import notify
         import alt_matrix_notify
@@ -127,6 +137,19 @@ def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_r
         order_dict = _order_dict_for_notify(db, order_row, account)
         subject, body = fn(order_dict, **extra) if extra else fn(order_dict)
         notify.send_account_email(subject, body, account.id)
+        category = _TELEGRAM_CATEGORY_BY_BUILDER.get(builder)
+        if category == "fill":
+            text = notify._telegram_fill_text("Alt Matrix", order_row.symbol, order_row.direction,
+                                               order_row.entry_fill_price, stop=order_row.sl_price_initial)
+        elif category == "breakeven":
+            text = notify._telegram_breakeven_text("Alt Matrix", order_row.symbol, order_row.be_price)
+        elif category == "exit":
+            text = notify._telegram_exit_text("Alt Matrix", order_row.symbol, order_row.exit_reason,
+                                               r=order_row.realized_pnl_r, usd=order_row.realized_pnl_usd)
+        else:
+            text = None
+        if category and text:
+            notify.send_account_telegram(category, text, account.id)
     except Exception as e:
         print(f"|| ALT MATRIX EXECUTOR || {builder} notification failed for order {order_row.id}: {e}")
 
@@ -146,6 +169,8 @@ def _notify_unprotected(db: Session, account: ExecutorAccount, order_row: AltMat
             f"(stop at {order_row.sl_price_initial}).",
             account.id,
         )
+        notify.send_account_telegram("problem", notify._telegram_problem_text(
+            "Alt Matrix", order_row.symbol, f"unprotected position — {detail}"), account.id)
     except Exception as e:
         print(f"|| ALT MATRIX EXECUTOR || unprotected-position notification failed for order {order_row.id}: {e}")
 

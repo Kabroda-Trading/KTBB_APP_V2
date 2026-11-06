@@ -78,6 +78,13 @@ def _order_dict_for_notify(db: Session, order_row: CMEOrder, account: ExecutorAc
     }
 
 
+_TELEGRAM_CATEGORY_BY_BUILDER = {
+    "build_cme_entry_email": "fill",
+    "build_cme_breakeven_email": "breakeven",
+    "build_cme_exit_email": "exit",
+}
+
+
 def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_row: CMEOrder, **extra) -> None:
     try:
         import notify
@@ -86,6 +93,23 @@ def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_r
         order_dict = _order_dict_for_notify(db, order_row, account)
         subject, body = fn(order_dict, **extra) if extra else fn(order_dict)
         notify.send_account_email(subject, body, account.id)
+        # Telegram push (2026-11-xx) -- second delivery channel for the
+        # exact same event, never a new decision point. One dispatcher
+        # covers all three categories since _notify_account() already is
+        # the shared call site for fill/breakeven/exit.
+        category = _TELEGRAM_CATEGORY_BY_BUILDER.get(builder)
+        if category == "fill":
+            text = notify._telegram_fill_text("CME", order_row.symbol, order_row.direction,
+                                               order_row.entry_fill_price, stop=order_row.sl_price_initial)
+        elif category == "breakeven":
+            text = notify._telegram_breakeven_text("CME", order_row.symbol, order_row.be_price)
+        elif category == "exit":
+            text = notify._telegram_exit_text("CME", order_row.symbol, order_row.exit_reason,
+                                               r=order_row.realized_pnl_r, usd=order_row.dollar_pnl)
+        else:
+            text = None
+        if category and text:
+            notify.send_account_telegram(category, text, account.id)
     except Exception as e:
         print(f"|| CME EXECUTOR || {builder} notification failed for order {order_row.id}: {e}")
 
@@ -101,6 +125,8 @@ def _notify_unprotected(db: Session, account: ExecutorAccount, order_row: CMEOrd
             f"(stop at {order_row.sl_price_initial}).",
             account.id,
         )
+        notify.send_account_telegram("problem", notify._telegram_problem_text(
+            "CME", order_row.symbol, f"unprotected position — {detail}"), account.id)
     except Exception as e:
         print(f"|| CME EXECUTOR || unprotected-position notification failed for order {order_row.id}: {e}")
 

@@ -262,6 +262,8 @@ async def place_traveler_entry_order(db: Session, account: ExecutorAccount, trav
             f"the entry level before the order reached the exchange). No automatic retry.",
             account.id,
         )
+        notify.send_account_telegram("problem", notify._telegram_problem_text(
+            "Traveler", order_row.symbol, "entry order placement failed, no retry"), account.id)
         return
     order_row.entry_exchange_order_id = order_id
     order_row.entry_status = "NEW"
@@ -422,6 +424,8 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
                 f"limit could no longer rest (price had already moved past the entry level).",
                 account.id,
             )
+            notify.send_account_telegram("exit", notify._telegram_problem_text(
+                "Traveler", order_row.symbol, "entry canceled on the exchange before filling — no position opened, no loss"), account.id)
             return
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         if _plan_has_expired(traveler_plan_row, now_utc, is_rearm=order_row.is_rearm):
@@ -496,6 +500,8 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
             f"or close the position -- this bot will not act on it further.",
             account.id,
         )
+        notify.send_account_telegram("problem", notify._telegram_problem_text(
+            "Traveler", order_row.symbol, "entry filled but stop/T1 placement incomplete"), account.id)
         return
 
     order_row.management_state = "ENTRY_FILLED_ORDERS_PLACED"
@@ -532,6 +538,9 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
         # 2026-09-28 (Andy L4 ruling): a real fill is per-account trade-
         # execution detail -- route to this account's owner only.
         notify.send_account_email(subject, body, account.id)
+        text = notify._telegram_fill_text("Traveler", order_row.symbol, order_row.direction,
+                                           order_row.entry_fill_price, stop=order_row.stop_price)
+        notify.send_account_telegram("fill", text, account.id)
     except Exception as e:
         print(f"|| EXECUTOR LIVE E1 || Real-fill notification failed for order {order_row.id}: {e}")
 
@@ -631,6 +640,9 @@ async def _finalize_traveler_close(
         # 2026-09-28 (Andy L4 ruling): a real close/exit is per-account
         # trade-execution detail (includes risk$/R) -- account owner only.
         notify.send_account_email(subject, body, account.id)
+        text = notify._telegram_exit_text("Traveler", order_row.symbol, exit_reason,
+                                           r=order_row.realized_pnl_r, usd=order_row.realized_pnl_usd)
+        notify.send_account_telegram("exit", text, account.id)
     except Exception as e:
         print(f"|| EXECUTOR LIVE E1 || Management-event notification failed for order {order_row.id}: {e}")
 
