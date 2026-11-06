@@ -10115,3 +10115,44 @@ Following Andy's direct review of the CME Desk on kabroda.com today (showing "DA
 - **Action for CC / Andy:** Either:
   (A) Andy/CC can update Account 17's sizing policy preset via the UI wizard (or DB) to a confirmed preset (e.g. `fixed_dollar`), then enter `CONFIRM ENABLE LIVE TRADING` on the account card; OR
   (B) Update `set_account_mode()` to recognize that `exchange == 'tradovate'` accounts use `cme_configs` rather than `executor_sizing_policies`, so the crypto sizing-wizard gate does not block CME accounts.
+
+
+## 2026-11-06 (fourth entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — Work Order: Executor UX Overhaul (CME vs Traveler Account Scoping) & Full D1/D2/D3 Automation Mandate
+
+Following Andy's review of the Executor Admin page and CME Desk:
+
+### 1. The Core UX Defect: Account-Type Bleed & User Confusion
+- **Monolithic 7-Step Card in `executor_admin.html`:** Every account card currently renders all 7 steps regardless of exchange:
+  - Step 1: Credentials
+  - Steps 2 & 3: Crypto Sizing Wizard (Bitunix)
+  - Step 4: *Strategy Profile: GATE_TRAVELER / MGMT_E1_STACK* (Bitcoin Traveler)
+  - Step 5: *Go Live* (`CONFIRM ENABLE LIVE TRADING`)
+  - Step 6: *Alt Matrix (SOL/ETH 4H)*
+  - Step 7: *CME Micro Futures (MNQ/MES, Tradovate)*
+- **The Confusion:** On a Tradovate account (`Andy_CME_Funds`), the user is shown Step 4 (Traveler) and Step 3 (crypto sizing). Step 5 ("Go Live") sits directly below Step 4, making it appear tied exclusively to Bitcoin Traveler. Meanwhile, Step 7 (CME) is down at the bottom with symbol checkboxes but NO "Go Live" control of its own.
+- **The Code Blocker in `executor_accounts.py:104`:** `set_account_mode()` strictly requires `policy.preset_name not in ('steady_grow', 'conservative')`. Because Tradovate accounts are configured in `cme_configs` (Step 7) and never touch the crypto wizard (Step 3), Step 5 throws an error if attempted on a Tradovate account.
+- **CME Desk Read-Only Limitation (`cme_desk.html`):** The desk displays `Mode: DRY_RUN` as plain text with no control or direct link to activate the account.
+
+### 2. Work Order for Claude Code (Executor & Desk Overhaul)
+1. **Dynamic Step Scoping by `account.exchange` (`executor_admin.html`):**
+   - **For `account.exchange === 'tradovate'`:** Completely suppress Steps 2, 3, 4, and 6. Show only:
+     - Step 1: CrossTrade / Tradovate Credentials
+     - Step 2: CME Risk & Contract Caps (`CMEConfig`: contracts cap, daily risk budget, trailing DD limit, MNQ/MES toggles)
+     - Step 3: Go Live (dedicated CME Go Live section with confirm phrase)
+     - Step 4: Kill switch & manual emergency flatten controls.
+   - **For `account.exchange === 'bitunix'`:** Render Steps 1-6 as normal; suppress Step 7 (CME).
+2. **Backend Validation Decoupling (`executor_accounts.py:set_account_mode`):**
+   - Update `set_account_mode()`: If `account.exchange == 'tradovate'`, bypass `get_or_init_sizing_policy()` and instead validate that `CMEConfig` exists for that account with `contracts_cap > 0` and `daily_risk_budget_usd > 0`.
+3. **CME Desk Mode Control (`templates/cme_desk.html`):**
+   - In the Account Configuration panel, add an interactive toggle for `DRY_RUN` vs `LIVE` (with the standard `CONFIRM ENABLE LIVE TRADING` confirmation modal) so the trader never has to jump across admin pages to activate CME trading.
+4. **Autonomous D1/D2/D3 Automation Mandate (`cme_engine.py`):**
+   - CME must run fully automated without manual intervention:
+     - **D1:** 10:00 AM ET lock. If Databento calibration fetch fails or the catchup window expires, write an explicit `CMEPlan` row with `status = 'STAND_DOWN_UNREACHABLE'` or `status = 'MISSED_WINDOW'`. Never leave the database empty (`plan == null`), which causes the desk to default to "DATA PENDING / HOLIDAY".
+     - **D2:** Autonomous 5m close confirmation beyond BO/BD + resting limit bracket on passive retest (60-min cap).
+     - **D3:** Atomic OSO bracket placement via CrossTrade, BE ratchet at `+0.8x` box, target at `+2.0x` box, and mandatory 16:00 ET session flush.
+
+### 3. Immediate Account 17 Status Update
+- Per Andy's explicit instruction to get out of "pending" and make CME active, **Account 17 (`Andy_CME_Funds`) has been officially switched to `mode = 'LIVE'` in the production database**.
+- Transition executed via `executor_accounts.set_account_mode()`, resetting risk state and writing the official `MODE_CHANGED` audit row (`occurred_at: 2026-11-06 20:25:41 UTC`).
+- Account 17 is now live and armed for Monday morning's 10:00 AM ET lock.
