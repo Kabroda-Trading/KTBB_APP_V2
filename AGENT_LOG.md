@@ -10156,3 +10156,49 @@ Following Andy's review of the Executor Admin page and CME Desk:
 - Per Andy's explicit instruction to get out of "pending" and make CME active, **Account 17 (`Andy_CME_Funds`) has been officially switched to `mode = 'LIVE'` in the production database**.
 - Transition executed via `executor_accounts.set_account_mode()`, resetting risk state and writing the official `MODE_CHANGED` audit row (`occurred_at: 2026-11-06 20:25:41 UTC`).
 - Account 17 is now live and armed for Monday morning's 10:00 AM ET lock.
+
+
+## 2026-11-07 (first entry) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open — CME Layer-0 Data Pipeline: Calendar Guard, Databento 422 Handling, and Z0/D1/D2/D3 Division of Responsibility
+
+Following Andy's direct review of the CME Desk on Saturday morning (2026-11-07) showing the raw Databento HTTP 422 error on MNQ/MES:
+
+### 1. Root Cause Forensics: Why the 422 Happened
+- **The Weekend Fact:** CME Globex equity futures (MNQ, MES) close every Friday at 17:00 ET (21:00 UTC) and remain closed all day Saturday until Sunday at 18:00 ET. No trading occurred today.
+- **The Databento Boundary:** In Databento's `GLBX.MDP3` dataset, `available_end` is `2026-11-07 00:00:00+00:00` (Friday close). When the engine queried `2026-11-07 14:30:00Z` to `15:00:00Z` (Saturday 9:30–10:00 ET), Databento threw HTTP 422 (`data_start_after_available_end`) because `start` is in the future relative to available data.
+- **The Architectural Bug in `cme_clock.py`:** Lines 59–65 explicitly state:
+  `Weekends/holidays are deliberately NOT filtered here (CME equity-index futures trade nearly continuously; the engine's own lock logic simply finds an empty/garbage 30-minute window on a closed day and stands down for lack of valid bars -- no separate calendar is needed to get that right).`
+  This assumption failed: Databento does NOT return an empty list `[]` on closed weekend windows; it throws a hard HTTP 422 error.
+- **Why It Displayed Today:** Commit `522b395` (shipped last night) correctly stopped swallowing fetch errors, writing them to `cme_plans` with `status='MISSED_WINDOW'`. Because the weekend wasn't filtered, the raw JSON 422 payload was saved and rendered across the desk.
+
+### 2. Systematic Layering: Z0 -> D1 -> D2 -> D3 Division of Responsibility
+Andy specifically highlighted the need for a clean Z0 (Fetch/Calendar) foundation so D1/D2/D3 trade management can execute with institutional reliability:
+
+1. **Layer Z0 — Market Calendar, Session Boundary & Data Ingestion Guard:**
+   - **Weekend Calendar Guard in `cme_clock.py`:**
+     - The cash open (9:30 AM ET) and TPO session lock (10:00 AM ET) exist strictly Monday through Friday.
+     - `next_lock_utc()` must check if the next lock candidate falls on a weekend (`candidate.astimezone(NY_TZ).weekday() in (5, 6)`). On Friday after 10:00 AM ET, the next lock must advance directly to **Monday at 10:00 AM ET**.
+     - This stops all unnecessary, paid Databento API requests on Saturdays and Sundays.
+   - **Databento Error Translation (`cme_engine.py` / `cme_market.py`):**
+     - If Databento ever returns `data_start_after_available_end`, map it to `status_reason = "Market closed (no bars available)"` instead of dumping a raw JSON exception dictionary into the database.
+   - **Desk State Display (`templates/cme_desk.html`):**
+     - On weekends (`now.weekday() in (5, 6)`), display a clean status badge:
+       `MARKET CLOSED (WEEKEND)` with `Next Session Lock: Monday 10:00 AM ET (9:00 AM CT)` rather than an amber/red error box.
+
+2. **Layer D1 — Session Lock & Radar (Unchanged, Verified):**
+   - 10:00 AM ET lock pulls 30 1-minute bars (9:30–10:00 ET).
+   - TPO 70% Value Area calculates `r30h`, `r30l`, `poc`, `vah`, `val`, and `box = vah - val`.
+   - Reachability gate evaluates `box / daily_atr14 <= 0.55`. Arms triggers `bo` and `bd` or flags `STAND_DOWN_UNREACHABLE`.
+
+3. **Layer D2 — Entry & Cross Detection (Unchanged, Verified):**
+   - Watches 5-minute confirmed closes beyond `bo` or `bd` within 12 bars (60 min).
+   - Places resting limit bracket at the trigger price on passive retest (12 bars / 60-min timeout).
+
+4. **Layer D3 — Bracket Management (Unchanged, Verified):**
+   - Atomic OSO bracket: Stop loss + Target (`+2.0x` box).
+   - Breakeven ratchet: At `+0.8x` box, stop moves to lock in `+0.1x` box profit.
+   - Mandatory session flush at 16:00 ET.
+
+### 3. Verification & Action Summary
+- **No Emergency Action Needed This Weekend:** The market is closed; Account 17 is already set to `mode = 'LIVE'` in the database and ready for Monday.
+- **Claude Code Work Item:** When CC convenes, apply the simple weekend skip to `cme_clock.next_lock_utc()` and sanitize error strings in `cme_engine.py`.
