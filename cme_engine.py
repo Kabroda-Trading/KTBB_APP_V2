@@ -102,8 +102,22 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
     try:
         bars_1m = await cme_market.fetch_calibration_1m(symbol, date_key)
     except Exception as e:
+        # 2026-11-06 -- found live, flagged by DeepSeek, verified directly:
+        # returning with NO row here left the desk showing an ambiguous
+        # "DATA PENDING / HOLIDAY" for a day that was never actually
+        # checked, indistinguishable from "nothing has happened yet
+        # today." MISSED_WINDOW is a real, distinct status from
+        # STAND_DOWN_UNREACHABLE (cme_signals.py's own, already-correct
+        # "checked and refused on purpose" status) -- this one means "the
+        # market was never successfully checked at all." Same idempotent-
+        # row discipline the happy path already uses one line above.
         print(f"|| CME SESSION LOOP || {symbol} calibration fetch failed: {e}")
-        return   # no row at all for today -- safe, matches "no lock row for a closed/unfetchable day"
+        db.add(CMEPlan(
+            symbol=symbol, date_key=date_key, lock_time=datetime.datetime.utcnow(),
+            status="MISSED_WINDOW", status_reason=f"calibration fetch failed: {e}",
+        ))
+        db.flush()
+        return
 
     # 2026-11-05 -- found live, same day, flagged by DeepSeek and verified
     # directly against this exact line before fixing: this was hardcoded
@@ -171,6 +185,40 @@ async def _process_one_symbol_lock_tick(db: Session, symbol: str, date_key: str)
         traceback.print_exc()
 
 
+def _persist_missed_window_rows(lock_instant: datetime.datetime) -> None:
+    """2026-11-06 -- real structural fragility, flagged by DeepSeek,
+    verified directly: a process restart/deploy landing more than
+    _DEFAULT_CATCHUP_WINDOW_SECONDS after a day's lock instant used to just
+    get silently skipped -- that date_key never got a CMEPlan row for ANY
+    symbol, indistinguishable from "D1 hasn't run yet." Persists an
+    explicit MISSED_WINDOW row for every tracked symbol (same status/
+    idempotency convention as _process_symbol_lock's own
+    fetch-failure path) so a missed day is a real, visible record instead
+    of a silent gap. Pulled out of run_cme_session_loop() as its own
+    function specifically so it's unit-testable without driving the whole
+    async loop -- same reasoning _process_symbol_lock() itself already
+    follows. Own try/except/commit/rollback -- a failure here must never
+    crash the loop or block it from sleeping until the next real lock."""
+    date_key = lock_instant.astimezone(cme_clock.NY_TZ).strftime("%Y-%m-%d")
+    db = None
+    try:
+        db = SessionLocal()
+        for symbol in SYMBOLS:
+            if db.query(CMEPlan).filter_by(symbol=symbol, date_key=date_key).first() is None:
+                db.add(CMEPlan(
+                    symbol=symbol, date_key=date_key, lock_time=lock_instant.replace(tzinfo=None),
+                    status="MISSED_WINDOW", status_reason="catchup window elapsed before this process could attempt the lock",
+                ))
+        db.commit()
+    except Exception as e:
+        if db is not None:
+            db.rollback()
+        print(f"|| CME SESSION LOOP || failed to persist MISSED_WINDOW rows for {date_key}: {e}")
+    finally:
+        if db is not None:
+            db.close()
+
+
 async def run_cme_session_loop() -> None:
     """Background task (registered in main.py's lifespan()) -- the D1 lock
     tick, boundary-anchored to the real 10:00 ET lock (DST-aware, see
@@ -180,6 +228,7 @@ async def run_cme_session_loop() -> None:
         now = datetime.datetime.now(UTC)
         lock_instant = cme_clock.most_recent_lock_utc(now)
         if not cme_clock.is_within_catchup_window(lock_instant, now, _DEFAULT_CATCHUP_WINDOW_SECONDS):
+            _persist_missed_window_rows(lock_instant)
             await asyncio.sleep(cme_clock.seconds_until_next_lock(now))
             now = datetime.datetime.now(UTC)
             lock_instant = cme_clock.most_recent_lock_utc(now)

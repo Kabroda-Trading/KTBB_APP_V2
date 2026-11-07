@@ -227,7 +227,13 @@ def test_process_symbol_lock_is_idempotent_on_restart_replay(db, monkeypatch):
     assert db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-04").count() == 1
 
 
-def test_process_symbol_lock_creates_no_row_at_all_on_a_calibration_fetch_failure(db, monkeypatch):
+def test_process_symbol_lock_persists_missed_window_on_a_calibration_fetch_failure(db, monkeypatch):
+    # 2026-11-06 -- changed from "no row at all" to a real MISSED_WINDOW
+    # row: the old behavior left the desk showing an ambiguous "DATA
+    # PENDING" for a day that was never actually checked, indistinguishable
+    # from "nothing has happened yet today." MISSED_WINDOW is honest,
+    # not fabricated -- it carries no trading data at all (box/bo/bd/etc
+    # all stay None), just a real record that the fetch failed and why.
     account = _account(db)
     _config(db, account)
 
@@ -236,7 +242,46 @@ def test_process_symbol_lock_creates_no_row_at_all_on_a_calibration_fetch_failur
     monkeypatch.setattr(cm, "fetch_calibration_1m", _fail)
 
     _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
-    assert db.query(CMEPlan).count() == 0   # no partial/fabricated row on a data-layer failure
+    plan = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-04").first()
+    assert plan is not None
+    assert plan.status == "MISSED_WINDOW"
+    assert "Tradovate Market Data API not yet confirmed" in plan.status_reason
+    assert plan.box is None and plan.bo is None   # no fabricated trading data, just the status
+
+
+# ------------------------------------------------------------------ _persist_missed_window_rows (2026-11-06)
+# Real structural fragility found live: run_cme_session_loop() used to
+# just sleep until tomorrow when the catchup window was missed -- today's
+# date_key never got a CMEPlan row for ANY symbol at all. Pulled out as
+# its own function specifically so this is testable without driving the
+# whole async loop.
+
+def test_persist_missed_window_rows_writes_a_row_per_symbol(db):
+    lock_instant = datetime.datetime(2026, 11, 6, 15, 0, 0, tzinfo=datetime.timezone.utc)
+    ce._persist_missed_window_rows(lock_instant)
+
+    rows = db.query(CMEPlan).filter_by(date_key="2026-11-06").all()
+    assert {r.symbol for r in rows} == {"MNQ", "MES"}
+    for r in rows:
+        assert r.status == "MISSED_WINDOW"
+        assert "catchup window elapsed" in r.status_reason
+        assert r.box is None   # no fabricated trading data
+
+
+def test_persist_missed_window_rows_is_idempotent(db):
+    # A real CMEPlan already exists for one symbol (e.g. a prior tick did
+    # manage to lock MNQ for real before the process died) -- must not be
+    # clobbered by a later missed-window sweep for the same date_key.
+    _plan(db, symbol="MNQ", date_key="2026-11-06", status="ARMED")
+    db.commit()   # _persist_missed_window_rows() opens its OWN connection -- must not race an uncommitted write
+    lock_instant = datetime.datetime(2026, 11, 6, 15, 0, 0, tzinfo=datetime.timezone.utc)
+
+    ce._persist_missed_window_rows(lock_instant)
+
+    mnq = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-06").one()
+    assert mnq.status == "ARMED"   # untouched -- the real lock wins, never overwritten
+    mes = db.query(CMEPlan).filter_by(symbol="MES", date_key="2026-11-06").one()
+    assert mes.status == "MISSED_WINDOW"   # MES still gets its own row
 
 
 def test_process_symbol_lock_stand_down_creates_plan_but_no_orders(db, monkeypatch):

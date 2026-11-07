@@ -13,7 +13,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 import database
-from database import SessionLocal, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig, ExecutorSizingPolicy
+from database import SessionLocal, ExecutorAccount, ExecutorRiskState, ExecutorOrder, ExecutorAuditLog, ExecutorGlobalConfig, ExecutorSizingPolicy, CMEConfig
 import executor_accounts as ea
 import executor_control as ec
 
@@ -37,7 +37,7 @@ def _clean_rows(session):
     # here too -- a leftover audit row from another file with the same
     # account_id (autoincrement restarts at 1 per fresh table) breaks
     # exact-count assertions like len(rows) == 1.
-    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorAccount, ExecutorGlobalConfig):
+    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, CMEConfig, ExecutorAccount, ExecutorGlobalConfig):
         session.query(model).delete()
     session.commit()
 
@@ -668,6 +668,59 @@ def test_set_account_mode_refuses_live_without_ever_saving_a_sizing_choice(db):
     # preset_name values), going live succeeds normally.
     ea.update_sizing_policy(db, account, {"base_risk_pct": 0.10, "cap_abs_usd": 2500.0, "preset_name": "percent_capped"}, updated_by="andy@kabroda.com")
     db.commit()
+    result = ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    assert result.mode == "LIVE"
+
+
+# ------------------------------------------------------------------ set_account_mode -- Tradovate/CME accounts (2026-11-06)
+# Real incident found live: Account 17 (Tradovate/CME) could never pass
+# the sizing-choice gate above at all -- it checks ExecutorSizingPolicy.
+# preset_name, a field CME accounts never touch (they configure risk via
+# CMEConfig instead). Same "has a deliberate choice ever been explicitly
+# saved" spirit, correct field for this account type.
+
+def test_set_account_mode_refuses_live_for_tradovate_account_with_no_cme_config(db):
+    account = ea.create_account(db, user_id=1, label="andy_cme_funds", exchange="tradovate")
+    ea.set_credentials(db, account, "user1", "pass1", set_by="andy@kabroda.com")
+    db.commit()
+    with pytest.raises(ValueError, match="no CME risk configuration has ever been explicitly saved"):
+        ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    assert account.mode == "DRY_RUN"
+
+
+def test_set_account_mode_refuses_live_for_tradovate_account_with_zero_contracts_cap(db):
+    account = ea.create_account(db, user_id=1, label="andy_cme_funds", exchange="tradovate")
+    ea.set_credentials(db, account, "user1", "pass1", set_by="andy@kabroda.com")
+    db.add(CMEConfig(account_id=account.id, daily_risk_budget_usd=350.0, contracts_cap=0))
+    db.commit()
+    with pytest.raises(ValueError, match="no CME risk configuration has ever been explicitly saved"):
+        ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    assert account.mode == "DRY_RUN"
+
+
+def test_set_account_mode_live_succeeds_for_tradovate_account_with_real_cme_config(db):
+    account = ea.create_account(db, user_id=1, label="andy_cme_funds", exchange="tradovate")
+    ea.set_credentials(db, account, "user1", "pass1", set_by="andy@kabroda.com")
+    db.add(CMEConfig(account_id=account.id, daily_risk_budget_usd=350.0, contracts_cap=1,
+                      trailing_dd_limit_usd=2000.0, profit_target_usd=3000.0))
+    db.commit()
+    result = ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
+    db.commit()
+    assert result.mode == "LIVE"
+    rows = db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type="RISK_STATE_RESET_ON_LIVE_FLIP").all()
+    assert len(rows) == 1   # the shared reset/audit logic still fires for a CME account, same as crypto
+
+
+def test_set_account_mode_tradovate_account_never_checks_crypto_sizing_policy(db):
+    # A Tradovate account with NO ExecutorSizingPolicy row at all (never
+    # touched the crypto wizard) must still be able to go live once its
+    # own CMEConfig is real -- confirms the branch is truly exchange-
+    # scoped, not just "also accepts either precondition."
+    account = ea.create_account(db, user_id=1, label="andy_cme_funds", exchange="tradovate")
+    ea.set_credentials(db, account, "user1", "pass1", set_by="andy@kabroda.com")
+    db.add(CMEConfig(account_id=account.id, daily_risk_budget_usd=350.0, contracts_cap=1))
+    db.commit()
+    assert db.query(ExecutorSizingPolicy).filter_by(account_id=account.id).first() is None
     result = ea.set_account_mode(db, account, "LIVE", by="andy@kabroda.com", confirm="CONFIRM ENABLE LIVE TRADING")
     assert result.mode == "LIVE"
 

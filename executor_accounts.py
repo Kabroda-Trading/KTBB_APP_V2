@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 
 import executor_control
-from database import ExecutorAccount, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy
+from database import CMEConfig, ExecutorAccount, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy
 import executor_crypto
 import executor_sizing
 
@@ -100,13 +100,32 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
         # percent_uncapped/risk_based/custom (see saveSizingPolicy() in
         # executor_admin.html). Refuse to go live until a real choice has
         # actually been saved, the same way credentials are required first.
-        policy = get_or_init_sizing_policy(db, account)
-        if policy.preset_name in (None, "steady_grow", "conservative"):
-            raise ValueError(
-                "cannot go LIVE -- no sizing choice has ever been explicitly saved on this account "
-                "(it's still running the untouched default). Go to step 3, pick an option, and click "
-                "SAVE SIZING POLICY first -- selecting an option and previewing it is not the same as saving it."
-            )
+        # 2026-11-06 real incident found live: Account 17 (Tradovate/CME)
+        # could never pass this gate at all -- CME accounts configure risk
+        # via CMEConfig (daily_risk_budget_usd/contracts_cap), never the
+        # crypto Sizing Wizard this check was written for, so the "has a
+        # deliberate choice ever been explicitly saved" question needs a
+        # different, CME-correct answer here -- same spirit as the crypto
+        # check below, not a weaker one. Mirrors main.py's own established
+        # `(account.exchange or "").strip().lower() == "tradovate"` branch
+        # (account_balance_snapshot.py:41, main.py:2196/2275) rather than
+        # inventing a second way to detect a CME account.
+        if (account.exchange or "").strip().lower() == "tradovate":
+            cfg = db.query(CMEConfig).filter_by(account_id=account.id).first()
+            if cfg is None or cfg.contracts_cap <= 0 or cfg.daily_risk_budget_usd <= 0:
+                raise ValueError(
+                    "cannot go LIVE -- no CME risk configuration has ever been explicitly saved on this "
+                    "account. Go to the CME Micro Futures step, set a real daily risk budget and contracts "
+                    "cap, and click SAVE first."
+                )
+        else:
+            policy = get_or_init_sizing_policy(db, account)
+            if policy.preset_name in (None, "steady_grow", "conservative"):
+                raise ValueError(
+                    "cannot go LIVE -- no sizing choice has ever been explicitly saved on this account "
+                    "(it's still running the untouched default). Go to step 3, pick an option, and click "
+                    "SAVE SIZING POLICY first -- selecting an option and previewing it is not the same as saving it."
+                )
         if confirm != LIVE_TRADING_CONFIRM_PHRASE:
             raise ValueError(f"confirm phrase must be exactly {LIVE_TRADING_CONFIRM_PHRASE!r}")
 
