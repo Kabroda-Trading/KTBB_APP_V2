@@ -193,3 +193,40 @@ def test_fetch_daily_atr14_uses_the_ohlcv_1d_schema_and_excludes_todays_bar(monk
     # end_utc must be midnight ET on date_key -- excludes today's own
     # not-yet-closed daily bar, never leaks an incomplete range in.
     assert seen["end_utc"] == cm._ny_local_to_utc(2026, 11, 5, 0, 0)
+
+
+# ------------------------------------------------------------------ yfinance fallbacks (2026-11-09)
+
+def test_fetch_calibration_1m_falls_back_to_yfinance_on_databento_error(monkeypatch):
+    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
+
+    async def _raise_databento(*args, **kwargs):
+        raise RuntimeError("Databento bars query failed (422): data_end_after_available_end")
+
+    def _mock_yf_calibration(symbol, date_key):
+        return [{"open": 100.0, "high": 105.0, "low": 99.0, "close": 103.0}]
+
+    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _raise_databento)
+    monkeypatch.setattr(cm, "_fetch_calibration_1m_yfinance", _mock_yf_calibration)
+
+    result = asyncio.run(cm.fetch_calibration_1m("MNQ", "2026-11-09"))
+    assert len(result) == 1
+    assert result[0] == {"open": 100.0, "high": 105.0, "low": 99.0, "close": 103.0}
+
+
+def test_fetch_confirmed_5m_falls_back_to_yfinance_on_databento_error(monkeypatch):
+    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
+
+    async def _raise_databento(*args, **kwargs):
+        raise RuntimeError("Databento bars query failed (422): data_end_after_available_end")
+
+    def _mock_yf_5m(symbol, since_utc, now_utc):
+        return [{"open": 200.0, "high": 205.0, "low": 199.0, "close": 204.0}]
+
+    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _raise_databento)
+    monkeypatch.setattr(cm, "_fetch_confirmed_5m_yfinance", _mock_yf_5m)
+
+    result = asyncio.run(cm.fetch_confirmed_5m("MNQ", datetime.datetime.now(UTC)))
+    assert len(result) == 1
+    assert result[0] == {"open": 200.0, "high": 205.0, "low": 199.0, "close": 204.0}
+
