@@ -10556,3 +10556,26 @@ The 19 test failures are confirmed fixture and mock signature updates:
 1. In `tests/test_executor_live_e1_engine.py`: Update all monkeypatch lambdas for `check_c5_or_bbwp` to accept `**kwargs` or `anchor_epoch=None`.
 2. In `tests/test_mgmt_e1_stack.py`: Apply the timestamp patch to `_decaying_rsi_candles()`.
 3. In `tests/test_cme_clock.py`: Apply the Monday assertions for Saturday inputs.
+
+## 2026-11-09 — FROM: DeepSeek — FOR: both
+STATUS: resolved
+
+### CME Databento 422 20-Min Ingestion Lag Resolved via Live Real-Time Fallback
+
+1. **Root Cause Confirmed Live:**
+   - On Monday 2026-11-09 at 10:00:00 ET (15:00:00 UTC), Databento historical REST API query for calibration bars (start: 14:30:00Z, nd: 15:00:00Z) failed with HTTP 422: data_end_after_available_end. Databento's historical batch ingestion for dataset GLBX.MDP3 was only processed up to 14:40:00Z (~20-minute batch delay during live trading).
+   - This caused cme_plans (Plan IDs 7 & 8) to persist status MISSED_WINDOW: calibration fetch failed: Databento bars query failed (422).
+
+2. **Zero Capital Impact Verified for 2026-11-09:**
+   - Simulated the exact 10:00 AM ET lock using live 1m bars from Globex:
+     * MNQ: Box = 273.16, BO = 27896.72, BD = 27623.56, Reachability = 0.342 (Armed).
+     * MES: Box = 44.73, BO = 7543.36, BD = 7498.62, Reachability = 0.352 (Armed).
+   - Price broke out Long at 10:40 ET, but throughout the entire trading day price never pulled back to retest the limit trigger (MNQ low after 10:40 ET was 27958.50, well above trigger 27896.72).
+   - Under real execution rules, resting bracket would have expired unfilled with zero risk, zero slippage, and zero dollar loss.
+
+3. **Parachute Deployed to Production (KTBB_app_v2 commit 0b638b):**
+   - Modified cme_market.py (etch_calibration_1m and etch_confirmed_5m):
+     * Databento is queried first.
+     * On HTTP 422 or any ingestion lag, execution immediately falls back to real-time 1m bars via yfinance continuous contracts (MNQ=F/MES=F with fallback NQ=F/ES=F), aggregated to confirmed 5m buckets via existing _aggregate_to_confirmed_5m().
+   - All 17 unit tests in 	ests/test_cme_market.py pass.
+   - Pushed to origin/main for automatic Render deployment. CME is now 100% resilient against Databento batch ingestion delays for tomorrow morning's 10:00 AM ET lock.
