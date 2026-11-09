@@ -111,10 +111,22 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
         # "checked and refused on purpose" status) -- this one means "the
         # market was never successfully checked at all." Same idempotent-
         # row discipline the happy path already uses one line above.
+        # 2026-11-08 (Antigravity ruling AGENT_LOG Session 4 Item 4a): a
+        # Databento `data_start_after_available_end` 422 means the market
+        # was genuinely CLOSED for this window (a holiday, or a weekend
+        # edge that slipped past cme_clock's guard) -- surface that as a
+        # clean human-readable reason instead of dumping the raw JSON
+        # exception dict into the row and desk. Not conflated with a
+        # generic transient fetch failure (which keeps the raw error).
+        err_text = str(e)
+        if "data_start_after_available_end" in err_text:
+            reason = "Market closed (weekend/holiday) -- no bars available for this window"
+        else:
+            reason = f"calibration fetch failed: {e}"
         print(f"|| CME SESSION LOOP || {symbol} calibration fetch failed: {e}")
         db.add(CMEPlan(
             symbol=symbol, date_key=date_key, lock_time=datetime.datetime.utcnow(),
-            status="MISSED_WINDOW", status_reason=f"calibration fetch failed: {e}",
+            status="MISSED_WINDOW", status_reason=reason,
         ))
         db.flush()
         return

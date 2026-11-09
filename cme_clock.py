@@ -56,17 +56,32 @@ def today_flush_utc(now_utc: datetime.datetime) -> datetime.datetime:
     return _local_today_at(now_utc, FLUSH_H, FLUSH_M)
 
 
-def next_lock_utc(now_utc: datetime.datetime) -> datetime.datetime:
-    """The next 10:00 AM ET lock instant strictly AFTER now_utc -- today's,
-    if it hasn't happened yet, otherwise tomorrow's. Weekends/holidays are
-    deliberately NOT filtered here (CME equity-index futures trade nearly
-    continuously; the engine's own lock logic simply finds an empty/garbage
-    30-minute window on a closed day and stands down for lack of valid
-    bars -- no separate calendar is needed to get that right)."""
+def _next_weekday_lock(now_utc: datetime.datetime) -> datetime.datetime:
+    """The next 10:00 AM ET lock on a WEEKDAY (Mon-Fri), strictly after
+    now_utc. CME equity-index futures are CLOSED on weekends (Friday 17:00
+    ET through Sunday 18:00 ET), and Databento returns a hard HTTP 422
+    (data_start_after_available_end) rather than an empty list when a
+    closed window is queried -- so the lock must advance straight from
+    Friday's lock to MONDAY's lock, skipping Saturday and Sunday entirely.
+    Added 2026-11-08 per Antigravity's ruling (AGENT_LOG Session 4 Item 4a):
+    the prior "find an empty window and stand down" assumption was proven
+    false by the 2026-11-07 live 422."""
     candidate = today_lock_utc(now_utc)
     if candidate <= now_utc:
         candidate = today_lock_utc(now_utc + datetime.timedelta(days=1))
+    while candidate.astimezone(NY_TZ).weekday() in (5, 6):   # Sat=5, Sun=6
+        candidate = today_lock_utc(candidate + datetime.timedelta(days=1))
     return candidate
+
+
+def next_lock_utc(now_utc: datetime.datetime) -> datetime.datetime:
+    """The next 10:00 AM ET lock instant strictly AFTER now_utc -- today's,
+    if it hasn't happened yet, otherwise tomorrow's. 2026-11-08 (Antigravity
+    ruling AGENT_LOG Session 4 Item 4a): weekends are now filtered -- the
+    next lock after Friday's advances straight to MONDAY at 10:00 ET (CME
+    equity-index futures are closed Sat/Sun, and Databento 422s rather than
+    returning empty bars on a closed window)."""
+    return _next_weekday_lock(now_utc)
 
 
 def most_recent_lock_utc(now_utc: datetime.datetime) -> datetime.datetime:
@@ -79,10 +94,23 @@ def most_recent_lock_utc(now_utc: datetime.datetime) -> datetime.datetime:
     - 1 day`: on a DST transition day, yesterday's and today's lock instants
     aren't exactly 24h apart, so that shortcut would be wrong -- this
     re-resolves the local wall-clock time directly instead, same as every
-    other function here."""
+    other function here.
+
+    2026-11-08 (Antigravity ruling AGENT_LOG Session 4 Item 4a): weekends
+    are filtered here TOO -- the same "no Sat/Sun lock exists" fact that
+    motivated next_lock_utc()'s guard applies on the flip side. On a
+    Saturday/Sunday this must return FRIDAY's lock (the last real lock), not
+    a phantom "Saturday/Sunday 10:00 ET" instant that never existed. Without
+    this, a weekend restart would have the session loop treat a phantom
+    Saturday lock as "the most recent lock," mis-skip the catchup window,
+    and write a bogus MISSED_WINDOW row for a day the market was closed.
+    This was the one half of the ruling's "update BOTH functions" that the
+    initial implementation missed -- flagged, not silently left."""
     candidate = today_lock_utc(now_utc)
     if candidate > now_utc:
         candidate = today_lock_utc(now_utc - datetime.timedelta(days=1))
+    while candidate.astimezone(NY_TZ).weekday() in (5, 6):   # Sat=5, Sun=6
+        candidate = today_lock_utc(candidate - datetime.timedelta(days=1))
     return candidate
 
 

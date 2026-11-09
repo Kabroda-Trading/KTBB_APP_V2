@@ -404,7 +404,13 @@ class CrossTradeClient:
         identities, which would reach beyond this one account). Never
         raises -- same contract as TradovateClient.emergency_market_close()."""
         url = f"{BASE_URL}/accounts/{self.crosstrade_account_id}/positions/flatten"
-        payload = {"instrument": symbol, "marketPosition": "long" if direction.upper() == "LONG" else "short"}
+        # 2026-11-08 (Antigravity ruling AGENT_LOG Session 8 Finding 2): the
+        # instrument must match place_bracket_limit_order()'s own proven
+        # f"{symbol}1!" continuous-contract form -- a bare root ("MNQ")
+        # would be the wrong instrument for this flatten. Normalize here so
+        # the two endpoints can never drift on the instrument string again.
+        instrument = symbol if symbol.endswith("1!") else f"{symbol}1!"
+        payload = {"instrument": instrument, "marketPosition": "long" if direction.upper() == "LONG" else "short"}
         session = _get_session()
         try:
             async with session.post(url, headers=self._headers(), json=payload) as resp:

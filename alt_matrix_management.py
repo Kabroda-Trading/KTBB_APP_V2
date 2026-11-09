@@ -111,8 +111,26 @@ def advance(
     if not r_distance or r_distance <= 0:
         return None
 
-    entry_fill_epoch = entry_fill_time.timestamp() if hasattr(entry_fill_time, "timestamp") else entry_fill_time
-    since_entry_idx = [i for i, c in enumerate(candles_4h_confirmed) if c.get("time") is not None and c["time"] > entry_fill_epoch]
+    if hasattr(entry_fill_time, "timestamp"):
+        # entry_fill_time is stored NAIVE (datetime.utcnow()) by both the
+        # LIVE (alt_matrix_executor.py:393) and DRY_RUN (alt_matrix_engine.
+        # py:377) call sites -- calling .timestamp() on a naive datetime
+        # interprets it as LOCAL system time and shifts by the UTC offset
+        # on any non-UTC machine (same-class bug already fixed in the
+        # Traveler, AGENT_LOG 2026-11-08 Session 7). Coerce naive -> UTC
+        # first, so the epoch is the true UTC instant.
+        if getattr(entry_fill_time, "tzinfo", None) is None:
+            entry_fill_epoch = entry_fill_time.replace(tzinfo=datetime.timezone.utc).timestamp()
+        else:
+            entry_fill_epoch = entry_fill_time.timestamp()
+    else:
+        entry_fill_epoch = entry_fill_time
+    # 2026-11-08 (Antigravity ruling AGENT_LOG Session 8 Finding 3): sieve
+    # by candle CLOSE epoch, not OPEN. c["time"] is the bar OPEN; a fill at
+    # 08:00:10 has 08:00:00 > 08:00:10 == False, discarding the entry's own
+    # 4H bar so a stop in the first 4h never exits. Close = open + 14400.
+    since_entry_idx = [i for i, c in enumerate(candles_4h_confirmed)
+                       if c.get("time") is not None and (c["time"] + 14400) > entry_fill_epoch]
     if not since_entry_idx:
         return None
 

@@ -899,6 +899,19 @@ def init_db():
         except Exception:
             pass
 
+    # --- PRIMARY EXIT TIME (2026-11-08, Antigravity ruling AGENT_LOG
+    # Session 4 Item 2) -- see TravelerPlan.primary_exit_time's own comment.
+    # The re-arm exhaustion-cleared check must anchor to the PRIMARY
+    # journey's C5_EXIT close (not the entry fill), because the primary's
+    # own pre-exit depressed RSI is exactly the state that must be allowed
+    # to clear. TIMESTAMP, same convention as rearm_watch_deadline above. ---
+    for _col in ["primary_exit_time TIMESTAMP"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE traveler_plans ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- ONE-TIME BACKFILL: WAITING_CROSS/WAITING_TOUCH rows that predate
     # the session_expires_at column above (2026-10-07). Unlike the id=14
     # close-out further up this function (explicitly scoped to one id,
@@ -1604,6 +1617,17 @@ class TravelerPlan(Base):
     # -- REARM_WATCH stayed open indefinitely until a real re-cross
     # happened, instead of closing at the next lock as designed.
     rearm_watch_deadline = Column(DateTime, nullable=True)
+    # The PRIMARY journey's own C5_EXIT close time, persisted at the moment
+    # REARM_WATCH is entered (start_rearm_watch_if_eligible()), so the
+    # re-arm's exhaustion-cleared check can anchor to it. Added 2026-11-08
+    # per Antigravity's ruling (AGENT_LOG Session 4 Item 2): the clearing
+    # check must evaluate only 1H/4H bars whose confirmed close is STRICTLY
+    # AFTER the primary exit -- the primary's own pre-exit depressed RSI is
+    # exactly the exhaustion state that must be allowed to clear. Same
+    # "compute once at entry, read back every poll, never recompute" pattern
+    # as rearm_watch_deadline immediately above (and the same 2026-10-11
+    # production-incident lesson that pattern encodes). NULL until set.
+    primary_exit_time = Column(DateTime, nullable=True)
     rearm_cross_time = Column(DateTime, nullable=True)
     rearm_cross_price = Column(Float, nullable=True)
     rearm_rsi_4h_at_cross = Column(Float, nullable=True)  # RE-CROSS RSI, NOT the primary's own rsi_4h_at_cross above -- F_A and the tercile re-check both read THIS value for the re-arm leg

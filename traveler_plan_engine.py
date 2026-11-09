@@ -143,6 +143,22 @@ def _as_utc(dt):
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
+def _primary_exit_epoch(row: TravelerPlan) -> Optional[float]:
+    """2026-11-08 (Antigravity ruling, AGENT_LOG Session 4 Item 2): the
+    anchor for the re-arm exhaustion-cleared check -- the PRIMARY journey's
+    own C5_EXIT close time (TravelerPlan.primary_exit_time, set once at
+    REARM_WATCH entry by mgmt_e1_stack.start_rearm_watch_if_eligible()).
+    Returns its epoch, or None if unset (no filtering -- only a legacy/
+    abnormal row; every genuine REARM_WATCH row has it set). Naive -> UTC
+    coercion mirrors _as_utc() above, same SQLite-strips-tzinfo handling."""
+    t = row.primary_exit_time
+    if t is None:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t.timestamp()
+
+
 async def _advance_one(db, row: TravelerPlan, now_utc: datetime) -> None:
     symbol = row.symbol
     # 2026-09-27 (Andy ruling 14:55 CT): Bitunix, not Kraken -- the
@@ -248,9 +264,24 @@ async def _advance_rearm_one(db, row: TravelerPlan, now_utc: datetime) -> None:
         candles_4h = await market_data.fetch_bitunix_4h(symbol, target_bars=200)
         if not candles_1h or not candles_4h:
             return  # can't check exhaustion-cleared this poll -- try again next cycle, never guess
+        anchor_epoch = _primary_exit_epoch(row)
         c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(
-            candles_1h, candles_4h, now_ts=now_utc.timestamp(), candles_4h_bbwp=candles_4h)
-        exhaustion_cleared = not (c5_hit or bbwp_hit)
+            candles_1h, candles_4h, now_ts=now_utc.timestamp(), candles_4h_bbwp=candles_4h,
+            anchor_epoch=anchor_epoch)
+        # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 8 Item C): the
+        # re-arm exhaustion check must NOT declare "cleared" until at least
+        # one confirmed 1H bar has closed STRICTLY AFTER the primary exit
+        # (DRY_RUN mirror of executor_live_e1_engine.py's own guard -- same
+        # rule, same reason: right after a C5_EXIT no post-exit bar exists,
+        # so (False, False) on zero bars would be a vacuous True).
+        h1_confirmed = market_data.confirmed_closes(candles_1h, 3600, now_utc.timestamp())
+        has_post_anchor_bar = (
+            anchor_epoch is not None
+            and bool(h1_confirmed)
+            and h1_confirmed[-1].get("time") is not None
+            and (h1_confirmed[-1]["time"] + 3600) > anchor_epoch
+        )
+        exhaustion_cleared = has_post_anchor_bar and not (c5_hit or bbwp_hit)
 
         plan_dict = {
             "direction": row.direction,

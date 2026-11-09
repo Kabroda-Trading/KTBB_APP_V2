@@ -1057,7 +1057,7 @@ def test_c5_exit_email_has_the_approximated_caveat(db, monkeypatch):
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
     sent = []
     monkeypatch.setattr("notify.send_account_email", lambda subject, body, account_id: sent.append((subject, body)) or True)
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1127,7 +1127,7 @@ def test_c5_fires_before_t1_market_closes_and_cancels_t1(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1156,7 +1156,7 @@ def test_bbwp_fires_before_t1_market_closes_and_cancels_t1(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (False, True))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (False, True))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1235,7 +1235,7 @@ def test_time_exit_market_closes_and_cancels_t1(db, monkeypatch):
     plan = _traveler_plan(db, journey_cap_at=_FAR_PAST)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (False, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (False, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1260,7 +1260,7 @@ def test_c5_fires_but_t1_actually_filled_first_reconciled_as_t1(db, monkeypatch)
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1306,7 +1306,7 @@ def test_close_position_call_failure_retries_next_tick(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
 
     async def _raise(self, *a, **kw):
         raise ConnectionError("simulated network failure")
@@ -1340,7 +1340,7 @@ def test_market_close_exit_price_uses_last_known_live_price_not_fabricated(db, m
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1529,7 +1529,7 @@ def test_rearm_watch_transition_to_waiting_touch_fires_the_rearm_cross_hook(db, 
     plan.rearm_status = "REARM_WATCH"
     db.flush()
     _fake_rearm_candle_fetchers(monkeypatch)
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (False, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (False, False))
     monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {
         "rearm_status": "REARM_WAITING_TOUCH",
         "rearm_cross_time": datetime.datetime(2026, 9, 21, 15, 0, tzinfo=datetime.timezone.utc),
@@ -1555,7 +1555,7 @@ def test_rearm_watch_no_update_makes_no_change_and_fires_no_hook(db, monkeypatch
     plan.rearm_status = "REARM_WATCH"
     db.flush()
     _fake_rearm_candle_fetchers(monkeypatch)
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {})
 
     cross_calls = []
@@ -1578,7 +1578,7 @@ def test_rearm_watch_window_closed_transition_does_not_fire_the_cross_hook(db, m
     plan.rearm_status = "REARM_WATCH"
     db.flush()
     _fake_rearm_candle_fetchers(monkeypatch)
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (False, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (False, False))
     monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {
         "rearm_status": "REARM_WINDOW_CLOSED", "rearm_last_transition_reason": "window closed, no re-cross",
     })
@@ -1610,7 +1610,7 @@ def test_rearm_watch_live_closes_at_its_own_persisted_deadline_not_a_freshly_rec
     plan.rearm_watch_deadline = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
     db.flush()
     _fake_rearm_candle_fetchers(monkeypatch)
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, now_ts=None, candles_4h_bbwp=None: (False, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (False, False))
     # gate_traveler.advance_rearm_watch() is the REAL function here.
 
     cross_calls = []
@@ -1637,7 +1637,7 @@ def test_live_c5_exit_closure_enters_rearm_watch(db, monkeypatch):
     plan = _traveler_plan(db)
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     _install(monkeypatch,
              get_position=_async_seq([_one_position_response(), _no_position_response()]),
              close_position=_async(_close_position_response()),
@@ -1809,7 +1809,7 @@ def test_c5_exit_sets_exit_fee_usd_via_position_id_excluding_entry_order(db, mon
     order = _order_row(db, account, plan, management_state="ENTRY_FILLED_ORDERS_PLACED",
                         entry_fill_price=100.0, position_id="pos1", t1_exchange_order_id="t1-1",
                         entry_exchange_order_id="entry-order-1")
-    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda c1h, c4h, candles_4h_bbwp=None: (True, False))
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **k: (True, False))
     calls = []
 
     async def _history(self, order_id=None, symbol=None, position_id=None, **kw):

@@ -108,6 +108,15 @@ def start_rearm_watch_if_eligible(traveler_plan, order, rearm_watch_deadline=Non
         return False
     traveler_plan.rearm_status = "REARM_WATCH"
     traveler_plan.rearm_watch_deadline = rearm_watch_deadline
+    # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 4 Item 2): persist
+    # the primary journey's own C5_EXIT close time, exactly parallel to
+    # rearm_watch_deadline above -- the re-arm exhaustion-cleared check
+    # anchors to THIS (not the entry fill), so only bars closing strictly
+    # after the primary died are evaluated for whether exhaustion cleared.
+    # Read from the closing order's own exit_time (set by the caller's
+    # _finalize_traveler_close / DRY_RUN _advance_e1_order before this hook
+    # runs). Absent/None -> left None, never fabricated.
+    traveler_plan.primary_exit_time = getattr(order, "exit_time", None)
     traveler_plan.rearm_last_transition_reason = (
         "primary journey closed via C5_EXIT -- watching for a re-arm until the next lock"
     )
@@ -173,8 +182,13 @@ def advance(
     # close, the instant either condition is observed true. Freshly
     # recomputed each poll from the 1H/4H closes since entry -- cheap at
     # live candle-window sizes (the site's own limit=100 fetches).
+    # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 4 Item 1): pass
+    # entry_fill_epoch as the anchor so C5/BBWP only counts 1H/4H bars
+    # whose close falls strictly AFTER the fill (the backtest's "re-anchor
+    # to the fill"), not pre-fill decay from the pullback-fill RSI dip.
     c5_hit, bbwp_hit = check_c5_or_bbwp(candles_1h, candles_4h, now_ts=now_utc.timestamp(),
-                                        candles_4h_bbwp=candles_4h_bbwp)
+                                        candles_4h_bbwp=candles_4h_bbwp,
+                                        anchor_epoch=entry_fill_epoch)
     if c5_hit or bbwp_hit:
         last = since_entry[-1]
         return {
@@ -210,6 +224,7 @@ def advance(
 def check_c5_or_bbwp(
     candles_1h: List[Dict[str, Any]], candles_4h: List[Dict[str, Any]], now_ts: Optional[float] = None,
     candles_4h_bbwp: Optional[List[Dict[str, Any]]] = None,
+    anchor_epoch: Optional[float] = None,
 ) -> Tuple[bool, bool]:
     """The C5_T-M_EXIT / BBWP_BURN_70 condition check, extracted from
     advance() (P3, 2026-09-20) so it has ONE implementation shared by both
@@ -244,18 +259,67 @@ def check_c5_or_bbwp(
     not an error) -- same "missing data never gets the favorable case"
     convention used throughout this codebase, never a crash on a
     transient feed gap."""
-    h1_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_1h, 3600, now_ts)]
-    h4_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_4h, 14400, now_ts)]
+    h1_confirmed = market_data.confirmed_closes(candles_1h, 3600, now_ts)
+    h4_confirmed = market_data.confirmed_closes(candles_4h, 14400, now_ts)
+    h4_bbwp_confirmed = market_data.confirmed_closes(candles_4h_bbwp or [], 14400, now_ts)
+
+    # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 4 Item 1/2) -- the
+    # indicator series are computed on the FULL confirmed history FIRST
+    # (RSI/BBWP warm-up from the oldest available bar), matching the
+    # backtest's construction order (lab_touchfill_arms.py:110-118 computes
+    # rsi/c5/bbwp on the full resampled series, THEN slices h1.loc[f_ts:
+    # j_ts] in walk_from_fill() for the trigger window). Slicing the closes
+    # BEFORE the indicator computation would re-initialize the RSI EWM
+    # warm-up at the anchor and give a DIFFERENT (too-conservative) RSI for
+    # the first ~14 bars after it -- a subtle but real divergence from the
+    # measured system. The anchor only gates WHICH bar's flag is eligible
+    # to fire, never the warm-up window itself.
+    h1_closes = [float(c["close"]) for c in h1_confirmed]
+    h4_closes = [float(c["close"]) for c in h4_confirmed]
     rsi_1h = si.rsi_series(h1_closes, period=si.RSI_PERIOD)
     rsi_4h = si.rsi_series(h4_closes, period=si.RSI_PERIOD)
+    h4_bbwp_closes = [float(c["close"]) for c in h4_bbwp_confirmed]
+    bbwp_4h = si.bbwp_series(h4_bbwp_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)
+
+    # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 8 Item A) -- LATCH
+    # SEMANTICS. The backtest is a LATCH, not a latest-bar probe: it
+    # precomputes c5_ts/bb_ts as the set of ALL in-window bars where the
+    # flag was ever true, then `any(t <= ts)` fires and TERMINATES the
+    # journey the instant any in-window trigger bar has passed -- it never
+    # "un-exits" because RSI subsequently recovered (lab_touchfill_arms.py:
+    # 197, 205-209). A latest-bar-only probe would miss a C5 decay on bar
+    # [-2] if bar [-1] recovered (DRY_RUN multi-bar walks), or miss a
+    # transient dip spanned by a live poll gap. So: fire if ANY confirmed
+    # bar whose CLOSE (open + interval_seconds) is STRICTLY AFTER the
+    # anchor had the flag true -- the anchor bounds the latch window.
+    # `i` indexes rsi_1h/rsi_4h/bbwp_4h in lock-step with their source
+    # confirmed-candle lists (rsi_series/bbwp_series return one value per
+    # input close, None elsewhere), so the per-bar flag is evaluated at the
+    # SAME index in both.
+    def _post_anchor_indices(confirmed, interval_seconds):
+        if not confirmed:
+            return []
+        if anchor_epoch is None:
+            # No anchor bounds the window -- preserve the ORIGINAL latest-
+            # bar-only semantics (the anchor is what defines "since when we
+            # care"; without it there is no valid re-anchor and no backtest
+            # analog -- every production call site passes one). Kept as the
+            # None-default so a bare check_c5_or_bbwp() call (tests, legacy)
+            # still means "current confirmed state", not "any bar ever".
+            return [len(confirmed) - 1]
+        return [i for i, c in enumerate(confirmed)
+                if c.get("time") is not None and (c["time"] + interval_seconds) > anchor_epoch]
 
     c5_hit = (
-        (len(rsi_1h) > 0 and si.c5_momentum_decay(rsi_1h, len(rsi_1h) - 1, C5_LOOKBACK_BARS))
-        or (len(rsi_4h) > 0 and si.c5_momentum_decay(rsi_4h, len(rsi_4h) - 1, C5_LOOKBACK_BARS))
+        any(si.c5_momentum_decay(rsi_1h, i, C5_LOOKBACK_BARS)
+            for i in _post_anchor_indices(h1_confirmed, 3600))
+        or any(si.c5_momentum_decay(rsi_4h, i, C5_LOOKBACK_BARS)
+               for i in _post_anchor_indices(h4_confirmed, 14400))
     )
-    h4_bbwp_closes = [float(c["close"]) for c in market_data.confirmed_closes(candles_4h_bbwp or [], 14400, now_ts)]
-    bbwp_4h = si.bbwp_series(h4_bbwp_closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK)
-    bbwp_hit = len(bbwp_4h) > 0 and si.bbwp_burn(bbwp_4h, len(bbwp_4h) - 1, BBWP_BURN_THRESHOLD)
+    bbwp_hit = any(
+        si.bbwp_burn(bbwp_4h, i, BBWP_BURN_THRESHOLD)
+        for i in _post_anchor_indices(h4_bbwp_confirmed, 14400)
+    )
     return bool(c5_hit), bool(bbwp_hit)
 
 

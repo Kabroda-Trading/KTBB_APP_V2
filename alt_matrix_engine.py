@@ -220,8 +220,20 @@ async def _advance_one_order_management(
     # function's own docstring -- but nothing was calling THIS pure
     # helper in production before now).
     if order_row.entry_fill_price is not None and order_row.r_distance:
-        entry_epoch = order_row.entry_fill_time.timestamp() if order_row.entry_fill_time else None
-        since_entry = [c for c in candles_4h_confirmed if entry_epoch is not None and c.get("time") is not None and c["time"] > entry_epoch]
+        entry_epoch = None
+        if order_row.entry_fill_time is not None:
+            # 2026-11-08 (Antigravity ruling AGENT_LOG Session 8 Finding 3):
+            # sieve by candle CLOSE epoch (open + 14400), not OPEN, and
+            # coerce naive -> UTC before .timestamp() (entry_fill_time is
+            # set via datetime.utcnow(), naive -- same-class fix as
+            # alt_matrix_management.py's own advance()).
+            _et = order_row.entry_fill_time
+            if _et.tzinfo is None:
+                _et = _et.replace(tzinfo=datetime.timezone.utc)
+            entry_epoch = _et.timestamp()
+        since_entry = [c for c in candles_4h_confirmed
+                       if entry_epoch is not None and c.get("time") is not None
+                       and (c["time"] + 14400) > entry_epoch]
         if since_entry:
             mfe = alt_matrix_management.mfe_through(since_entry, order_row.entry_fill_price, order_row.r_distance)
             order_row.mfe_r = mfe

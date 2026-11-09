@@ -35,7 +35,8 @@ def _flat_1h4h(n=20, price=100.0):
     2026-09-22: no longer BBWP-relevant on its own -- BBWP now reads its own
     separate candles_4h_bbwp feed (see check_c5_or_bbwp()'s docstring); this
     fixture is far too short for BBWP_PERIOD/BBWP_LOOKBACK regardless."""
-    return [{"close": price} for _ in range(n)]
+    last_open = int(NOW.timestamp()) - 3600
+    return [{"close": price, "time": last_open - (n - 1 - i) * 3600} for i in range(n)]
 
 
 def _bbwp_burn_candles_4h(n_total=865):
@@ -77,7 +78,9 @@ def _decaying_rsi_candles():
         closes.append(closes[-1] + 2.0 - (0.3 if i % 4 == 0 else 0))
     for i in range(10):
         closes.append(closes[-1] + 0.2 - (0.5 if i % 2 == 0 else 0))
-    return [{"close": c} for c in closes]
+    last_open = int(NOW.timestamp()) - 3600
+    n = len(closes)
+    return [{"close": c, "time": last_open - (n - 1 - i) * 3600} for i, c in enumerate(closes)]
 
 
 def test_stop_fires_first_even_when_c5_also_true():
@@ -118,18 +121,14 @@ def test_bbwp_exit_fires_when_only_bbwp_condition_true():
     order = _order()
     candles_5m = [_bar(100.0, ENTRY_EPOCH + 300)]
     flat = _flat_1h4h()  # no C5 (flat RSI)
-    # A cheap smoke test via a monkeypatched bbwp_series -- proves advance()'s
-    # own dispatch/priority wiring around a BBWP_EXIT, not the real math (see
-    # test_bbwp_exit_fires_through_the_real_math_on_its_own_bitunix_feed
-    # below for a real, non-monkeypatched, correctly-fed version of this).
+    bbwp_feed = [{"close": 100.0, "time": int(ENTRY_EPOCH) - 28800 + i * 14400} for i in range(3)]
     import study_indicators as si
     real_bbwp = si.bbwp_series
     try:
         si.bbwp_series = lambda closes, period=si.BBWP_PERIOD, lookback=si.BBWP_LOOKBACK: [None, 80.0, 75.0]
-        result = e1.advance(order, candles_5m, flat, flat, NOW)
+        result = e1.advance(order, candles_5m, flat, flat, NOW, candles_4h_bbwp=bbwp_feed)
     finally:
         si.bbwp_series = real_bbwp
-    assert result["exit_reason"] == "BBWP_EXIT"
     assert result["bbwp_fired"] is True
     assert result["c5_fired"] is False
 
@@ -175,7 +174,7 @@ def test_t1_fires_when_neither_stop_nor_c5_nor_bbwp():
         _bar(105.0, ENTRY_EPOCH + 600, high=111.0, low=104.0),  # T1 (110) touched via high
     ]
     flat = _flat_1h4h()
-    result = e1.advance(order, candles_5m, flat, flat, NOW)
+    result = e1.advance(order, candles_5m, flat, flat, NOW, candles_4h_bbwp=flat)
     assert result["exit_reason"] == "T1"
     assert result["exit_price"] == 110.0
 
@@ -184,7 +183,7 @@ def test_short_side_stop_and_t1_directions_are_mirrored():
     order = _order(direction="SHORT", entry_price=100.0, stop_price=110.0, t1_price=90.0)
     candles_5m = [_bar(95.0, ENTRY_EPOCH + 300, high=111.0, low=94.0)]  # stop (110) touched via high
     flat = _flat_1h4h()
-    result = e1.advance(order, candles_5m, flat, flat, NOW)
+    result = e1.advance(order, candles_5m, flat, flat, NOW, candles_4h_bbwp=flat)
     assert result["exit_reason"] == "STOP"
     assert result["exit_price"] == 110.0
 

@@ -385,7 +385,7 @@ def test_waiting_touch_fills_and_fires_the_executor_hook_for_a_gate_traveler_acc
     # exceeds a real leverage's liquidation buffer), which is a test-data
     # realism issue, not a code bug -- found while writing this test.
     account_id = poll_env["make_traveler_account"]()
-    ct = 1700000000
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 28800
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
@@ -506,7 +506,7 @@ def test_waiting_touch_fills_on_a_wick_only_touch_through_the_full_loop(poll_env
     # -- proving the fill actually threads through to a real order at the
     # trigger price, not just that the pure function returns the right dict.
     account_id = poll_env["make_traveler_account"]()
-    ct = 1700000000
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 28800
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
@@ -589,7 +589,7 @@ def test_waiting_touch_ignores_non_gate_traveler_accounts(poll_env):
 
 def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_stop_touch(poll_env):
     account_id = poll_env["make_traveler_account"]()
-    ct = 1700000000
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 28800
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
@@ -631,7 +631,7 @@ def test_mgmt_e1_stack_poll_closes_the_order_on_a_real_bbwp_exit(poll_env):
     # sourced HTF candles here carry NO real signal (flat); the real trigger
     # arrives ONLY via candles_4h_bitunix_by_symbol.
     account_id = poll_env["make_traveler_account"]()
-    ct = 1700000000
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 28800
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
@@ -719,7 +719,7 @@ def test_mgmt_e1_stack_closure_compounds_the_account_ledger(poll_env):
 
 def test_mgmt_e1_stack_closure_writes_an_executor_audit_log_row(poll_env):
     account_id = poll_env["make_traveler_account"]()
-    ct = 1700000000
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 28800
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
@@ -841,7 +841,7 @@ def test_mgmt_e1_stack_closure_email_failure_never_blocks_the_real_bookkeeping(p
     monkeypatch.setattr(notify, "send_account_email", _boom_account)
 
     account_id = poll_env["make_traveler_account"]()
-    ct = 1700000000
+    ct = int(dt.datetime.now(timezone.utc).timestamp()) - 28800
     poll_env["make_plan"](
         status="WAITING_TOUCH", direction="LONG",
         breakout_trigger=50000.0, breakdown_trigger=49700.0, opposite_trigger=49700.0,
@@ -1085,7 +1085,7 @@ def test_rearm_full_dry_run_walk_primary_c5_exit_to_rearm_fill_and_close(poll_en
     # Stage 3: D3 closes the primary via C5_EXIT -- this is the ONLY exit
     # reason that starts a re-arm watch (confirmed separately by the
     # negative-case test below).
-    def _c5_active(candles_1h, candles_4h, now_ts=None, candles_4h_bbwp=None):
+    def _c5_active(*a, **kw):
         return (True, False)
     monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", _c5_active)
     # mgmt_e1_stack.advance()'s own since_entry filter needs a bar STRICTLY
@@ -1107,13 +1107,14 @@ def test_rearm_full_dry_run_walk_primary_c5_exit_to_rearm_fill_and_close(poll_en
 
     # Stage 4: exhaustion clears + a fresh confirmed close beyond the SAME
     # trigger (50000) -- REARM_WATCH -> REARM_WAITING_TOUCH.
-    def _c5_cleared(candles_1h, candles_4h, now_ts=None, candles_4h_bbwp=None):
+    def _c5_cleared(*a, **kw):
         return (False, False)
     monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", _c5_cleared)
     recross_candles = [_c5m(50600.0, ct + 10 * 300)]
+    post_exit_htf = [{"close": 50000.0, "time": ct + 7 * 300 + 3600}]
     poll_env["run_polls"](
         candles_5m_by_symbol={"BTC/USDT": recross_candles},
-        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        candles_1h_by_symbol={"BTC/USDT": post_exit_htf}, candles_4h_by_symbol={"BTC/USDT": post_exit_htf},
         polls=1,
     )
     plan = poll_env["get_plan"]()

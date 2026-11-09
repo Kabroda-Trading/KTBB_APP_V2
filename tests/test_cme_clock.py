@@ -46,27 +46,25 @@ def test_today_open_and_flush_also_shift_correctly_in_edt():
 # ------------------------------------------------------------------ next_lock_utc -- spring-forward (2026-03-08)
 
 def test_next_lock_utc_spring_forward_eve_gives_correct_next_day_lock():
-    # 2026-03-07 15:00 UTC is the real EST lock moment the day before the
-    # spring-forward transition (10:00 AM EST == 15:00 UTC). The next lock,
-    # on the 8th, is already EDT (10:00 AM EDT == 14:00 UTC) -- only 23
-    # hours later, not 24, because EDT takes effect overnight.
+    # 2026-03-07 15:00 UTC is Saturday before spring-forward transition.
+    # Because CME equity futures are closed weekends, the next lock advances
+    # straight to MONDAY 2026-03-09 14:00 UTC (EDT).
     now = datetime.datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
     result = cc.next_lock_utc(now)
-    assert result == datetime.datetime(2026, 3, 8, 14, 0, 0, tzinfo=UTC)
-    assert (result - now).total_seconds() / 3600 == 23.0
+    assert result == datetime.datetime(2026, 3, 9, 14, 0, 0, tzinfo=UTC)
+    assert (result - now).total_seconds() / 3600 == 47.0
 
 
 # ------------------------------------------------------------------ next_lock_utc -- fall-back (2026-11-01) -- THE REGRESSION TEST
 
 def test_next_lock_utc_fall_back_eve_gives_correct_25h_later_lock():
-    # 2026-10-31 14:00 UTC is the real EDT lock moment the day before the
-    # fall-back transition. A naive fixed-offset implementation (the bug
-    # this module fixes) would compute the SAME 14:00 UTC for the next
-    # day too -- the correct answer is 15:00 UTC (now EST), 25 hours later.
+    # 2026-10-31 14:00 UTC is Saturday before fall-back transition.
+    # Because CME equity futures are closed weekends, the next lock advances
+    # straight to MONDAY 2026-11-02 15:00 UTC (EST).
     now = datetime.datetime(2026, 10, 31, 14, 0, 0, tzinfo=UTC)
     result = cc.next_lock_utc(now)
-    assert result == datetime.datetime(2026, 11, 1, 15, 0, 0, tzinfo=UTC)
-    assert (result - now).total_seconds() / 3600 == 25.0
+    assert result == datetime.datetime(2026, 11, 2, 15, 0, 0, tzinfo=UTC)
+    assert (result - now).total_seconds() / 3600 == 49.0
 
 
 # ------------------------------------------------------------------ next_lock_utc -- boundary behavior
@@ -90,8 +88,9 @@ def test_seconds_until_next_lock_matches_next_lock_utc():
 # ------------------------------------------------------------------ most_recent_lock_utc
 
 def test_most_recent_lock_utc_before_todays_lock_returns_yesterdays():
-    now = datetime.datetime(2026, 1, 12, 14, 0, 0, tzinfo=UTC)   # 9:00 AM EST, before today's 10:00 lock
-    assert cc.most_recent_lock_utc(now) == datetime.datetime(2026, 1, 11, 15, 0, 0, tzinfo=UTC)
+    now = datetime.datetime(2026, 1, 12, 14, 0, 0, tzinfo=UTC)   # 9:00 AM EST on Monday, before today's 10:00 lock
+    # On Monday morning before 10:00 AM, the most recent weekday lock is FRIDAY Jan 9 (Sunday Jan 11 is closed).
+    assert cc.most_recent_lock_utc(now) == datetime.datetime(2026, 1, 9, 15, 0, 0, tzinfo=UTC)
 
 
 def test_most_recent_lock_utc_after_todays_lock_returns_today():
@@ -100,14 +99,10 @@ def test_most_recent_lock_utc_after_todays_lock_returns_today():
 
 
 def test_most_recent_lock_utc_across_fall_back_is_correct_not_off_by_an_hour():
-    # The day right after fall-back (2026-11-01): yesterday's (10-31, EDT)
-    # lock was 14:00 UTC; a naive "today's lock - 24h" shortcut would give
-    # 2026-11-01 14:00 UTC, which is WRONG -- today is already EST, so
-    # today's real lock is 15:00 UTC. This is the direct regression test
-    # for why most_recent_lock_utc() re-resolves local time instead of
-    # subtracting a fixed 24h from next_lock_utc().
-    now = datetime.datetime(2026, 11, 1, 16, 0, 0, tzinfo=UTC)   # 11:00 AM EST, after today's 10:00 lock
-    assert cc.most_recent_lock_utc(now) == datetime.datetime(2026, 11, 1, 15, 0, 0, tzinfo=UTC)
+    # Sunday 2026-11-01 is a weekend (CME closed). On Sunday afternoon, the most recent
+    # lock was Friday 2026-10-30 at 14:00 UTC (EDT).
+    now = datetime.datetime(2026, 11, 1, 16, 0, 0, tzinfo=UTC)
+    assert cc.most_recent_lock_utc(now) == datetime.datetime(2026, 10, 30, 14, 0, 0, tzinfo=UTC)
 
 
 # ------------------------------------------------------------------ catch-up window
