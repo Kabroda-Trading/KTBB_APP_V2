@@ -10699,3 +10699,18 @@ CrossTrade's OpenAPI 3.1 specification (`https://app.crosstrade.io/v1/api/openap
    - Mock CrossTrade `POST /v1/api/market/bars` success, HTTP 408 error, and contract resolution.
    - Maintain 154/154 pass rate across all CME test suites.
 
+
+
+### 5. Verification & Live Probe Results
+- **St. Louis VPS Live Probe (`POST /v1/api/market/bars`):**
+  Successfully returned 200 OK in **364 ms** for `MNQ 12-26`.
+- **Live Response Schema Verified:**
+  * Root object returns `bars` array directly (`body["bars"]`, no `data` wrapper).
+  * Timestamps include both ISO-8601 UTC string (`time`) and millisecond epoch (`epoch`).
+  * `periodType` is lowercase `"minute"`.
+- **Implementation Landed:**
+  * `cme_crosstrade_client.py`: Updated `_parse_market_bars()` with live-verified schema handling, and `get_market_bars()`.
+  * `cme_contracts.py`: Added automatic contract resolver mapping roots (`MNQ`, `MES`) to dated instruments (`MNQ 12-26`).
+  * `cme_market.py`: Wired `fetch_calibration_1m` and `fetch_confirmed_5m` to query CrossTrade zero-lag feed, with continuous fallback.
+- **Full Test Suite:** **191 / 191 tests passed (100% green)** across all 8 CME test files.
+- **Commit:** `169b262` ("feat(cme): wire zero-lag CrossTrade market data via St. Louis VPS with verified live schema").
