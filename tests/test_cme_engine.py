@@ -249,6 +249,60 @@ def test_process_symbol_lock_persists_missed_window_on_a_calibration_fetch_failu
     assert plan.box is None and plan.bo is None   # no fabricated trading data, just the status
 
 
+def test_process_one_symbol_lock_tick_timeout_persists_a_missed_window_row(db, monkeypatch):
+    # 2026-11-10 (audit Bug 1) -- the blanket except used to roll back and
+    # return, leaving ZERO rows for the day (not even the fallback record),
+    # so the desk leaked yesterday's error as today's. A timeout must now
+    # commit a MISSED_WINDOW row, never a silent void.
+    monkeypatch.setattr(ce, "_ROW_TIMEOUT_SECONDS", 0.05)
+    account = _account(db)
+    _config(db, account)
+
+    async def _hang(symbol, date_key):
+        await asyncio.sleep(999)   # never returns -> asyncio.wait_for raises TimeoutError
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _hang)
+
+    _run(ce._process_one_symbol_lock_tick(db, "MNQ", "2026-11-10"))
+    plan = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-10").first()
+    assert plan is not None
+    assert plan.status == "MISSED_WINDOW"
+    assert "timed out" in plan.status_reason
+
+
+def test_process_one_symbol_lock_tick_timeout_does_not_clobber_an_existing_row(db, monkeypatch):
+    # Same idempotency convention as the fetch-failure path: if a real lock
+    # somehow already exists for the day, a timeout must not overwrite it.
+    monkeypatch.setattr(ce, "_ROW_TIMEOUT_SECONDS", 0.05)
+    _plan(db, symbol="MNQ", date_key="2026-11-10", status="ARMED")
+    db.commit()
+
+    async def _hang(symbol, date_key):
+        await asyncio.sleep(999)
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _hang)
+
+    _run(ce._process_one_symbol_lock_tick(db, "MNQ", "2026-11-10"))
+    mnq = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-10").one()
+    assert mnq.status == "ARMED"   # untouched
+
+
+def test_process_one_symbol_lock_tick_generic_error_rolls_back_without_row(db, monkeypatch):
+    # A non-timeout exception escaping _process_symbol_lock (the calibration
+    # fetch failure is caught INTERNALLY and already becomes a MISSED_WINDOW
+    # row, so the only way to reach the generic-except is a real unexpected
+    # raise) keeps the original rollback behavior -- surfaced loudly via
+    # traceback, not silently swallowed, and NOT manufactured into a
+    # MISSED_WINDOW row it cannot distinguish from a real one.
+    account = _account(db)
+    _config(db, account)
+
+    async def _boom(db_, symbol, date_key):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(ce, "_process_symbol_lock", _boom)
+
+    _run(ce._process_one_symbol_lock_tick(db, "MNQ", "2026-11-10"))
+    assert db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-10").count() == 0
+
+
 # ------------------------------------------------------------------ _persist_missed_window_rows (2026-11-06)
 # Real structural fragility found live: run_cme_session_loop() used to
 # just sleep until tomorrow when the catchup window was missed -- today's

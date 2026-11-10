@@ -1072,6 +1072,17 @@ async def run_executor_live_e1_loop() -> None:
                     traveler_plan_row = db.query(TravelerPlan).filter_by(id=order_row.traveler_plan_id).first()
                     if account is None or traveler_plan_row is None:
                         continue
+                    # 2026-11-10 (audit anomaly #1) -- defense-in-depth twin
+                    # of executor_engine._process_traveler_account's own CME
+                    # guard: a CME futures account must never reach the
+                    # Bitunix poll path, even for a row that predates the
+                    # fan-out guard (e.g. created before this deploy). Skip
+                    # and log so it can't retry the same invalid token call
+                    # every 30s cycle.
+                    if (account.exchange or "").strip().lower() == "tradovate" or (account.market_type or "") == "CME_FUTURES":
+                        print(f"|| EXECUTOR LIVE E1 || skipping CME account {account.id} "
+                              f"for crypto order {order_row.id} -- CME order placement is cme_engine.py's job")
+                        continue
                     await asyncio.wait_for(
                         poll_traveler_position(db, account, traveler_plan_row, order_row),
                         timeout=_ROW_TIMEOUT_SECONDS,

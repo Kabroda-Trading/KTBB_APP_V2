@@ -63,6 +63,17 @@ async def _process_traveler_account(
     docstring. Also changes which pair of TravelerPlan timestamp/price
     fields the DRY_RUN bookkeeping stamp below reads (rearm_fill_price/
     rearm_fill_time vs. the primary's own fill_price/fill_time)."""
+    # 2026-11-10 (CME_AND_TRAVELER_LIVE_AUDIT_2026_11_10.md anomaly #1) --
+    # a CME futures account (exchange='tradovate', market_type='CME_FUTURES')
+    # must never be driven through the crypto executor path: Account 17
+    # (Andy_CME_Funds) was observed attempting a BTC/USDT Bitunix order with
+    # its Tradovate credentials, failing with `code=10003 Token invalid`.
+    # CME order placement is owned by cme_engine.py/cme_executor.py entirely;
+    # this GATE_TRAVELER crypto path is only ever valid for Bitunix crypto
+    # accounts. Skip CME accounts BEFORE any sizing/order construction so
+    # they never even reach build_hypothetical_traveler_order().
+    if (account.exchange or "").strip().lower() == "tradovate" or (account.market_type or "") == "CME_FUTURES":
+        return
     if executor_accounts.gate_profile_of(account) != "GATE_TRAVELER":
         return
     risk_state = executor_accounts.get_or_init_risk_state(db, account)

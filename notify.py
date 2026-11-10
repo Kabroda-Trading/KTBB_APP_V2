@@ -242,7 +242,7 @@ def _send_telegram_raw(chat_id: str, text: str) -> bool:
     logs and returns False, never raises -- if TELEGRAM_BOT_TOKEN is
     unset or the call fails, matching send_admin_email()/send_account_
     email()'s own never-raise contract. Same global-env-var, fail-closed
-    convention as METASIGNALS_SECRET_KEY/DATABENTO_API_KEY (CLAUDE.md) --
+    convention as METASIGNALS_SECRET_KEY/CROSSTRADE_BEARER_TOKEN (CLAUDE.md) --
     one bot token for the whole site, not per-account, since a Telegram
     bot token has no per-account dimension (one bot, many chat_ids)."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")

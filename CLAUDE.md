@@ -66,18 +66,25 @@ METASIGNALS_SECRET_KEY   # Optional — required only for the Raspberry Pi daemo
                          # _handle_metasignals_ingest() for why both names are accepted (a real, confirmed
                          # discrepancy between this repo's own committed Pi script and the spec's later
                          # commit describing what's actually running on Andy's hardware, 2026-10-13).
-DATABENTO_API_KEY     # Optional -- required only for cme_market.py's real D1/D2 market-data fetch
-                      # (cme_databento_client.py). Added 2026-11-04 once direct Tradovate Market Data
-                      # access was confirmed blocked by the same funded-account gate as trading access
-                      # (accessToken and mdAccessToken come from the identical, confirmed-blocked
-                      # /auth/accesstokenrequest call), and CrossTrade (the execution path that DOES
-                      # work) was confirmed to have no market-data surface on its Tradovate-linked side.
-                      # A single global key, not per-ExecutorAccount -- MES/MNQ price data doesn't
-                      # depend on which Tradovate/CrossTrade account is trading it. Without this set,
-                      # cme_market.py's fetch functions raise a clear RuntimeError (not a silent gap).
+DATABENTO_API_KEY     # STALE / VESTIGIAL (2026-11-10) -- no longer read by any live code path.
+                      # cme_market.py's Databento client (cme_databento_client.py) was removed first
+                      # by Architecture A (continuous yfinance, 2026-11-09) and then that feed too was
+                      # replaced by CrossTrade's zero-lag GetBars (2026-11-10, see CROSSTRADE_BEARER_TOKEN
+                      # below). Left as a documented vestige for Render rather than silently removed, but
+                      # nothing in cme_market.py (or elsewhere) consults it anymore.
+CROSSTRADE_BEARER_TOKEN  # Optional -- required only for cme_market.py's D1/D2/D3 CME market-data fetch
+                      # via CrossTrade's GetBars RPC (POST /v1/api/market/bars), which queries the
+                      # NinjaTrader 8 add-on streaming zero-lag venue-true bars on the St. Louis VPS
+                      # (5.252.53.189). Replaces the delayed yfinance continuous proxy (measured ~10-min
+                      # lag, unacceptable for D2 cross confirmation / D3 ratchet). If unset, cme_market.py
+                      # falls back to the active crosstrade ExecutorAccount's decrypted api_key_encrypted
+                      # bearer token; if neither resolves, fetch_calibration_1m / fetch_confirmed_5m /
+                      # fetch_daily_atr14 RAISE a clear RuntimeError (NO delayed-feed fallback exists --
+                      # a day that can't be fed zero-lag data stands down as MISSED_WINDOW, never trades
+                      # on stale bars).
 TELEGRAM_BOT_TOKEN    # Optional -- required for any Telegram push to actually send (notify.py's
                       # _send_telegram_raw()). Fails closed (logs, returns False, never raises) if
-                      # unset -- same convention as METASIGNALS_SECRET_KEY/DATABENTO_API_KEY. A single
+                      # unset -- same convention as METASIGNALS_SECRET_KEY. A single
                       # global token (one bot, @KabrodaBot), not per-account -- matches how a Telegram
                       # bot actually works (one bot, many chat_ids). Added 2026-11-xx alongside
                       # NotificationPreference (database.py), the first per-USER (not per-account)

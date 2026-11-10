@@ -11,11 +11,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+import cme_clock
 from database import CMEPlan, CMEOrder, CMEConfig, CMETransition, ExecutorAccount
 from cme_signals import REACHABILITY_MAX
 
@@ -23,14 +24,28 @@ SYMBOLS = ["MNQ", "MES"]
 _OPEN_MGMT_STATES = ("PENDING_ENTRY", "WAITING_RETEST", "FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
 
 
-def _iso(dt: Optional[datetime]) -> Optional[str]:
+def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
 
 
+def _today_date_key() -> str:
+    """Today's date in NY local wall-clock time -- the same date basis the
+    CME lock uses (a session runs 9:30-16:00 ET, so "today's lock" is keyed
+    on the NY calendar date, not UTC)."""
+    return datetime.datetime.now(datetime.timezone.utc).astimezone(cme_clock.NY_TZ).strftime("%Y-%m-%d")
+
+
 def _latest_plan(db: Session, symbol: str) -> Optional[CMEPlan]:
+    # 2026-11-10 (CME_AND_TRAVELER_LIVE_AUDIT_2026_11_10.md Bug 3) -- the
+    # prior ORDER BY lock_time DESC LIMIT 1 had no date filter, so when a
+    # day's lock had not yet run (or silently failed to write a row), the
+    # desk leaked YESTERDAY's plan (including yesterday's Databento 422
+    # error string) as if it were today's live state. Filtering to today's
+    # date_key means a not-yet-checked day honestly reports `plan: null`
+    # ("Awaiting Today's Lock") instead of a stale row.
     return (
         db.query(CMEPlan)
-        .filter(CMEPlan.symbol == symbol)
+        .filter(CMEPlan.symbol == symbol, CMEPlan.date_key == _today_date_key())
         .order_by(CMEPlan.lock_time.desc())
         .first()
     )

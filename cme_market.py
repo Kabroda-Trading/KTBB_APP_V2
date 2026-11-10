@@ -4,34 +4,29 @@
 # calibration bars), D2 (5-minute breakout cross/retest bars), and D3
 # (5-minute ratchet monitoring).
 #
-# Unified Continuous Real-Time Engine (Architecture A):
-# Uses continuous CME Globex futures (MNQ=F / MES=F, fallback NQ=F / ES=F),
-# matching the exact underlying dataset calibrated in Kabroda AI Brain's
-# 10.4-year CME study (DATA_ASSETS.md Rows 21-22).
+# CrossTrade zero-lag venue-true feed (2026-11-10): every fetch path reads
+# CME bars from CrossTrade's GetBars RPC (POST /v1/api/market/bars), which
+# queries the NinjaTrader 8 add-on streaming on the St. Louis VPS. This
+# replaces Architecture A's delayed yfinance continuous-futures proxy
+# (measured ~10-minute Lag, unacceptable for D2 cross confirmation and
+# D3 ratchet management).
 #
-# Eliminates batch ingestion lag, HTTP 422 errors, and external API key
-# requirements for market data.
+# NO FALLBACK. If CrossTrade is unconfigured (no CROSSTRADE_BEARER_TOKEN
+# and no active crosstrade ExecutorAccount) or its GetBars call errors,
+# these functions RAISE a clear RuntimeError instead of silently
+# substituting delayed yfinance data. A day that can't be fed zero-lag
+# data must stand down loudly (MISSED_WINDOW), never trade on stale bars.
 # ==============================================================================
 
 from __future__ import annotations
 
-import asyncio
 import datetime
+import os
 from typing import Any, Dict, List, Optional
 
-import os
 import cme_clock
 import cme_contracts
 import cme_crosstrade_client
-import yfinance as yf
-
-
-_TICKER_MAP = {
-    "MNQ": ("MNQ=F", "NQ=F"),
-    "MES": ("MES=F", "ES=F"),
-}
-
-
 
 
 def _get_crosstrade_client() -> Optional[cme_crosstrade_client.CrossTradeClient]:
@@ -59,195 +54,92 @@ def _get_crosstrade_client() -> Optional[cme_crosstrade_client.CrossTradeClient]
         pass
     return None
 
+
+def _require_crosstrade_client() -> cme_crosstrade_client.CrossTradeClient:
+    client = _get_crosstrade_client()
+    if client is None:
+        raise RuntimeError(
+            "CrossTrade market-data client unavailable (no CROSSTRADE_BEARER_TOKEN and no "
+            "active crosstrade ExecutorAccount) -- refusing to trade on delayed yfinance; "
+            "configure the CrossTrade VPS feed first."
+        )
+    return client
+
+
 def _strip_to_signal_shape(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """cme_signals.py's functions only ever read open/high/low/close --
     drops timestamps and extra metadata."""
     return [{"open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"]} for b in bars]
 
 
-def _aggregate_to_confirmed_5m(bars_1m: List[Dict[str, Any]], now_utc: datetime.datetime) -> List[Dict[str, Any]]:
-    """Aggregates 1-minute bars into 5-minute buckets aligned to real
-    wall-clock 5-minute boundaries. CONFIRMED means fully closed: a bucket
-    is only included once its own 5-minute window has fully elapsed relative
-    to now_utc."""
-    buckets: Dict[datetime.datetime, List[Dict[str, Any]]] = {}
-    for bar in bars_1m:
-        ts = bar["ts_event"]
-        bucket_start = ts - datetime.timedelta(minutes=ts.minute % 5, seconds=ts.second, microseconds=ts.microsecond)
-        buckets.setdefault(bucket_start, []).append(bar)
-
-    confirmed = []
-    for bucket_start in sorted(buckets):
-        bucket_end = bucket_start + datetime.timedelta(minutes=5)
-        if bucket_end > now_utc:
-            continue
-        minute_bars = buckets[bucket_start]
-        confirmed.append({
-            "open": minute_bars[0]["open"],
-            "high": max(b["high"] for b in minute_bars),
-            "low": min(b["low"] for b in minute_bars),
-            "close": minute_bars[-1]["close"],
-        })
-    return confirmed
-
-
-def _download_1m_bars(symbol: str) -> Optional[Any]:
-    tickers = _TICKER_MAP.get(symbol.upper(), (f"{symbol.upper()}=F",))
-    for ticker in tickers:
-        try:
-            df = yf.download(ticker, period="5d", interval="1m", progress=False)
-            if df is not None and not df.empty:
-                if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
-                    df.columns = df.columns.get_level_values(0)
-                return df
-        except Exception as e:
-            print(f"|| CME MARKET || download failed for {ticker}: {e}")
-    return None
-
-
-def _fetch_calibration_1m_sync(symbol: str, date_key: str) -> List[Dict[str, Any]]:
-    df = _download_1m_bars(symbol)
-    if df is None or df.empty:
-        return []
-
-    try:
-        df = df.tz_convert(cme_clock.NY_TZ)
-    except Exception:
-        pass
-
-    cal_df = df[
-        (df.index.strftime("%Y-%m-%d") == date_key)
-        & (df.index.time >= datetime.time(cme_clock.OPEN_H, cme_clock.OPEN_M))
-        & (df.index.time < datetime.time(cme_clock.LOCK_H, cme_clock.LOCK_M))
-    ]
-    return [
-        {
-            "open": float(r["Open"]),
-            "high": float(r["High"]),
-            "low": float(r["Low"]),
-            "close": float(r["Close"]),
-        }
-        for _, r in cal_df.iterrows()
-    ]
-
-
-def _fetch_confirmed_5m_sync(symbol: str, since_utc: datetime.datetime, now_utc: datetime.datetime) -> List[Dict[str, Any]]:
-    df = _download_1m_bars(symbol)
-    if df is None or df.empty:
-        return []
-
-    try:
-        df = df.tz_convert(datetime.timezone.utc)
-    except Exception:
-        pass
-
-    if since_utc.tzinfo is None:
-        since_utc = since_utc.replace(tzinfo=datetime.timezone.utc)
-
-    df_since = df[df.index >= since_utc]
-    bars_1m = [
-        {
-            "ts_event": idx.to_pydatetime(),
-            "open": float(r["Open"]),
-            "high": float(r["High"]),
-            "low": float(r["Low"]),
-            "close": float(r["Close"]),
-        }
-        for idx, r in df_since.iterrows()
-    ]
-    return _aggregate_to_confirmed_5m(bars_1m, now_utc)
-
-
-def _fetch_daily_atr14_sync(symbol: str, date_key: str) -> Optional[float]:
-    tickers = _TICKER_MAP.get(symbol.upper(), (f"{symbol.upper()}=F",))
-    df = None
-    for ticker in tickers:
-        try:
-            df = yf.download(ticker, period="1mo", interval="1d", progress=False)
-            if df is not None and not df.empty:
-                if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
-                    df.columns = df.columns.get_level_values(0)
-                break
-        except Exception as e:
-            print(f"|| CME MARKET || daily download failed for {ticker}: {e}")
-
-    if df is None or df.empty:
-        return None
-
-    df_prior = df[df.index.strftime("%Y-%m-%d") < date_key]
-    if len(df_prior) < 14:
-        return None
-
-    last14 = df_prior.iloc[-14:]
-    ranges = [float(r["High"] - r["Low"]) for _, r in last14.iterrows()]
-    return sum(ranges) / len(ranges)
-
-
 async def fetch_calibration_1m(symbol: str, date_key: str) -> List[Dict[str, Any]]:
     """Real 1-minute bars for `date_key`'s 9:30-10:00 ET calibration
-    window, in the shape cme_signals.compute_tpo_value_area() expects.
-    Prefers CrossTrade (zero-lag venue-true feed via St. Louis VPS).
-    Falls back to continuous feed if CrossTrade is unconfigured/unavailable."""
-    client = _get_crosstrade_client()
-    if client:
-        try:
-            instrument = cme_contracts.resolve_contract(symbol)
-            bars = await client.get_market_bars(instrument, period_type="minute", period=1, days_back=2, limit=150)
-            if bars:
-                cal_bars = []
-                for b in bars:
-                    t = b.get("time")
-                    if not t:
-                        continue
-                    t_ny = t.astimezone(cme_clock.NY_TZ)
-                    if (
-                        t_ny.strftime("%Y-%m-%d") == date_key
-                        and t_ny.time() >= datetime.time(cme_clock.OPEN_H, cme_clock.OPEN_M)
-                        and t_ny.time() < datetime.time(cme_clock.LOCK_H, cme_clock.LOCK_M)
-                    ):
-                        cal_bars.append({
-                            "open": float(b["open"]),
-                            "high": float(b["high"]),
-                            "low": float(b["low"]),
-                            "close": float(b["close"]),
-                        })
-                if cal_bars:
-                    return cal_bars
-        except Exception as e:
-            print(f"|| CME MARKET || CrossTrade calibration fetch failed, trying fallback: {e}")
-
-    bars = await asyncio.to_thread(_fetch_calibration_1m_sync, symbol, date_key)
-    if not bars:
-        raise RuntimeError(f"Failed to fetch calibration 1m bars for {symbol} on {date_key}")
-    return bars
+    window, in the shape cme_signals.compute_tpo_value_area() expects,
+    from CrossTrade's zero-lag GetBars feed. RAISES if CrossTrade is
+    unconfigured or returns no bars for the window -- no delayed-feed
+    fallback exists (the D1 caller turns this into a MISSED_WINDOW row)."""
+    client = _require_crosstrade_client()
+    instrument = cme_contracts.resolve_contract(symbol)
+    bars = await client.get_market_bars(instrument, period_type="minute", period=1, days_back=2, limit=150)
+    cal_bars: List[Dict[str, Any]] = []
+    for b in bars:
+        t = b.get("time")
+        if not t:
+            continue
+        t_ny = t.astimezone(cme_clock.NY_TZ)
+        if (
+            t_ny.strftime("%Y-%m-%d") == date_key
+            and t_ny.time() >= datetime.time(cme_clock.OPEN_H, cme_clock.OPEN_M)
+            and t_ny.time() < datetime.time(cme_clock.LOCK_H, cme_clock.LOCK_M)
+        ):
+            cal_bars.append({
+                "open": float(b["open"]),
+                "high": float(b["high"]),
+                "low": float(b["low"]),
+                "close": float(b["close"]),
+            })
+    if not cal_bars:
+        raise RuntimeError(f"Failed to fetch calibration 1m bars for {symbol} on {date_key} via CrossTrade")
+    return cal_bars
 
 
 async def fetch_confirmed_5m(symbol: str, since_utc: datetime.datetime) -> List[Dict[str, Any]]:
     """Confirmed (fully closed) 5-minute bars for `symbol` since `since_utc`,
-    in the shape cme_signals.check_cross()/check_retest_fill() expect.
-    Prefers CrossTrade (zero-lag venue-true feed via St. Louis VPS).
-    Falls back to continuous feed if CrossTrade is unconfigured/unavailable."""
-    client = _get_crosstrade_client()
-    if client:
-        try:
-            instrument = cme_contracts.resolve_contract(symbol)
-            bars = await client.get_market_bars(instrument, period_type="minute", period=5, days_back=1, limit=50)
-            if bars:
-                if since_utc.tzinfo is None:
-                    since_utc = since_utc.replace(tzinfo=datetime.timezone.utc)
-                matching = [b for b in bars if b.get("time") and b["time"] >= since_utc]
-                if matching:
-                    return _strip_to_signal_shape(matching)
-        except Exception as e:
-            print(f"|| CME MARKET || CrossTrade confirmed 5m fetch failed, trying fallback: {e}")
-
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    bars_5m = await asyncio.to_thread(_fetch_confirmed_5m_sync, symbol, since_utc, now_utc)
-    return _strip_to_signal_shape(bars_5m)
+    in the shape cme_signals.check_cross()/check_retest_fill() expect, from
+    CrossTrade's zero-lag GetBars feed (native 5m bars -- no 1m->5m
+    aggregation). RAISES if CrossTrade is unconfigured or its call errors.
+    An empty window (no bars yet since `since_utc`, including CrossTrade's
+    HTTP-408 "NT8 disconnected" quiet gap) returns [] so the D2/D3 watch
+    loop retries on its next 30s tick rather than crashing."""
+    client = _require_crosstrade_client()
+    instrument = cme_contracts.resolve_contract(symbol)
+    bars = await client.get_market_bars(instrument, period_type="minute", period=5, days_back=1, limit=50)
+    if since_utc.tzinfo is None:
+        since_utc = since_utc.replace(tzinfo=datetime.timezone.utc)
+    matching = [b for b in bars if b.get("time") and b["time"] >= since_utc]
+    return _strip_to_signal_shape(matching)
 
 
 async def fetch_daily_atr14(symbol: str, date_key: str) -> Optional[float]:
     """Simple 14-day mean of Daily High - Daily Low, ending the day
     BEFORE date_key (today's own daily bar isn't closed yet at the
-    10:00 ET lock -- using it would leak an incomplete range)."""
-    return await asyncio.to_thread(_fetch_daily_atr14_sync, symbol, date_key)
+    10:00 ET lock -- using it would leak an incomplete range). Reads
+    CrossTrade's GetBars daily bars (periodType="day") -- no delayed
+    yfinance fallback. Returns None only on legitimately insufficient
+    history (<14 prior daily bars), which the caller treats as a safe
+    stand-down; RAISES when CrossTrade is unconfigured or its call fails."""
+    client = _require_crosstrade_client()
+    instrument = cme_contracts.resolve_contract(symbol)
+    bars = await client.get_market_bars(instrument, period_type="day", period=1, days_back=30, limit=30)
+    prior: List[Dict[str, Any]] = []
+    for b in bars:
+        t = b.get("time")
+        if not t:
+            continue
+        if t.astimezone(cme_clock.NY_TZ).strftime("%Y-%m-%d") < date_key:
+            prior.append(b)
+    if len(prior) < 14:
+        return None
+    last14 = prior[-14:]
+    ranges = [float(b["high"]) - float(b["low"]) for b in last14]
+    return sum(ranges) / len(ranges)

@@ -1477,6 +1477,45 @@ def test_dry_run_traveler_row_still_books_the_fill_immediately(db, monkeypatch):
     assert order.management_state == "ENTRY_FILLED_ORDERS_PLACED"
 
 
+def test_cme_futures_account_is_skipped_by_the_crypto_fanout(db, monkeypatch):
+    # 2026-11-10 (audit anomaly #1) -- Account 17 (Andy_CME_Funds,
+    # exchange='tradovate') was observed attempting a BTC/USDT Bitunix order
+    # with Tradovate credentials (Token invalid). A CME futures account must
+    # be skipped BEFORE build_hypothetical_traveler_order() is ever reached.
+    account = _traveler_account(db, "LIVE", "andy_cme_funds")
+    account.exchange = "tradovate"
+    account.market_type = "CME_FUTURES"
+    db.commit()
+    plan = _filled_plan(db)
+
+    build_calls = []
+
+    async def _fake_build(db_, plan_, account_, risk_, is_rearm=False):
+        build_calls.append(account_.id)
+        return _would_place_dict(plan_, account_)
+    monkeypatch.setattr(executor_plan_builder, "build_hypothetical_traveler_order", _fake_build)
+
+    _run(executor_engine._process_traveler_account(db, plan, account))
+    assert build_calls == []   # never even attempted sizing/order construction
+    assert db.query(ExecutorOrder).filter_by(account_id=account.id, traveler_plan_id=plan.id).count() == 0
+
+
+def test_cme_futures_account_is_skipped_even_with_only_market_type_set(db, monkeypatch):
+    # The guard must also fire on market_type alone (the canonical CME
+    # marker), independent of the exchange string -- defense-in-depth.
+    account = _traveler_account(db, "DRY_RUN", "cme_market_type_only")
+    account.market_type = "CME_FUTURES"
+    db.commit()
+    plan = _filled_plan(db)
+
+    async def _fake_build(db_, plan_, account_, risk_, is_rearm=False):
+        return _would_place_dict(plan_, account_)
+    monkeypatch.setattr(executor_plan_builder, "build_hypothetical_traveler_order", _fake_build)
+
+    _run(executor_engine._process_traveler_account(db, plan, account))
+    assert db.query(ExecutorOrder).filter_by(account_id=account.id, traveler_plan_id=plan.id).count() == 0
+
+
 def test_simulated_e1_walk_selects_only_dry_run_orders(db):
     dry_acct = _traveler_account(db, "DRY_RUN", "walk_dry")
     live_acct = _traveler_account(db, "LIVE", "walk_live")

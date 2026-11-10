@@ -54,6 +54,15 @@ SYMBOLS = ["MNQ", "MES"]
 _ROW_TIMEOUT_SECONDS = 25
 _DEFAULT_CATCHUP_WINDOW_SECONDS = 900
 _WATCH_POLL_SECONDS = 30
+# 2026-11-10 (CME_AND_TRAVELER_LIVE_AUDIT_2026_11_10.md Bug 2) -- Python's
+# asyncio.sleep() may wake a few milliseconds EARLY, so a boundary-anchored
+# sleep to the exact 10:00 ET lock can land at 09:59:59.999 and have
+# most_recent_lock_utc() resolve to YESTERDAY's lock instead of today's. A
+# small overshoot buffer guarantees the loop wakes strictly AFTER the
+# boundary; the top-of-loop catchup-window check remains the backstop for
+# genuinely-late wakes (cloud pause/restart). Keeping it 2s (well inside the
+# 900s catchup window) so the overshoot is never mistaken for a missed day.
+_LOCK_BOUNDARY_BUFFER_SECONDS = 2.0
 
 _PENDING_RETEST_STATES = ("WAITING_RETEST",)
 _OPEN_POSITION_STATES = ("FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
@@ -191,6 +200,29 @@ async def _process_one_symbol_lock_tick(db: Session, symbol: str, date_key: str)
     try:
         await asyncio.wait_for(_process_symbol_lock(db, symbol, date_key), timeout=_ROW_TIMEOUT_SECONDS * 4)
         db.commit()
+    except asyncio.TimeoutError:
+        # 2026-11-10 (CME_AND_TRAVELER_LIVE_AUDIT_2026_11_10.md Bug 1) --
+        # the prior blanket except rolled back the transaction and returned,
+        # leaving ZERO rows for the day -- not even the fallback
+        # MISSED_WINDOW record -- so the desk showed yesterday's stale error
+        # as if it were today's. A timeout is a real, distinct "we did not
+        # successfully check this market" outcome and MUST be persisted as a
+        # MISSED_WINDOW row (same status/idempotency convention as
+        # _process_symbol_lock's own fetch-failure path), never silently
+        # rolled back into a void. Committed on its own so a timeout on one
+        # symbol can never orphan the other's successful lock.
+        db.rollback()
+        existing = db.query(CMEPlan).filter_by(symbol=symbol, date_key=date_key).first()
+        if existing is None:
+            db.add(CMEPlan(
+                symbol=symbol, date_key=date_key, lock_time=datetime.datetime.utcnow(),
+                status="MISSED_WINDOW",
+                status_reason=f"lock tick timed out after {_ROW_TIMEOUT_SECONDS * 4}s",
+            ))
+            db.commit()
+            print(f"|| CME SESSION LOOP || {symbol} lock tick timed out -- persisted MISSED_WINDOW row for {date_key}")
+        else:
+            print(f"|| CME SESSION LOOP || {symbol} lock tick timed out but a row already exists for {date_key}")
     except Exception as e:
         db.rollback()
         print(f"|| CME SESSION LOOP || {symbol} lock tick failed: {e}")
@@ -241,7 +273,11 @@ async def run_cme_session_loop() -> None:
         lock_instant = cme_clock.most_recent_lock_utc(now)
         if not cme_clock.is_within_catchup_window(lock_instant, now, _DEFAULT_CATCHUP_WINDOW_SECONDS):
             _persist_missed_window_rows(lock_instant)
-            await asyncio.sleep(cme_clock.seconds_until_next_lock(now))
+            # Overshoot buffer: sleep slightly PAST the boundary so the wake
+            # always lands strictly after the lock (see Bug 2 note on
+            # _LOCK_BOUNDARY_BUFFER_SECONDS above) -- never a millisecond
+            # early, which would re-resolve to yesterday's lock.
+            await asyncio.sleep(cme_clock.seconds_until_next_lock(now) + _LOCK_BOUNDARY_BUFFER_SECONDS)
             now = datetime.datetime.now(UTC)
             lock_instant = cme_clock.most_recent_lock_utc(now)
 
@@ -258,7 +294,7 @@ async def run_cme_session_loop() -> None:
             if db is not None:
                 db.close()
 
-        await asyncio.sleep(cme_clock.seconds_until_next_lock(datetime.datetime.now(UTC)))
+        await asyncio.sleep(cme_clock.seconds_until_next_lock(datetime.datetime.now(UTC)) + _LOCK_BOUNDARY_BUFFER_SECONDS)
 
 
 # ------------------------------------------------------------------ watch loop (D2/D3, 30s)

@@ -10714,3 +10714,32 @@ CrossTrade's OpenAPI 3.1 specification (`https://app.crosstrade.io/v1/api/openap
   * `cme_market.py`: Wired `fetch_calibration_1m` and `fetch_confirmed_5m` to query CrossTrade zero-lag feed, with continuous fallback.
 - **Full Test Suite:** **191 / 191 tests passed (100% green)** across all 8 CME test files.
 - **Commit:** `169b262` ("feat(cme): wire zero-lag CrossTrade market data via St. Louis VPS with verified live schema").
+
+## 2026-11-10 (Session 12) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: closed — all four items from the CME_AND_TRAVELER_LIVE_AUDIT_2026_11_10.md handoff work order implemented and verified (not patched piecemeal; each root cause fixed in the module that owns it).
+
+### Fixes landed (full suite 1272/1272 green)
+1. **Timeout rollback trap (cme_engine.py Bug 1).** _process_one_symbol_lock_tick() now catches syncio.TimeoutError separately: instead of the old blanket xcept rolling back into a silent void (zero rows for the day, desk showing yesterday's 422), it commits an explicit MISSED_WINDOW row (`"lock tick timed out after 100s"`) with the same idempotency convention as the fetch-failure path — never clobbers an existing row. Non-timeout exceptions keep the original loud rollback.
+2. **Sleep-boundary premature-wake race (cme_engine.py Bug 2).** Added _LOCK_BOUNDARY_BUFFER_SECONDS = 2.0 overshoot to both boundary-anchored syncio.sleep() calls so the loop wakes strictly AFTER the 10:00 ET lock, never a few ms early (which resolved to yesterday's lock). 2s stays well inside the 900s catchup window, so it's never mistaken for a missed day.
+3. **Radar stale-date leak (cme_radar.py Bug 3).** _latest_plan() now filters date_key == today (NY wall-clock); a day not yet checked honestly reports plan: null ("Awaiting Today's Lock") instead of leaking yesterday's Databento error. Added _today_date_key() using cme_clock.NY_TZ.
+4. **Crypto↔CME isolation (xecutor_engine.py + xecutor_live_e1_engine.py anomaly #1).** _process_traveler_account() skips accounts where xchange == 'tradovate' OR market_type == 'CME_FUTURES' BEFORE order construction, so Andy_CME_Funds (Acct 17) can never attempt a BTC/USDT Bitunix order again. Defense-in-depth twin guard added in the live E1 poll loop for rows that predate the deploy.
+
+### Tests added/updated
+	est_cme_engine.py (timeout-row persistence, no-clobber, generic-error rollback), 	est_cme_routes.py (stale-row-not-leaked, prefers-today's-plan; existing snapshot tests updated to today's date), 	est_executor_live_e1_engine.py (CME-account skip on exchange and market_type).
+
+## 2026-11-10 (Session 13) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: done — yfinance removed from the CME market-data path entirely; CrossTrade is now the sole source (no silent fallback).
+
+Andy's directive: "zero reasons to run into delayed yfinance; the system should work with CrossTrade." Verified the live code directly (not the log) and found that Session 11's CrossTrade migration had left two gaps: (1) yfinance was still a SILENT fallback for calibration-1m and confirmed-5m, so a quiet CrossTrade failure (expired token / VPS down / missing account) was masked by dropping to delayed data with no warning — the most likely cause of the "yesterday failed, today worked" flip; and (2) daily ATR14 was still 100% yfinance with no CrossTrade branch at all.
+
+### What changed
+- `cme_market.py` rewritten: `fetch_calibration_1m` / `fetch_confirmed_5m` / `fetch_daily_atr14` all read CrossTrade GetBars (POST /v1/api/market/bars). Removed `import yfinance`, `_download_1m_bars`, `_fetch_*_sync`, `_aggregate_to_confirmed_5m` (confirmed-5m now uses native 5m bars, no 1m->5m aggregation). Added `_require_crosstrade_client()` which RAISES a clear RuntimeError when no `CROSSTRADE_BEARER_TOKEN` and no active crosstrade ExecutorAccount. NO fallback: an unfed day stands down as MISSED_WINDOW (D1 caller already maps a raise -> MISSED_WINDOW), never trades on stale bars.
+- `fetch_daily_atr14` now uses CrossTrade daily bars (periodType="day", days_back=30), returning None only on <14 prior daily bars (legit stand-down), raising on CrossTrade failure.
+- `main.py` admin market-data-test docstring, `notify.py` comment, and `CLAUDE.md` env-var block updated (DATABENTO_API_KEY marked vestigial; CROSSTRADE_BEARER_TOKEN documented).
+- `tests/test_cme_market.py` rewritten to the CrossTrade-only behavior (12 tests; prior 14 consolidated).
+
+### Verification
+`pytest tests/` -> 1270 passed (net -2 = test consolidation). Full CME sub-suite 194 passed. No live `.py` file imports yfinance anymore (only `_archive/market_context_oracle.py` and defensive test mocks).
+
+### Note for the next pass (flag, not a blocker)
+CrossTrade GetBars `periodType="day"` is the one value NOT yet confirmed against the live VPS (Session 11 confirmed lowercase "minute" only). The daily-bars call for ATR14 uses the NT8-native "day" form; confirm on the first live D1 lock that ATR14 returns a sane value, and adjust casing if NT8 rejects it. `requirements.txt` still lists `yfinance` (now unused by any live path — harmless; remove on a future cleanup if desired).

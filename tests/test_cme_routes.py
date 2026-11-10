@@ -92,9 +92,14 @@ def test_public_snapshot_works_with_no_login(env):
     assert set(body["symbols"].keys()) == {"MNQ", "MES"}
 
 
+def _today_ny_date_key():
+    import cme_clock
+    return datetime.datetime.now(datetime.timezone.utc).astimezone(cme_clock.NY_TZ).strftime("%Y-%m-%d")
+
+
 def test_public_snapshot_reflects_a_real_armed_plan(env):
     db = env["db"]
-    db.add(CMEPlan(symbol="MNQ", date_key="2026-11-04", lock_time=datetime.datetime(2026, 11, 4, 15, 0, 0),
+    db.add(CMEPlan(symbol="MNQ", date_key=_today_ny_date_key(), lock_time=datetime.datetime.utcnow(),
                     status="ARMED", box=20.0, reachability=0.4, bo=4500.0, bd=4480.0))
     db.commit()
 
@@ -108,6 +113,37 @@ def test_public_snapshot_does_not_fabricate_a_plan_with_no_lock_yet(env):
     client = TestClient(app)
     resp = client.get("/api/radar/cme-snapshot")
     assert resp.json()["symbols"]["MES"]["plan"] is None
+
+
+def test_public_snapshot_does_not_leak_yesterdays_plan_as_today(env):
+    """2026-11-10 (audit Bug 3) -- a stale row from a prior day (even one
+    carrying a MISSED_WINDOW / Databento 422 error) must never surface as
+    today's live state. Only today's date_key is eligible."""
+    db = env["db"]
+    # A genuinely-old failed lock with the exact error string the audit found.
+    db.add(CMEPlan(symbol="MNQ", date_key="2026-11-09", lock_time=datetime.datetime(2026, 11, 9, 15, 0, 0),
+                    status="MISSED_WINDOW", status_reason="Databento bars query failed (422)"))
+    db.commit()
+
+    client = TestClient(app)
+    resp = client.get("/api/radar/cme-snapshot")
+    assert resp.status_code == 200
+    # No row for today's date_key -> MNQ must report null, NOT yesterday's row.
+    assert resp.json()["symbols"]["MNQ"]["plan"] is None
+
+
+def test_public_snapshot_prefers_todays_plan_over_a_stale_one(env):
+    db = env["db"]
+    today = _today_ny_date_key()
+    db.add(CMEPlan(symbol="MES", date_key="2026-11-09", lock_time=datetime.datetime(2026, 11, 9, 15, 0, 0),
+                    status="MISSED_WINDOW", status_reason="stale"))
+    db.add(CMEPlan(symbol="MES", date_key=today, lock_time=datetime.datetime.utcnow(),
+                    status="ARMED", box=20.0, reachability=0.4, bo=4500.0, bd=4480.0))
+    db.commit()
+
+    client = TestClient(app)
+    resp = client.get("/api/radar/cme-snapshot")
+    assert resp.json()["symbols"]["MES"]["plan"]["status"] == "ARMED"
 
 
 # ------------------------------------------------------------------ GET /api/admin/cme-status

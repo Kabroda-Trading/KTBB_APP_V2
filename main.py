@@ -2018,10 +2018,11 @@ async def api_admin_cme_status(request: Request, db: Session = Depends(get_db)):
 async def api_admin_cme_market_data_test(request: Request, symbol: str = "MNQ", date_key: Optional[str] = None, db: Session = Depends(get_db)):
     """Read-only diagnostic, admin-only, zero financial risk -- the
     cme_market.py equivalent of the Tradovate/CrossTrade VERIFY AUTH routes.
-    Lets Andy confirm the continuous-feed (yfinance MNQ=F/MES=F) market-data
-    path actually works end to end (real fetch, price shape, NY windowing)
-    against a real HISTORICAL date, without waiting for tomorrow's live
-    9:30-10:00 ET window. date_key defaults to today's NY calendar date."""
+    Lets Andy confirm the CrossTrade zero-lag (GetBars via St. Louis VPS)
+    market-data path actually works end to end (real fetch, price shape, NY
+    windowing) against a real HISTORICAL date, without waiting for
+    tomorrow's live 9:30-10:00 ET window. date_key defaults to today's NY
+    calendar date."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_admin"):
         return JSONResponse({"ok": False, "error": "Admin only."}, status_code=403)
