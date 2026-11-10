@@ -104,12 +104,17 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import weakref
 from typing import Any, Dict, List, Optional
 
 import aiohttp
 
 BASE_URL = "https://app.crosstrade.io/v1/api/tv"
+# The NinjaTrader RPC endpoints (market data) live under /v1/api/*, NOT the
+# /v1/api/tv/* Tradovate prefix that BASE_URL targets -- a separate base so
+# the market-data calls never get routed through the wrong path.
+_MARKET_BASE = "https://app.crosstrade.io/v1/api"
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10.0)
 
 _sessions: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
@@ -120,6 +125,74 @@ def _safe_float(v: Any) -> float:
         return float(v) if v is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+def _parse_market_bars(body: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Normalizes the `data` payload of GetBars into a list of canonical
+    bar dicts: {"time": datetime(UTC), "timestamp": int(epoch), "open",
+    "high", "low", "close", "volume"}. The CrossTrade OpenAPI spec types
+    `data` as a bare object with NO per-field schema, so this is a
+    DEFENSIVE parser covering the two plausible real shapes until the
+    first live response confirms one (same NOT-YET-LIVE-VERIFIED class as
+    sum_fill_fees(), whose field names are also a guess pending a real
+    fill). Two shapes are handled:
+
+      1. {"bars": [ {time, timestamp, open, high, low, close, volume}, ... ]}
+         -- the shape Session 11's work order documented.
+      2. A flat array of the same bar objects (in case GetBars returns the
+         list directly with no "bars" wrapper).
+
+    On success, `time` is always a tz-aware UTC datetime (coerced from the
+    ISO string or the epoch), so callers can compare/slice by wall clock.
+    Returns [] (never raises) if the data has no recognizable bars -- the
+    caller decides whether an empty result is an error or just a quiet
+    gap."""
+    data = body.get("data")
+    if isinstance(data, dict) and "bars" in data:
+        bars = data.get("bars")
+    elif isinstance(body.get("bars"), list):
+        bars = body.get("bars")
+    elif isinstance(data, list):
+        bars = data
+    else:
+        bars = None
+
+    if not isinstance(bars, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for b in bars:
+        if not isinstance(b, dict):
+            continue
+        ts = b.get("time")
+        epoch_val = b.get("epoch") if b.get("epoch") is not None else b.get("timestamp")
+        if ts is None:
+            if epoch_val is not None:
+                ep_sec = float(epoch_val) / 1000.0 if float(epoch_val) > 1e11 else float(epoch_val)
+                time_dt = datetime.datetime.fromtimestamp(ep_sec, tz=datetime.timezone.utc)
+            else:
+                time_dt = None
+        else:
+            if isinstance(ts, datetime.datetime):
+                time_dt = ts if ts.tzinfo is not None else ts.replace(tzinfo=datetime.timezone.utc)
+            else:
+                try:
+                    time_dt = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    if time_dt.tzinfo is None:
+                        time_dt = time_dt.replace(tzinfo=datetime.timezone.utc)
+                except (ValueError, TypeError):
+                    time_dt = None
+        ep_int = int(epoch_val // 1000) if epoch_val and float(epoch_val) > 1e11 else int(epoch_val) if epoch_val else None
+        out.append({
+            "time": time_dt,
+            "timestamp": ep_int,
+            "open": b.get("open"),
+            "high": b.get("high"),
+            "low": b.get("low"),
+            "close": b.get("close"),
+            "volume": b.get("volume"),
+        })
+    return out
 
 
 def sum_fill_fees(fills: List[Dict[str, Any]]) -> float:
@@ -248,6 +321,69 @@ class CrossTradeClient:
                 raise RuntimeError(f"CrossTrade order detail query failed ({resp.status}): {await resp.text()}")
             body = await resp.json()
         return body.get("data")
+
+    async def get_market_bars(
+        self,
+        instrument: str,
+        period_type: str = "minute",
+        period: int = 5,
+        days_back: int = 1,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """POST /v1/api/market/bars (RPC GetBars) -- queries the connected
+        NinjaTrader 8 add-on (via the St. Louis VPS) for the venue-true,
+        zero-lag CME bars that replace the delayed yfinance continuous
+        proxy (Session 11, AGENT_LOG.md). This is the real execution-venue
+        market-data path: the same NT8 that places the orders also serves
+        the bars, so there is no decision-feed-vs-execution-venue mismatch.
+
+        `instrument` MUST be a dated NT8 contract ("MNQ 12-26"), NOT a bare
+        root or a "1!" continuous alias -- CrossTrade's own docs are
+        explicit that NT8-continuous symbols are supported through webhook
+        ingestion only, not the direct NT8 API. Use cme_contracts.py's
+        resolver to produce this from a root symbol; do not pass a bare
+        root here.
+
+        `period_type` casing is NOT live-verified -- NT8's native
+        BarsRequest uses "Minute"/"Day", but Session 11's example wrote
+        "minute". Default "Minute" here (the NT8-native form); if the
+        first live call rejects it, the lowercase form is the one thing to
+        try next.
+
+        **DATA SHAPE NOT LIVE-VERIFIED** -- `_parse_market_bars()` handles
+        the documented {"bars": [...]} shape and a flat-array fallback, and
+        the raw response is logged on every call so the real field names
+        can be confirmed/corrected against the first real response (same
+        convention as get_fills_for_order()).
+
+        Returns [] (never raises) on HTTP 408 (NT8 add-on disconnected) --
+        the caller logs VPS_NT8_DISCONNECTED and treats it as a quiet gap,
+        NOT a hard failure. Raises RuntimeError on any other non-200 so the
+        caller can't silently mistake an auth/rate-limit error for "no
+        bars yet"."""
+        url = f"{_MARKET_BASE}/market/bars"
+        payload = {
+            "instrument": instrument,
+            "periodType": period_type,
+            "period": period,
+            "daysBack": days_back,
+            "limit": limit,
+        }
+        session = _get_session()
+        async with session.post(url, headers=self._headers(), json=payload) as resp:
+            text = await resp.text()
+            if resp.status == 408:
+                # NT8 add-on not connected -- a quiet, recoverable gap, not
+                # an error. Caller surfaces VPS_NT8_DISCONNECTED.
+                return []
+            if resp.status != 200:
+                raise RuntimeError(f"CrossTrade market bars query failed ({resp.status}): {text}")
+            try:
+                body = await resp.json(content_type=None)
+            except Exception:
+                raise RuntimeError(f"CrossTrade market bars returned non-JSON: {text[:500]!r}")
+        print(f"[CROSSTRADE] RAW market/bars response (verify field names against this): {body}")
+        return _parse_market_bars(body)
 
     async def get_fills_for_order(self, order_id: int) -> List[Dict[str, Any]]:
         """GET /fills/order/{orderId} -- CONFIRMED LIVE against CrossTrade's

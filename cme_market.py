@@ -19,7 +19,10 @@ import asyncio
 import datetime
 from typing import Any, Dict, List, Optional
 
+import os
 import cme_clock
+import cme_contracts
+import cme_crosstrade_client
 import yfinance as yf
 
 
@@ -28,6 +31,33 @@ _TICKER_MAP = {
     "MES": ("MES=F", "ES=F"),
 }
 
+
+
+
+def _get_crosstrade_client() -> Optional[cme_crosstrade_client.CrossTradeClient]:
+    token = os.environ.get("CROSSTRADE_BEARER_TOKEN")
+    if token:
+        return cme_crosstrade_client.CrossTradeClient(bearer_token=token, crosstrade_account_id="")
+    try:
+        import database
+        import executor_crypto
+        db = database.SessionLocal()
+        try:
+            acc = db.query(database.ExecutorAccount).filter(
+                database.ExecutorAccount.execution_provider == "crosstrade",
+                database.ExecutorAccount.is_active == True
+            ).first()
+            if acc and acc.api_key_encrypted:
+                decrypted = executor_crypto.decrypt_secret(acc.api_key_encrypted)
+                return cme_crosstrade_client.CrossTradeClient(
+                    bearer_token=decrypted,
+                    crosstrade_account_id=acc.crosstrade_account_id or ""
+                )
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return None
 
 def _strip_to_signal_shape(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """cme_signals.py's functions only ever read open/high/low/close --
@@ -155,7 +185,37 @@ def _fetch_daily_atr14_sync(symbol: str, date_key: str) -> Optional[float]:
 
 async def fetch_calibration_1m(symbol: str, date_key: str) -> List[Dict[str, Any]]:
     """Real 1-minute bars for `date_key`'s 9:30-10:00 ET calibration
-    window, in the shape cme_signals.compute_tpo_value_area() expects."""
+    window, in the shape cme_signals.compute_tpo_value_area() expects.
+    Prefers CrossTrade (zero-lag venue-true feed via St. Louis VPS).
+    Falls back to continuous feed if CrossTrade is unconfigured/unavailable."""
+    client = _get_crosstrade_client()
+    if client:
+        try:
+            instrument = cme_contracts.resolve_contract(symbol)
+            bars = await client.get_market_bars(instrument, period_type="minute", period=1, days_back=2, limit=150)
+            if bars:
+                cal_bars = []
+                for b in bars:
+                    t = b.get("time")
+                    if not t:
+                        continue
+                    t_ny = t.astimezone(cme_clock.NY_TZ)
+                    if (
+                        t_ny.strftime("%Y-%m-%d") == date_key
+                        and t_ny.time() >= datetime.time(cme_clock.OPEN_H, cme_clock.OPEN_M)
+                        and t_ny.time() < datetime.time(cme_clock.LOCK_H, cme_clock.LOCK_M)
+                    ):
+                        cal_bars.append({
+                            "open": float(b["open"]),
+                            "high": float(b["high"]),
+                            "low": float(b["low"]),
+                            "close": float(b["close"]),
+                        })
+                if cal_bars:
+                    return cal_bars
+        except Exception as e:
+            print(f"|| CME MARKET || CrossTrade calibration fetch failed, trying fallback: {e}")
+
     bars = await asyncio.to_thread(_fetch_calibration_1m_sync, symbol, date_key)
     if not bars:
         raise RuntimeError(f"Failed to fetch calibration 1m bars for {symbol} on {date_key}")
@@ -164,7 +224,23 @@ async def fetch_calibration_1m(symbol: str, date_key: str) -> List[Dict[str, Any
 
 async def fetch_confirmed_5m(symbol: str, since_utc: datetime.datetime) -> List[Dict[str, Any]]:
     """Confirmed (fully closed) 5-minute bars for `symbol` since `since_utc`,
-    in the shape cme_signals.check_cross()/check_retest_fill() expect."""
+    in the shape cme_signals.check_cross()/check_retest_fill() expect.
+    Prefers CrossTrade (zero-lag venue-true feed via St. Louis VPS).
+    Falls back to continuous feed if CrossTrade is unconfigured/unavailable."""
+    client = _get_crosstrade_client()
+    if client:
+        try:
+            instrument = cme_contracts.resolve_contract(symbol)
+            bars = await client.get_market_bars(instrument, period_type="minute", period=5, days_back=1, limit=50)
+            if bars:
+                if since_utc.tzinfo is None:
+                    since_utc = since_utc.replace(tzinfo=datetime.timezone.utc)
+                matching = [b for b in bars if b.get("time") and b["time"] >= since_utc]
+                if matching:
+                    return _strip_to_signal_shape(matching)
+        except Exception as e:
+            print(f"|| CME MARKET || CrossTrade confirmed 5m fetch failed, trying fallback: {e}")
+
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     bars_5m = await asyncio.to_thread(_fetch_confirmed_5m_sync, symbol, since_utc, now_utc)
     return _strip_to_signal_shape(bars_5m)

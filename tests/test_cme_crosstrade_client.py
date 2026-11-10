@@ -15,6 +15,7 @@ directly -- matching aiohttp's own ClientSession.get(), which returns a
 context manager, not a coroutine.
 """
 import asyncio
+import datetime
 import os
 import sys
 
@@ -26,12 +27,15 @@ import cme_crosstrade_client as ctc
 
 
 class _FakeResponse:
-    def __init__(self, status=200, json_body=None, text_body=""):
+    def __init__(self, status=200, json_body=None, text_body="", json_raises=False):
         self.status = status
         self._json_body = json_body if json_body is not None else {}
         self._text_body = text_body
+        self._json_raises = json_raises
 
-    async def json(self):
+    async def json(self, content_type=None):
+        if self._json_raises:
+            raise ValueError("not JSON")
         return self._json_body
 
     async def text(self):
@@ -51,6 +55,10 @@ class _FakeSession:
 
     def get(self, url, headers=None, params=None):
         self.calls.append({"url": url, "headers": headers, "params": params})
+        return self._response
+
+    def post(self, url, headers=None, params=None, json=None):
+        self.calls.append({"url": url, "headers": headers, "params": params, "method": "POST", "json": json})
         return self._response
 
 
@@ -185,3 +193,132 @@ def test_sum_fill_fees_empty_list():
 def test_sum_fill_fees_tolerates_non_numeric_values():
     fills = [{"commission": "not-a-number"}]
     assert ctc.sum_fill_fees(fills) == 0.0
+
+
+# ------------------------------------------------------------------ get_market_bars /
+# _parse_market_bars -- Session 11 zero-lag CME market-data path. The
+# `data` shape is NOT live-verified (CrossTrade specs it as a bare object),
+# so these pin the DEFENSIVE parser's two handled shapes and the 408 gap
+# contract, not a confirmed-correct schema.
+
+
+def test_get_market_bars_posts_to_market_bars_with_dated_instrument(monkeypatch):
+    response = _FakeResponse(status=200, json_body={"success": True, "data": {"bars": []}})
+    session = _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    result = asyncio.run(client.get_market_bars("MNQ 12-26", period_type="Minute", period=5, days_back=1, limit=100))
+    assert result == []
+    assert session.calls == [{
+        "url": f"{ctc._MARKET_BASE}/market/bars",
+        "headers": {"Authorization": "Bearer tok", "Content-Type": "application/json", "Accept": "application/json"},
+        "params": None,
+        "method": "POST",
+        "json": {"instrument": "MNQ 12-26", "periodType": "Minute", "period": 5, "daysBack": 1, "limit": 100},
+    }]
+
+
+def test_get_market_bars_parses_the_documented_bars_wrapper_shape(monkeypatch):
+    bars = [
+        {"time": "2026-11-09T22:35:00Z", "timestamp": 1794285300,
+         "open": 21050.25, "high": 21055.00, "low": 21048.50, "close": 21052.75, "volume": 3200},
+    ]
+    response = _FakeResponse(status=200, json_body={"success": True, "data": {"bars": bars}})
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    result = asyncio.run(client.get_market_bars("MNQ 12-26"))
+    assert len(result) == 1
+    b = result[0]
+    assert b["open"] == 21050.25
+    assert b["close"] == 21052.75
+    assert b["volume"] == 3200
+    assert b["timestamp"] == 1794285300
+    assert b["time"] == datetime.datetime(2026, 11, 9, 22, 35, 0, tzinfo=datetime.timezone.utc)
+
+
+def test_get_market_bars_parses_a_flat_array_fallback_shape(monkeypatch):
+    bars = [{"time": "2026-11-09T22:35:00Z", "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5}]
+    response = _FakeResponse(status=200, json_body={"success": True, "data": bars})
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    result = asyncio.run(client.get_market_bars("MNQ 12-26"))
+    assert len(result) == 1
+    assert result[0]["open"] == 1.0
+    assert result[0]["close"] == 1.5
+
+
+def test_get_market_bars_coerces_epoch_time_when_no_iso_string(monkeypatch):
+    # Correct epoch for 2026-11-09T22:35:00Z (the MD's own example paired an
+    # ISO string with an epoch that decoded to the NEXT day -- an internal
+    # inconsistency we are NOT reproducing; this test uses the true epoch).
+    bars = [{"timestamp": 1794263700, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5}]
+    response = _FakeResponse(status=200, json_body={"success": True, "data": {"bars": bars}})
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    result = asyncio.run(client.get_market_bars("MNQ 12-26"))
+    assert result[0]["time"] == datetime.datetime(2026, 11, 9, 22, 35, 0, tzinfo=datetime.timezone.utc)
+
+
+def test_get_market_bars_returns_empty_list_on_408_not_raises(monkeypatch):
+    # 408 = NT8 add-on disconnected -- a quiet gap, NOT an error. The caller
+    # surfaces VPS_NT8_DISCONNECTED.
+    response = _FakeResponse(status=408, text_body='{"error": "add-on not connected"}')
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    assert asyncio.run(client.get_market_bars("MNQ 12-26")) == []
+
+
+def test_get_market_bars_raises_on_other_non_200(monkeypatch):
+    response = _FakeResponse(status=429, text_body='{"error": "rate limit"}')
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    with pytest.raises(RuntimeError, match="market bars query failed"):
+        asyncio.run(client.get_market_bars("MNQ 12-26"))
+
+
+def test_get_market_bars_raises_on_non_json_200(monkeypatch):
+    response = _FakeResponse(status=200, text_body="not json at all", json_raises=True)
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    with pytest.raises(RuntimeError, match="non-JSON"):
+        asyncio.run(client.get_market_bars("MNQ 12-26"))
+
+
+def test_parse_market_bars_returns_empty_on_unknown_data_shape():
+    assert ctc._parse_market_bars({"success": True, "data": {"unexpected": True}}) == []
+    assert ctc._parse_market_bars({"success": True}) == []
+    assert ctc._parse_market_bars({"success": True, "data": "not-a-list"}) == []
+
+
+def test_get_market_bars_parses_live_verified_st_louis_vps_payload(monkeypatch):
+    # Verified live against St. Louis VPS NinjaTrader 8 response (2026-11-09)
+    payload = {
+        "instrument": "MNQ 12-26",
+        "periodType": "minute",
+        "period": 5,
+        "count": 1,
+        "bars": [
+            {
+                "time": "2026-11-10T05:15:00.0000000Z",
+                "epoch": 1794287700000,
+                "open": 27968.75,
+                "high": 27995.5,
+                "low": 27968.75,
+                "close": 27988,
+                "volume": 4809
+            }
+        ],
+        "success": True
+    }
+    response = _FakeResponse(status=200, json_body=payload)
+    _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    result = asyncio.run(client.get_market_bars("MNQ 12-26", period_type="minute", period=5))
+    assert len(result) == 1
+    b = result[0]
+    assert b["open"] == 27968.75
+    assert b["high"] == 27995.5
+    assert b["low"] == 27968.75
+    assert b["close"] == 27988
+    assert b["volume"] == 4809
+    assert b["timestamp"] == 1794287700
+    assert b["time"] == datetime.datetime(2026, 11, 10, 5, 15, 0, tzinfo=datetime.timezone.utc)
