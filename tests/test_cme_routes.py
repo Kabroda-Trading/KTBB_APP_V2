@@ -198,13 +198,13 @@ def test_market_data_test_surfaces_a_real_fetch_failure_clearly(env, monkeypatch
     import cme_market
 
     async def _fake_fail(symbol, date_key):
-        raise RuntimeError("DATABENTO_API_KEY not set -- cannot fetch real market data")
+        raise RuntimeError("Failed to fetch calibration 1m bars for MES on 2026-11-04")
     monkeypatch.setattr(cme_market, "fetch_calibration_1m", _fake_fail)
 
     client = _login("cme_admin@kabroda.com", "adminpass123")
     resp = client.get("/api/admin/cme-market-data-test?symbol=MES&date_key=2026-11-04")
     assert resp.status_code == 502
-    assert "DATABENTO_API_KEY" in resp.json()["error"]
+    assert "Failed to fetch calibration" in resp.json()["error"]
 
 
 def test_market_data_test_defaults_date_key_to_today_ny(env, monkeypatch):

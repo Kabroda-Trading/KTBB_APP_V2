@@ -1,13 +1,22 @@
-"""Coverage for cme_market.py's own logic -- the NY-local-to-UTC window
-computation (DST correctness, same category of bug this project has
-already found and fixed once in cme_clock.py's own history) and the
-1-minute -> 5-minute bar aggregation (Databento has no native 5-minute
-schema). cme_databento_client.py's HTTP I/O is deliberately NOT mocked
-here -- this codebase has no aiohttp-mocking precedent for any exchange/
-data client (confirmed 2026-11-04 while building cme_crosstrade_client.py);
-these tests exercise cme_market.py's own pure logic instead, the same way
-cme_tradovate_client.py/cme_crosstrade_client.py are only tested at the
-route/branching level."""
+"""Coverage for cme_market.py's own logic under Architecture A -- the
+continuous-feed (yfinance) market-data engine adopted 2026-11-09 to remove
+the Databento historical REST dependency from the live execution path (see
+AGENT_LOG.md Session 9).
+
+Covered here:
+  * 1-minute -> 5-minute aggregation (_aggregate_to_confirmed_5m), the
+    "confirmed == fully closed bucket" contract;
+  * the 09:30-10:00 ET calibration window isolation (_fetch_calibration_1m_sync);
+  * the daily ATR14 simple-mean math and "never fabricate a fallback on
+    failure" contract (_fetch_daily_atr14_sync / fetch_daily_atr14);
+  * the async public wrappers' empty-result error handling.
+
+yfinance's HTTP I/O is deliberately NOT mocked (this codebase has no
+network-mock precedent for exchange/data clients) -- the _download_1m_bars
+seam is monkeypatched instead, so these exercise cme_market.py's own logic
+the same way cme_tradovate_client.py/cme_crosstrade_client.py are only
+tested at the route/branching level.
+"""
 import asyncio
 import datetime
 import os
@@ -17,7 +26,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pytest
 
-import cme_databento_client as dbc
+import pandas as pd
+
 import cme_market as cm
 
 UTC = datetime.timezone.utc
@@ -27,26 +37,18 @@ def _bar(ts, o, h, l, c):
     return {"ts_event": ts, "open": o, "high": h, "low": l, "close": c}
 
 
-# ------------------------------------------------------------------ _ny_local_to_utc (DST correctness)
-
-def test_ny_local_to_utc_resolves_edt_correctly():
-    # 2026-07-15 is deep in EDT (UTC-4) -- 9:30 AM ET = 13:30 UTC
-    result = cm._ny_local_to_utc(2026, 7, 15, 9, 30)
-    assert result == datetime.datetime(2026, 7, 15, 13, 30, tzinfo=UTC)
-
-
-def test_ny_local_to_utc_resolves_est_correctly():
-    # 2026-01-15 is deep in EST (UTC-5) -- 9:30 AM ET = 14:30 UTC
-    result = cm._ny_local_to_utc(2026, 1, 15, 9, 30)
-    assert result == datetime.datetime(2026, 1, 15, 14, 30, tzinfo=UTC)
-
-
-def test_ny_local_to_utc_handles_the_november_dst_fallback_boundary():
-    # 2026-11-01 is the real US DST fallback date -- the day right after
-    # (2026-11-04, the same date this feature was built on) must already
-    # resolve as EST (UTC-5), not a stale EDT offset.
-    result = cm._ny_local_to_utc(2026, 11, 4, 10, 0)
-    assert result == datetime.datetime(2026, 11, 4, 15, 0, tzinfo=UTC)
+def _df(rows):
+    """rows: list of (ts_datetime, open, high, low, close)."""
+    index = pd.to_datetime([r[0] for r in rows], utc=True)
+    return pd.DataFrame(
+        {
+            "Open": [r[1] for r in rows],
+            "High": [r[2] for r in rows],
+            "Low": [r[3] for r in rows],
+            "Close": [r[4] for r in rows],
+        },
+        index=index,
+    )
 
 
 # ------------------------------------------------------------------ _aggregate_to_confirmed_5m
@@ -120,113 +122,97 @@ def test_strip_to_signal_shape_drops_ts_event():
     assert result == [{"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5}]
 
 
-# ------------------------------------------------------------------ _require_api_key
+# ------------------------------------------------------------------ _fetch_calibration_1m_sync
 
-def test_require_api_key_raises_a_clear_error_when_unset(monkeypatch):
-    monkeypatch.delenv("DATABENTO_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="DATABENTO_API_KEY"):
-        cm._require_api_key()
+def test_calibration_isolates_the_0930_to_1000_et_window(monkeypatch):
+    # Bars from 09:20 through 10:09 ET -- only 09:30 <= t < 10:00 ET survive.
+    # 2026-11-04 is EST (UTC-5), so 09:20 ET == 14:20 UTC.
+    date_key = "2026-11-04"
+    rows = []
+    t = datetime.datetime(2026, 11, 4, 14, 20, tzinfo=UTC)   # 09:20 ET (EST)
+    for i in range(50):   # 50 minutes: 09:20 -> 10:09 ET
+        ts = t + datetime.timedelta(minutes=i)
+        rows.append((ts, 100.0 + i, 101.0 + i, 99.0 + i, 100.5 + i))
 
+    monkeypatch.setattr(cm, "_download_1m_bars", lambda symbol: _df(rows))
+    bars = cm._fetch_calibration_1m_sync("MNQ", date_key)
 
-def test_require_api_key_returns_the_env_value_when_set(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-    assert cm._require_api_key() == "db-test-key"
-
-
-# ------------------------------------------------------------------ fetch_daily_atr14
-# 2026-11-05 -- added same day a real gap was found live: cme_engine.py's
-# call site had been hardcoding daily_atr14=None since this module's own
-# Databento rebuild, forcing every lock into the reachability safety
-# sentinel's STAND_DOWN path. These tests cover the simple-mean math and
-# the "never fabricate a fallback on failure" contract, not the real HTTP
-# call (no aiohttp-mocking precedent in this codebase, per this file's
-# own header).
-
-async def _fake_daily_bars_14(self, symbol, start_utc, end_utc, schema="ohlcv-1m"):
-    base = datetime.datetime(2026, 10, 1, tzinfo=UTC)
-    # 14 daily bars with ranges 1..14 -- mean range = 7.5
-    return [
-        {"ts_event": base + datetime.timedelta(days=i), "open": 100.0, "high": 100.0 + (i + 1), "low": 100.0, "close": 100.0}
-        for i in range(14)
-    ]
+    # 30 bars: 09:30 .. 09:59 ET inclusive; 10:00 ET excluded.
+    assert len(bars) == 30
+    # first surviving bar is 09:30 ET (i=10), last is 09:59 ET (i=39).
+    assert bars[0]["open"] == 100.0 + 10
+    assert bars[-1]["open"] == 100.0 + 39
 
 
-def test_fetch_daily_atr14_computes_the_simple_mean_range(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _fake_daily_bars_14)
-    result = asyncio.run(cm.fetch_daily_atr14("MNQ", "2026-11-05"))
+def test_calibration_returns_empty_on_no_data(monkeypatch):
+    monkeypatch.setattr(cm, "_download_1m_bars", lambda symbol: None)
+    assert cm._fetch_calibration_1m_sync("MNQ", "2026-11-04") == []
+
+
+# ------------------------------------------------------------------ _fetch_daily_atr14_sync
+
+def _fake_daily_download(rows):
+    def _download(*args, **kwargs):
+        return _df(rows)
+    return _download
+
+
+def test_daily_atr14_computes_the_simple_mean_range(monkeypatch):
+    # 15 daily bars strictly before date_key; last 14 have ranges 2..15 -> mean 8.5.
+    date_key = "2026-11-05"
+    rows = []
+    base = datetime.datetime(2026, 10, 20, tzinfo=UTC)
+    for i in range(15):
+        rows.append((base + datetime.timedelta(days=i), 100.0, 100.0 + (i + 1), 100.0, 100.0))
+
+    monkeypatch.setattr(cm.yf, "download", _fake_daily_download(rows))
+    result = cm._fetch_daily_atr14_sync("MNQ", date_key)
+    # All 15 bars are before date_key, so last 14 = ranges 2..15 -> mean 8.5.
+    assert result == pytest.approx(8.5)
+
+
+def test_daily_atr14_excludes_todays_forming_bar(monkeypatch):
+    # Include a bar exactly ON date_key -- it must be excluded from the mean.
+    date_key = "2026-11-05"
+    rows = []
+    base = datetime.datetime(2026, 10, 20, tzinfo=UTC)
+    for i in range(14):
+        rows.append((base + datetime.timedelta(days=i), 100.0, 100.0 + (i + 1), 100.0, 100.0))
+    # a 15th bar ON date_key (range 999) -- must NOT be counted.
+    rows.append((datetime.datetime(2026, 11, 5, tzinfo=UTC), 100.0, 1099.0, 100.0, 100.0))
+
+    monkeypatch.setattr(cm.yf, "download", _fake_daily_download(rows))
+    result = cm._fetch_daily_atr14_sync("MNQ", date_key)
+    # Only the 14 pre-date_key bars (ranges 1..14) -> mean 7.5.
     assert result == pytest.approx(7.5)
 
 
-async def _fake_daily_bars_too_few(self, symbol, start_utc, end_utc, schema="ohlcv-1m"):
-    return [{"ts_event": datetime.datetime.now(UTC), "open": 100.0, "high": 105.0, "low": 100.0, "close": 102.0}]
+def test_daily_atr14_returns_none_on_too_few_bars_never_fabricates(monkeypatch):
+    monkeypatch.setattr(cm.yf, "download", _fake_daily_download([]))
+    assert cm._fetch_daily_atr14_sync("MNQ", "2026-11-05") is None
 
 
-def test_fetch_daily_atr14_returns_none_on_too_few_bars_never_fabricates(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _fake_daily_bars_too_few)
-    assert asyncio.run(cm.fetch_daily_atr14("MNQ", "2026-11-05")) is None
+def test_daily_atr14_returns_none_on_fetch_failure_never_fabricates(monkeypatch):
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated download outage")
+    monkeypatch.setattr(cm.yf, "download", _raise)
+    # _fetch_daily_atr14_sync catches and returns None on failure.
+    assert cm._fetch_daily_atr14_sync("MNQ", "2026-11-05") is None
 
 
-async def _fake_daily_bars_raises(self, symbol, start_utc, end_utc, schema="ohlcv-1m"):
-    raise RuntimeError("Databento bars query failed (502): simulated outage")
+# ------------------------------------------------------------------ async public wrappers
+
+def test_fetch_calibration_1m_raises_when_no_bars_returned(monkeypatch):
+    monkeypatch.setattr(cm, "_download_1m_bars", lambda symbol: None)
+    with pytest.raises(RuntimeError, match="Failed to fetch calibration"):
+        asyncio.run(cm.fetch_calibration_1m("MNQ", "2026-11-04"))
 
 
-def test_fetch_daily_atr14_returns_none_on_fetch_failure_never_fabricates(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _fake_daily_bars_raises)
-    assert asyncio.run(cm.fetch_daily_atr14("MNQ", "2026-11-05")) is None
-
-
-def test_fetch_daily_atr14_uses_the_ohlcv_1d_schema_and_excludes_todays_bar(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-    seen = {}
-
-    async def _capture(self, symbol, start_utc, end_utc, schema="ohlcv-1m"):
-        seen["schema"] = schema
-        seen["end_utc"] = end_utc
-        return await _fake_daily_bars_14(self, symbol, start_utc, end_utc, schema)
-
-    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _capture)
-    asyncio.run(cm.fetch_daily_atr14("MNQ", "2026-11-05"))
-    assert seen["schema"] == "ohlcv-1d"
-    # end_utc must be midnight ET on date_key -- excludes today's own
-    # not-yet-closed daily bar, never leaks an incomplete range in.
-    assert seen["end_utc"] == cm._ny_local_to_utc(2026, 11, 5, 0, 0)
-
-
-# ------------------------------------------------------------------ yfinance fallbacks (2026-11-09)
-
-def test_fetch_calibration_1m_falls_back_to_yfinance_on_databento_error(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-
-    async def _raise_databento(*args, **kwargs):
-        raise RuntimeError("Databento bars query failed (422): data_end_after_available_end")
-
-    def _mock_yf_calibration(symbol, date_key):
-        return [{"open": 100.0, "high": 105.0, "low": 99.0, "close": 103.0}]
-
-    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _raise_databento)
-    monkeypatch.setattr(cm, "_fetch_calibration_1m_yfinance", _mock_yf_calibration)
-
-    result = asyncio.run(cm.fetch_calibration_1m("MNQ", "2026-11-09"))
-    assert len(result) == 1
-    assert result[0] == {"open": 100.0, "high": 105.0, "low": 99.0, "close": 103.0}
-
-
-def test_fetch_confirmed_5m_falls_back_to_yfinance_on_databento_error(monkeypatch):
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-test-key")
-
-    async def _raise_databento(*args, **kwargs):
-        raise RuntimeError("Databento bars query failed (422): data_end_after_available_end")
-
-    def _mock_yf_5m(symbol, since_utc, now_utc):
-        return [{"open": 200.0, "high": 205.0, "low": 199.0, "close": 204.0}]
-
-    monkeypatch.setattr(dbc.DatabentoClient, "get_ohlcv_1m_bars", _raise_databento)
-    monkeypatch.setattr(cm, "_fetch_confirmed_5m_yfinance", _mock_yf_5m)
-
-    result = asyncio.run(cm.fetch_confirmed_5m("MNQ", datetime.datetime.now(UTC)))
-    assert len(result) == 1
-    assert result[0] == {"open": 200.0, "high": 205.0, "low": 199.0, "close": 204.0}
-
+def test_fetch_daily_atr14_computes_mean_via_async_wrapper(monkeypatch):
+    date_key = "2026-11-05"
+    rows = []
+    base = datetime.datetime(2026, 10, 20, tzinfo=UTC)
+    for i in range(14):
+        rows.append((base + datetime.timedelta(days=i), 100.0, 100.0 + (i + 1), 100.0, 100.0))
+    monkeypatch.setattr(cm.yf, "download", _fake_daily_download(rows))
+    assert asyncio.run(cm.fetch_daily_atr14("MNQ", date_key)) == pytest.approx(7.5)

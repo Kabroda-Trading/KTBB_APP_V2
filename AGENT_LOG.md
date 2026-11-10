@@ -10579,3 +10579,62 @@ STATUS: resolved
      * On HTTP 422 or any ingestion lag, execution immediately falls back to real-time 1m bars via yfinance continuous contracts (MNQ=F/MES=F with fallback NQ=F/ES=F), aggregated to confirmed 5m buckets via existing _aggregate_to_confirmed_5m().
    - All 17 unit tests in 	ests/test_cme_market.py pass.
    - Pushed to origin/main for automatic Render deployment. CME is now 100% resilient against Databento batch ingestion delays for tomorrow morning's 10:00 AM ET lock.
+
+## 2026-11-09 (Session 9) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open (Architectural Review & Work Order: CME TradFi Desk Data Layer Transition to Architecture A)
+
+### 1. Executive Summary & Context
+On Monday 2026-11-09 at 10:00:00 AM ET (15:00:00 UTC), the CME engine attempted to execute the D1 session lock for MNQ and MES via cme_market.fetch_calibration_1m(). The request failed with HTTP 422:
+`calibration fetch failed: Databento bars query failed (422): {"detail":{"case":"data_end_after_available_end","message":"The dataset GLBX.MDP3 has data available up to '2026-11-09 14:40:00+00:00'. The 'end' in the query ('2026-11-09 15:00:00+00:00') is after the available range. Try requesting with an earlier 'end'."}}`
+
+### 2. Root Cause Analysis
+1. **The Ingestion Latency Flaw:** cme_databento_client.py was built against https://hist.databento.com/v0/timeseries.get_range. Databento's Historical REST API ingests and batch-indexes raw CME Globex MDP 3.0 packets in 15-to-20-minute batch intervals. At exactly 10:00:00 AM ET, the historical catalog was only indexed up to 09:40:00 AM ET (14:40:00 UTC).
+2. **Scope of Failure:** This does not just block D1 (10:00 AM lock). It inherently blocks D2 (5m breakout checks at 10:05, 10:10, etc.) and D3 (5m breakeven ratchet checks at +0.8x Box), because querying the historical REST API for confirmed bars ending at 
+ow_utc will *always* fail with HTTP 422 during live hours.
+3. **Databento Live Feasibility:** Databento Live (live.databento.com) requires their Standard Plan ($199/month + CME exchange fees) and streams raw tick packets via WebSocket/TCP. It does not provide on-demand OHLCV bars; using it would require building a stateful 24/7 market-data tick daemon.
+
+### 3. Proposed Solution: Architecture A (Unified Continuous Real-Time Engine)
+Andy and DeepSeek reviewed the system and agreed to eliminate the batch historical dependency from the live execution path in favor of Architecture A:
+- **Canonical Parity:** In DATA_ASSETS.md (Rows 21-22), the 10.4-year CME backtest in Kabroda AI Brain (calibration_data/cme_futures/NQ_*.csv and ES_*.csv) was calibrated on CME Continuous Futures.
+- **Data Source:** Continuous Globex futures (MNQ=F / MES=F with fallback to NQ=F / ES=F) via yfinance.
+- **Latency & Cost:** Real-time 0-second batch lag, `batch lag, batch lag, /month/month/month recurring cost, eliminates the DATABENTO_API_KEY requirement for live operations.
+- **Lifecycle Integration:**
+  * **D1 Calibration:** 30 1-minute bars from 09:30 to 10:00 AM ET for date_key.
+  * **ATR14:** Simple 14-day mean of Daily High - Daily Low strictly prior to date_key (excluding today's forming daily bar).
+  * **D2 / D3 Monitoring:** Confirmed 5-minute bars aggregated from 1m bars using _aggregate_to_confirmed_5m() aligned to wall-clock boundaries (:00, :05, :10).
+
+### 4. Work Order & Checklist for Claude Code
+Please review the proposed implementation in KTBB_app_v2:
+
+1. **Review cme_market.py:**
+   - Verify etch_calibration_1m(symbol, date_key) correctly isolates 09:30-10:00 ET bars.
+   - Verify etch_confirmed_5m(symbol, since_utc) correctly groups and confirms closed 5-minute buckets.
+   - Verify etch_daily_atr14(symbol, date_key) strictly excludes today's unclosed bar and returns None on <14 days.
+2. **Review Tests in 	ests/test_cme_market.py:**
+   - Ensure DST tests (_ny_local_to_utc) and aggregation tests (_aggregate_to_confirmed_5m) maintain 100% pass rate.
+   - Update ATR14 tests and mock tests to reflect the continuous feed.
+3. **Check Admin & Ancillary Routes:**
+   - In main.py (/api/admin/cme-market-data-test), remove or update the DATABENTO_API_KEY error assertion.
+   - Verify 	ests/test_cme_routes.py passes without requiring a fake Databento key.
+4. **Run Full Test Suite:**
+   Run: pytest tests/test_cme_clock.py tests/test_cme_market.py tests/test_cme_signals.py tests/test_cme_engine.py tests/test_cme_executor.py tests/test_cme_routes.py
+   Ensure all tests are 100% green before signoff and deployment.
+
+## 2026-11-09 (Session 10) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved — CME data layer fully migrated to Architecture A (continuous yfinance feed), Databento historical path removed.
+
+Executed Session 9's work order in full, verified against the live code, not just the spec.
+
+### What was done
+1. **cme_market.py finalized as Architecture A** (the uncommitted rewrite was already correct — completed, not re-authored). Removed the now-orphaned `import os` (its only user was the deleted `_require_api_key`). Databento import, `_require_api_key`, and `_ny_local_to_utc` are gone; D1/D2/D3 + daily ATR14 all read continuous Globex futures via yfinance (MNQ=F/MES=F, fallback NQ=F/ES=F).
+2. **tests/test_cme_market.py rewritten** to assert the continuous-feed behavior: dropped the 3 `_ny_local_to_utc` DST tests, 2 `_require_api_key` tests, 4 Databento-mocked ATR14 tests, and 2 Databento->yfinance fallback tests (that fallback path no longer exists). Replaced with window-isolation, ATR14 simple-mean, and no-fabrication coverage via the `_download_1m_bars` / `yf.download` seams.
+3. **tests/test_cme_routes.py** — removed the `DATABENTO_API_KEY` error assertion (route now surfaces the continuous-feed failure string).
+4. **main.py** admin route docstring — no longer references `cme_databento_client.py` / `DATABENTO_API_KEY`.
+5. **cme_databento_client.py + tests/test_cme_databento_client.py deleted** (fully orphaned once Architecture A landed — no remaining import sites).
+
+### Verification
+`pytest tests/test_cme_clock.py tests/test_cme_market.py tests/test_cme_signals.py tests/test_cme_engine.py tests/test_cme_executor.py tests/test_cme_routes.py` → **154 passed** (up from 146 passed + 11 failed before this pass).
+
+### Residual notes (not blockers)
+- `cme_clock.py` and `cme_engine.py` still carry *historical* comments mentioning Databento 422 semantics (weekend guard rationale) — left intact as they explain the clock's calendar behavior, not the data source. Flag for a future doc-cleanup pass if desired.
+- `notify.py:245` and `CLAUDE.md` still reference `DATABENTO_API_KEY` as an env var — now vestigial for live CME ops. Left for Andy to retire on Render rather than risk an operational change.
