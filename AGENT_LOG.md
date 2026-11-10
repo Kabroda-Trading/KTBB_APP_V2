@@ -10638,3 +10638,64 @@ Executed Session 9's work order in full, verified against the live code, not jus
 ### Residual notes (not blockers)
 - `cme_clock.py` and `cme_engine.py` still carry *historical* comments mentioning Databento 422 semantics (weekend guard rationale) — left intact as they explain the clock's calendar behavior, not the data source. Flag for a future doc-cleanup pass if desired.
 - `notify.py:245` and `CLAUDE.md` still reference `DATABENTO_API_KEY` as an env var — now vestigial for live CME ops. Left for Andy to retire on Render rather than risk an operational change.
+
+## 2026-11-09 (Session 11) — FROM: DeepSeek (Antigravity) — FOR: Claude Code + Andy
+STATUS: open — St. Louis Windows Cloud VPS established with NinjaTrader 8 + CrossTrade; migrating CME market data from delayed yfinance to zero-lag CrossTrade REST API (`/v1/api/market/bars`).
+
+### 1. The Core Finding: Continuous yfinance Delay
+While Architecture A cleanly removed Databento's batch-indexing 422 failures, live testing on `MNQ=F` and `NQ=F` revealed that Yahoo Finance continuous futures quotes suffer from a mandatory 10.1-minute exchange delay (`Lag: 604s` measured live against UTC clock). For 5-minute breakout cross confirmation (D2) and ratchet management (D3), a 10-minute delay is operationally unacceptable.
+
+### 2. Infrastructure Deployed: Windows Cloud VPS (St. Louis, US-Central)
+To obtain institutional zero-lag CME data without paying CME's $390–$400/mo non-display license fees or Databento's $199/mo tier, Andy provisioned a dedicated 24/7 cloud node:
+- **Server:** Contabo Cloud VPS 4 (4 vCPU, 8 GB RAM, 100 GB SSD) running Windows Server 2022 Datacenter.
+- **Location:** St. Louis, MO (US-Central) — direct fiber peering with CME Group servers in Aurora/Chicago, IL.
+- **IP:** `5.252.53.189` (RDP port 3389 active and verified).
+- **Installed Software:**
+  1. **NinjaTrader 8:** Logged into Andy's funded Tradovate/NT account streaming live CME Level 1 Top-of-Book futures data (MNQ 12-26 1-minute chart actively printing with green connection indicator).
+  2. **CrossTrade NT8 Add-on v1.13.13:** Installed, configured with Automated Trading Interface (ATI) enabled. Verified connected to upstream servers:
+     `Secure connection established` -> `Waiting for signals...`.
+
+### 3. CrossTrade Market Data RPC (`POST /v1/api/market/bars`)
+CrossTrade's OpenAPI 3.1 specification (`https://app.crosstrade.io/v1/api/openapi.json`) exposes the `GetBars` RPC endpoint directly querying the connected NinjaTrader 8 add-on:
+- **Endpoint:** `POST https://app.crosstrade.io/v1/api/market/bars`
+- **Headers:** `Authorization: Bearer <Andy_CrossTrade_Token>`, `Content-Type: application/json`
+- **Request Body:**
+  ```json
+  {
+    "instrument": "MNQ 12-26",
+    "periodType": "minute",
+    "period": 5,
+    "daysBack": 1,
+    "limit": 100
+  }
+  ```
+- **Response Format:** Strictly closed historical OHLCV bars directly from NT8's `BarsRequest`:
+  ```json
+  {
+    "bars": [
+      {
+        "time": "2026-11-09T22:35:00Z",
+        "timestamp": 1794285300,
+        "open": 21050.25,
+        "high": 21055.00,
+        "low": 21048.50,
+        "close": 21052.75,
+        "volume": 3200
+      }
+    ]
+  }
+  ```
+- **Error Handling:** Returns HTTP 408 if the NT8 add-on is temporarily disconnected.
+
+### 4. Implementation Plan for `KTBB_app_v2`
+1. **`cme_crosstrade_client.py`:**
+   - Add `async def get_market_bars(self, instrument: str, period_type: str = "minute", period: int = 5, limit: int = 100) -> List[Dict[str, Any]]`.
+   - Reuses the existing CrossTrade Bearer token already configured on Account 17 (`Andy_CME_Funds`).
+2. **`cme_market.py`:**
+   - Replace the `yfinance` download calls with `CrossTradeClient.get_market_bars()`.
+   - Strip bars to canonical signal shape: `[{"open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"]}]`.
+   - Fallback handling: log `VPS_NT8_DISCONNECTED` safely if HTTP 408 is returned.
+3. **Tests (`tests/test_cme_market.py`):**
+   - Mock CrossTrade `POST /v1/api/market/bars` success, HTTP 408 error, and contract resolution.
+   - Maintain 154/154 pass rate across all CME test suites.
+
