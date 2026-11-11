@@ -8,6 +8,22 @@ independent full-suite test run. Every claim below was verified directly
 against the current code (file:line) or a real test run — nothing here is
 relayed from a commit message or another agent's say-so without being
 checked first.
+
+> **CORRECTION (2026-11-11, same day, after further research):** Section 5
+> below originally reported the Traveler/Alt Matrix finding as a severe,
+> unpatched cross-contamination bug. A follow-up research pass (reading
+> `AGENT_LOG.md`/`CC_INTERFACE.md`'s own committed 2026-10-09 "Option A"
+> ruling from Andy, and `alt_matrix_portfolio.py` directly) found that
+> finding was based on a **wrong assumption** — Alt Matrix sharing the same
+> physical account as Traveler is Andy's own explicit, deliberate design,
+> not a bug, and the real safety mechanism (a 30% free-margin reserve floor
+> + 20% total-risk cap + 3-position cap, enforced one-way by Alt Matrix
+> checking itself before every order, never by Traveler checking anything)
+> is real, live, correctly wired, and does exactly what it's supposed to.
+> Section 5 is kept below with strikethrough-equivalent framing and a
+> correction block rather than silently rewritten, so the record is
+> honest about what was initially gotten wrong and why. See the corrected
+> version in Section 5 for what's actually true.
 **Scope:** `KTBB_app_v2` (kabroda.com) as of commit `522b395`..`64c4813`
 (2026-11-07 through 2026-11-10), audited 2026-11-11.
 
@@ -153,76 +169,83 @@ as the actual source of truth, which is what the real code already does.**
 
 ---
 
-## 5. The severe finding: Traveler can still place real orders on an Alt Matrix account
+## 5. CORRECTED — Traveler placing BTC orders on an Alt Matrix account is the intended design, not a bug
 
-This was found by a focused subagent audit and independently re-verified
-directly in the code before being written up here (confirmed `executor_
-accounts.py:217-228`, `main.py` gate_profile usage, and the Alt Matrix
-enrollment route).
+**Original finding (now corrected, kept for the record):** a subagent
+audit found that `executor_engine.py`'s Traveler processing functions
+sweep every active `ExecutorAccount` with no positive allowlist, and that
+the one remaining guard (`gate_profile_of(account) != "GATE_TRAVELER"`)
+is dead code — since V2 Crown's retirement, `"GATE_TRAVELER"` is the only
+legal `gate_profile` value, so every account (including a correctly-
+enrolled Alt Matrix account) resolves to it by default. This was reported
+as a severe cross-contamination risk: an Alt Matrix account could have a
+real BTC/USDT Traveler order placed on it.
 
-**The mechanism**: `executor_engine.py`'s four Traveler processing
-functions (`process_traveler_cross`, `process_traveler_fill`, `process_
-traveler_rearm_cross`, `process_traveler_rearm_fill`) each query **every
-active `ExecutorAccount` in the system**, with no positive allowlist of
-their own (unlike Alt Matrix and CME, both of which only ever touch
-accounts that have an explicit `AltMatrixConfig`/`CMEConfig` row). Each
-account then passes through `_process_traveler_account()`, which has
-exactly two skip conditions:
+**Why that was the wrong conclusion**: a second research pass (reading
+`AGENT_LOG.md`/`CC_INTERFACE.md`'s own committed, dated ruling) found that
+**Alt Matrix sharing the exact same physical Bitunix account/
+`ExecutorAccount` row as BTC Traveler is Andy's own explicit, deliberate
+architecture decision** — "Option A," ruled 2026-10-09 23:25 CT, committed
+verbatim in both `AGENT_LOG.md` and `CC_INTERFACE.md` §5. Andy was given
+the alternative (a separate sub-account) and explicitly chose the shared-
+account model instead, with a margin-reserve floor as the real safety
+mechanism. `ALT_MATRIX_DEPLOYMENT_RUNBOOK.md` states this even more
+directly: *"The Alt Matrix operates on the exact same Bitunix account
+using the exact same API credentials... already battle-tested by the
+Bitcoin Traveler system."* `AltMatrixConfig`'s own schema has no field for
+a separate balance or sub-ledger at all — confirming there was never a
+second account to protect.
 
-1. `account.exchange == "tradovate" or account.market_type ==
-   "CME_FUTURES"` → skip (the fix added 2026-11-10 for the CME incident).
-2. `executor_accounts.gate_profile_of(account) != "GATE_TRAVELER"` → skip.
+**The real safety mechanism, verified directly and confirmed correctly
+wired in**: `alt_matrix_portfolio.py` (232 lines, read in full) implements
+exactly the three caps from Andy's ruling —
+`MAX_OPEN_POSITIONS = 3` (1 BTC + 1 SOL + 1 ETH),
+`MAX_TOTAL_RISK_PCT = 0.20`,
+`MIN_FREE_MARGIN_PCT_AFTER = 0.30` (the margin-reserve floor specifically
+ruled on 2026-10-09) — and the dependency is deliberately **one-way**:
+Alt Matrix reads Traveler's resting-order exposure to decide whether
+*Alt Matrix itself* should stand down (`CONCURRENCY_SKIPPED`); nothing in
+`gate_traveler.py`/`traveler_plan_engine.py`/`executor_engine.py`
+references Alt Matrix at all, so Traveler can never be blocked, delayed,
+or made aware of Alt Matrix's state — "BTC Sovereign Priority #1 is
+immutable," by construction, not by a check Traveler has to remember to
+run. Confirmed wired into the real order-placement path: `alt_matrix_
+engine.py:369-374` calls `check_admission()` for every candidate entry
+and writes the real `CONCURRENCY_SKIPPED` decision + a full audit
+snapshot (`admission_snapshot_json`) when it fires. This module also
+fails closed on any error ("ANY ERROR ANYWHERE IN check_admission() MEANS
+STAND DOWN," its own header) and reads live exchange state (not cached DB
+rows) for the equity/position/margin numbers that matter.
 
-**Condition 2 is dead code.** Since V2 Crown's full retirement (2026-09-24),
-`"GATE_TRAVELER"` is the *only* legal `gate_profile` value left in the
-system (`_VALID_GATE_PROFILES = ("GATE_TRAVELER",)`), and `gate_profile_
-of()` explicitly resolves a never-configured (`NULL`) account to
-`"GATE_TRAVELER"` by design (`executor_accounts.py:223-228`, with its own
-docstring confirming this is deliberate: *"a brand-new or never-touched
-account reads as GATE_TRAVELER... not None"*). This means **every account
-in the entire system, from every subsystem, resolves to `"GATE_TRAVELER"`
-unconditionally** — the field no longer discriminates anything.
+**So: Traveler placing a BTC order on an account that also runs Alt
+Matrix is not a bug — it's the same account, by design, and it's supposed
+to.** `gate_profile_of()` always resolving to `"GATE_TRAVELER"` is
+consistent with that design (every account IS a Traveler account; Alt
+Matrix is an optional add-on role layered on top of it, not a separate
+account type Traveler needs to recognize and exclude).
 
-**Confirmed**: `gate_profile` is only ever set by one manual admin route
-(`main.py:2334`, `set_account_profile`), never automatically by the Alt
-Matrix enrollment flow (`main.py:2367-2394`, the `AltMatrixConfig` POST
-route) — so a real, normal Alt Matrix account, enrolled exactly the way
-the admin UI intends, has `gate_profile = NULL` forever, which resolves to
-`"GATE_TRAVELER"`.
+**What remains genuinely true and still worth knowing**: no real account
+currently has a live `AltMatrixConfig` row — both Andy's and Dawson's Alt
+Matrix desks show `$0.00 (Inactive/Standby)` as of the 2026-11-08
+verified-production baseline in their own blueprints, gated on BTC equity
+crossing $10,000 (Andy)/$12,500 (Dawson). So there was never an active,
+currently-firing risk here, even under the original (wrong) reading.
 
-**The consequence**: an Alt Matrix account (Bitunix, SOL/ETH) is **not**
-`exchange == "tradovate"` and **not** `market_type == "CME_FUTURES"` — so
-it passes guard #1. It also passes guard #2, because guard #2 can no
-longer fail for *any* account. **It proceeds into `build_hypothetical_
-traveler_order()`, which builds and — if the account is LIVE — places a
-real BTC/USDT order using that account's real Bitunix credentials**,
-completely independent of and invisible to Alt Matrix's own SOL/ETH book
-running on the same account.
+**One genuine, minor ambiguity flagged during the correction, not acted
+on**: `ANDY_TRADING_DESK_BLUEPRINT.md`/`DAWSON_TRADING_DESK_BLUEPRINT.md`
+use the phrase "dedicated Alt Matrix sub-account" when describing the
+$2,500 house-money carve-out. This reads, on its own, like it could mean a
+literal second account — it doesn't; it's informal language for how the
+$2,500 is mentally earmarked within the one shared account, consistent
+with everything else cited above and with the actual `AltMatrixConfig`
+schema. Worth a one-line clarification from Andy only if he wants the
+wording tightened for a future reader — not a code or safety issue.
 
-**This is not a hypothetical requiring a misconfiguration mistake — it is
-the default, normal state of any account enrolled into Alt Matrix the
-intended way.** It is a more serious version of the CME incident already
-fixed: that one failed loudly (wrong credentials, "Token invalid"); this
-one would **succeed silently** — a real, live, wrong-symbol order placed
-with no error at all, since Alt Matrix accounts genuinely do have valid
-Bitunix credentials.
-
-**Immediate question to resolve before any fix ships**: does a real, LIVE
-Alt Matrix account currently exist? If yes, this is an active, live risk
-right now and should be treated with the same urgency as the CME incident.
-If Alt Matrix is still DRY_RUN-only today, this is serious but not yet
-live-money-urgent — still worth fixing before Alt Matrix goes live.
-
-**Recommended fix** (not yet implemented — this document is the audit,
-not the fix): give Traveler the same positive per-account allowlist
-pattern Alt Matrix and CME already use (e.g., a `TravelerConfig` table, or
-a simple boolean/flag on `ExecutorAccount`), rather than continuing to
-patch `_process_traveler_account()`'s negative-exclusion guard one
-subsystem at a time. The current pattern (exclude what you recognize)
-will need a new exclusion every time a new subsystem is added; the
-positive-allowlist pattern (only process what you've explicitly enrolled)
-is what Alt Matrix and CME already correctly do and doesn't have this
-failure mode.
+**No code change recommended from this section.** The CME/Tradovate
+exclusion guard added in `64c4813` (§3, item 8 above) remains correct and
+necessary — CME genuinely is a different exchange, different credentials,
+and was never meant to run Traveler at all. That part of the original
+finding was right; only the Alt Matrix half of it was wrong.
 
 ---
 
@@ -304,7 +327,7 @@ failure mode.
 | CME sleep-boundary race | Fixed | Resolved 2026-11-10 |
 | CME desk stale-row leak | Fixed | Resolved 2026-11-10 |
 | CME/Traveler credential cross-contamination (Account 17) | Fixed | Resolved 2026-11-10 |
-| **Traveler can place real orders on Alt Matrix accounts** | **Severe, live, default-state** | **NOT YET FIXED** |
+| ~~Traveler can place real orders on Alt Matrix accounts~~ | **MISDIAGNOSED — see §5 correction** | Not a bug (shared-account design is intentional; `alt_matrix_portfolio.py` is the real, correctly-wired safety mechanism) |
 | Admin routes pollute CME accounts with crypto sizing/risk rows | Low (data only) | NOT YET FIXED |
 | Enrollment routes don't validate exchange type | Low (needs admin mistake) | NOT YET FIXED |
 | Fabricated Master Spec sections (7/8/11) | Documentation only, no code impact | NOT YET CORRECTED |
@@ -312,9 +335,7 @@ failure mode.
 | CME trigger/target/stop/BE math vs backtest | Verified line-level | Confirmed matching |
 | Full test suite | 1270/1270 | Confirmed independently |
 
-**Recommended priority order for next work**: (1) confirm whether a real
-LIVE Alt Matrix account exists today — this determines if §5 is an active
-emergency or a pre-emptive fix; (2) fix §5 regardless, before Alt Matrix
-ever goes live, using the positive-allowlist pattern; (3) the two
-low-severity admin-route gaps in §6; (4) correct or remove the fabricated
-sections of the Master Spec doc.
+**Recommended priority order for next work**: (1) the two low-severity
+admin-route gaps in §6; (2) correct or remove the fabricated sections of
+the Master Spec doc. §5's original item is resolved as a misdiagnosis —
+no code fix is recommended there (see §5's correction).
