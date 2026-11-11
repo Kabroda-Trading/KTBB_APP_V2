@@ -10865,3 +10865,27 @@ was measured -- is still pending. The new protocol doc is the "how to
 check it" half; your walkthrough is the "here's why it's true" half.
 Please append it either to the protocol doc or the audit doc rather than
 starting a third document.
+
+
+## 2026-11-11 (evening) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: resolved
+
+**1. Backtest Parity Walkthrough Completed:**
+Appended Section 5 to `KTBB_app_v2/BACKTEST_VERIFICATION_PROTOCOL.md` with line-by-line evidence citations:
+- **Traveler C5:** Reconciled `mgmt_e1_stack.py` with `lab_touchfill_arms.py:118,122` & `lab_exhaustion_backtest_results.md`. Verified full-history warm-up, confirmed-close stripping, and strict post-fill latch window (`_post_anchor_indices`).
+- **Traveler R1 Re-Arm:** Reconciled `gate_traveler.py` with `rearm_ledger_2016_2020.csv` & CANON §9c. Verified that `rearm_watch_deadline` correctly bounds the 24h watch window.
+- **CME D1 Lock & Math:** Reconciled `cme_signals.py` / `cme_market.py` with `reconstruct_locks_cme_symbol.py` & `cme_futures_scorecard_2016_2026.md`. Verified 10:00 AM ET lock, 0.55 ATR14 reachability sentinel, 2.0x target, 0.8x breakeven trigger, and CrossTrade zero-lag feed.
+
+**2. Forensic Audit of Today's Live Trade (2026-11-11 Plan 56):**
+- **Trade Setup:** BTC/USDT Short filled at $73,417.90 at 14:35 UTC (Order #6058 Andy, #6059 Dawson, #6060 Terry). Stop loss was at $73,989.68 (571.77 pts, -1.0R).
+- **C5 Action:** At 15:00 UTC, the 1H candle closed at $73,540.0. 1H RSI was 46.55 vs 50.33 six hours prior (at 08:00 UTC). `c5_momentum_decay` evaluated True. All orders closed at $73,540.0 at 15:00:07 UTC for a -0.2135R nick (-$106.77 Terry, -$6.67 Andy, -$23.51 Dawson).
+- **Empirical Validation:** Within 35 minutes post-exit, BTC surged to $74,451.80, which would have struck the stop at $73,989.68. C5 saved **+0.7865 R (+78.6% of risked capital)** by exiting early on decay.
+
+**3. CME Holiday & Prop Firm ($50k) Rules Gap Analysis:**
+- **Veterans Day Status:** CME equity futures had modified holiday hours (halted at 13:00 ET). The live system generated 0 orders (`cme_plans` has 0 rows for Nov 11), correctly avoiding holiday trading.
+- **Identified Gap for Live Tradovate Accounts:**
+  Prop firms (Apex, Topstep, etc.) enforce strict non-negotiable rules for $50k accounts:
+  a) **Holiday / Early-Close Flattening:** Positions must be closed at least 15 mins before market halt (e.g. 12:45 PM ET).
+  b) **High-Impact News Blackouts:** No orders permitted within $\pm$ 2-5 minutes of Tier 1 news (FOMC, CPI, NFP, PPI).
+  c) **Trailing Drawdown Limit:** $2,500 trailing max drawdown calculated from intraday peak unrealized equity.
+- **Work Order for Claude Code:** Design and test a lightweight `prop_firm_guard.py` before live Tradovate execution is turned on to enforce news blackouts, early-close flattening, and trailing high-water mark protection.

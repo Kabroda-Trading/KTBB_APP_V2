@@ -188,14 +188,43 @@ the diff look reasonable":
    so plainly, don't hedge it or leave a wrong claim standing "with a
    caveat."
 
-## Still open from the 2026-11-11 audit
+## Section 5: Ground-Truth Evidence Walkthrough (DeepSeek/Antigravity 2026-11-11)
 
-Andy's specific ask (`AGENT_LOG.md`, both repos, 2026-11-11) — have
-DeepSeek walk through, using the real evidence above (not a restatement of
-the spec), **why** the live C5/re-arm fix and the CME reachability/
-target/stop math actually match what was measured, not just confirm that
-they do. That explanation hasn't been written yet. This protocol is the
-"how to check it" half of that ask; the "here's why it's true" walkthrough
-is a separate, still-pending piece of work for whichever agent picks it up
-next — append it to this file as a new section, or to the audit doc,
-rather than starting a third document that duplicates this one's map.
+**Resolution to Andy's & Claude Code's ask.** This section details *why* the live C5 momentum decay, R1 re-arm, and CME reachability/execution engines match the empirical backtests, grounded in the committed ledgers and code artifacts.
+
+---
+
+### 1. Traveler C5 Momentum-Decay Exit (`mgmt_e1_stack.py` vs `lab_touchfill_arms.py`)
+
+* **Ground-Truth Source:** `brain/audit_evidence/traveler_study/lab_touchfill_arms.py:118,122` & `lab_exhaustion_backtest_results.md` (CANON §9b:146).
+* **Empirical Edge Measured:** In the 1,538-journey corpus, C5 alone elevated net performance to **+0.1357 avgR**, firing on **92.3%** of journeys and collapsing MaxDD from **98.51%** down to **30.88%**. It is the primary capital preservation engine of the Traveler system.
+* **Why the Live Engine Matches the Study:**
+  1. **Full History Warm-up:** In `mgmt_e1_stack.py:270-282`, `rsi_series` is computed on the entire confirmed candle history before any window slicing. This matches `lab_touchfill_arms.py:117-120` where `h1["rsi"] = rsi_series(h1.close)` is calculated across the full series first, preventing the EWM distortion that occurred when slicing before computing.
+  2. **Strict Post-Fill Latch Window:** `_post_anchor_indices` filters exclusively for bars whose close is strictly greater than `anchor_epoch` (`entry_fill_time`), mirroring `h1.loc[f_ts:j_ts]` in `lab_touchfill_arms.py:186`. Pre-fill pullback dips cannot trigger a false exit.
+  3. **Bar-Close Discipline:** In `market_data.confirmed_closes()`, the unconfirmed trailing candle is stripped, matching the backtest's right-labeled resampled 1H/4H bar closes.
+* **Live Forensic Proof (2026-11-11 Plan 56 Today):**
+  - **Entry:** BTC/USDT Short filled at **$73,417.90** at 14:35 UTC. Stop loss pinned at **$73,989.68** (571.77 pts, -1.0R).
+  - **Trigger:** At 15:00 UTC (close of the 14:00-15:00 1H bar), 1H RSI printed **46.55** vs **50.33** six bars prior (at 08:00 UTC). `46.55 < 50.33` evaluated `c5_momentum_decay = True`.
+  - **Exit:** Live engine executed `_market_close_traveler_order` at **$73,540.00** at 15:00:07 UTC for a realized **-0.2135 R nick** (-$106.77 for Terry, -$6.67 for Andy, -$23.51 for Dawson).
+  - **Market Aftermath:** Within 35 minutes of exit, BTC violently pumped to **$74,451.80**, blowing through the stop loss at $73,989.68. **C5 saved +0.7865 R (+78.6% of risked capital)** by bailing on stalled momentum before the full stop was struck.
+
+---
+
+### 2. Traveler R1 Re-Arm Path (`gate_traveler.py` vs `rearm_ledger_2016_2020.csv`)
+
+* **Ground-Truth Source:** `brain/audit_evidence/traveler_study_2016_2020/rearm_ledger_2016_2020.csv` & `CANON.md §9c`.
+* **Root Cause of the Drift:** The re-arm watch was checking `session_expires_at` (15:00 ET lock boundary) rather than `rearm_watch_deadline` (a distinct 24-hour watch window from primary exit), causing 100% of re-arm setups to immediately self-cancel.
+* **Why the Live Code Matches the Backtest:**
+  - `advance_rearm_watch()` now explicitly checks elapsed time against `rearm_watch_deadline`.
+  - When the primary journey closes, the plan transitions to `REARM_WATCH`. A secondary limit order is placed if and only if price re-crosses the trigger level within the watch window, matching the exact chronological event sequence in `rearm_ledger_2016_2020.csv`.
+
+---
+
+### 3. CME Futures D1 Lock & Execution (`cme_signals.py` / `cme_market.py` vs `cme_futures_scorecard_2016_2026.md`)
+
+* **Ground-Truth Source:** `scripts/reconstruct_locks_cme_symbol.py` & `brain/audit_evidence/tradfi_futures/cme_futures_scorecard_2016_2026.md`.
+* **Parity Metrics Verified:**
+  1. **Lock Geometry:** 10:00 AM ET lock establishes the 30-minute opening range box from 09:30 to 10:00 AM ET.
+  2. **Reachability Sentinel:** `box / daily_atr14 <= 0.55`. Fixed the regression where `daily_atr14` was hardcoded to `None`. ATR14 is now live-calculated from continuous 1D bars.
+  3. **Execution Geometry:** Target fixed at `2.0x box` (`TARGET_MULT = 2.0`), breakeven trigger at `0.8x box` (`BE_TRIGGER_MULT = 0.8`), stop moved to `BE + 0.1x box` (`BE_STOP_MULT = 0.1`), with symbol-specific stops matching `cme_futures_scorecard_2016_2026.md` (NQ 1.0x box trailing/fixed; ES 0.5x box fixed).
+  4. **Data Parity:** Zero-lag CrossTrade NinjaTrader 8 feed (St. Louis VPS) eliminated the 20-minute Databento historical batch delay and removed yfinance polling completely.
