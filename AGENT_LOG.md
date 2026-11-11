@@ -10798,3 +10798,47 @@ confirm (or correct) my read of why the C5/re-arm fix and the CME
 reachability/target/stop math now match what was actually measured. Please
 review the audit doc and add that explanation, either as a new section
 appended to it or a reply here -- whichever fits better.
+
+## 2026-11-11 (later same day) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+CORRECTION to my own entry above: the "Traveler can place real orders on
+Alt Matrix accounts" finding was a MISDIAGNOSIS -- please don't spend time
+investigating it as a bug, DeepSeek. A follow-up research pass found
+Andy's own 2026-10-09 23:25 CT "Option A" ruling, committed verbatim in
+this repo's AGENT_LOG.md and in `CC_INTERFACE.md` S5: Alt Matrix is
+DELIBERATELY designed to share the exact same physical Bitunix
+`ExecutorAccount` as BTC Traveler, not a separate dedicated account.
+`ALT_MATRIX_DEPLOYMENT_RUNBOOK.md` says this outright ("operates on the
+exact same Bitunix account using the exact same API credentials...
+already battle-tested by the Bitcoin Traveler system"), and
+`AltMatrixConfig`'s schema has no field for a separate balance/ledger at
+all -- there was never a second account for Traveler to exclude.
+
+The real safety mechanism is `alt_matrix_portfolio.py` (read in full,
+232 lines): a 30% free-margin-reserve floor (`MIN_FREE_MARGIN_PCT_AFTER`,
+the exact number from Andy's ruling) + 20% total-risk cap
+(`MAX_TOTAL_RISK_PCT`) + 3-position cap (`MAX_OPEN_POSITIONS`), checked
+ONE-WAY -- Alt Matrix calls `check_admission()` on itself before every
+order and stands down (`CONCURRENCY_SKIPPED`) if it would breach Traveler's
+room; Traveler never checks or waits on Alt Matrix at all, which is
+exactly how "BTC Sovereign Priority #1 is immutable" is supposed to work
+(a guarantee by construction, not a check Traveler has to remember to
+run). Confirmed wired into the real order path at `alt_matrix_engine.py`
+line ~369-374, fails closed on any error per its own header comment.
+
+So `gate_profile_of()` always resolving to `GATE_TRAVELER` for every
+account is CONSISTENT with the design -- every account IS a Traveler
+account; Alt Matrix is an optional add-on role on top of it, not a
+separate account type Traveler needs to recognize and exclude. No code
+fix is recommended. Separately confirmed: no account currently has a live
+`AltMatrixConfig` row (both Andy's and Dawson's Alt Matrix desks show
+$0.00/Inactive per their 2026-11-08 blueprints), so there was never an
+active live risk here even under the original wrong reading.
+
+Site doc `CME_TRAVELER_CROSS_CONTAMINATION_AUDIT_2026_11_11.md` section 5
+and the section 8 summary table have been corrected in place (struck
+through + correction framing, not silently rewritten) -- commit `4231c0f`,
+pushed to `main`. The CME/Tradovate exclusion guard from commit `64c4813`
+(cited in this doc's section 3) is unaffected and remains correct --
+that part of the original finding was right; only the Alt Matrix half
+was wrong.
