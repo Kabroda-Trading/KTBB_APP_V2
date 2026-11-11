@@ -10743,3 +10743,58 @@ Andy's directive: "zero reasons to run into delayed yfinance; the system should 
 
 ### Note for the next pass (flag, not a blocker)
 CrossTrade GetBars `periodType="day"` is the one value NOT yet confirmed against the live VPS (Session 11 confirmed lowercase "minute" only). The daily-bars call for ATR14 uses the NT8-native "day" form; confirm on the first live D1 lock that ATR14 returns a sane value, and adjust casing if NT8 rejects it. `requirements.txt` still lists `yfinance` (now unused by any live path — harmless; remove on a future cleanup if desired).
+
+## 2026-11-11 — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open — full cross-system audit done, one severe unpatched finding, request for your input
+
+Andy asked for a full audit of everything touched over the last 3-4 days
+(the CME market-data rebuilds, the C5/re-arm fixes) plus an explicit check
+for cross-contamination between all four desks. Full write-up, with
+file:line citations and an independent full-suite run (1270/1270, not just
+trusted from a commit message), is in `KTBB_app_v2/CME_TRAVELER_CROSS_
+CONTAMINATION_AUDIT_2026_11_11.md`. Read that file for the complete
+picture -- summary here:
+
+**Confirmed working, verified not just claimed**: the CrossTrade GetBars
+feed, the C5/BBWP exit-timing fix, the R1 Re-Arm unblinding, and the CME
+gate/entry/target/stop math (cross-checked against `cme_signals.py`'s own
+documented line-level verification against `reconstruct_locks_cme_
+symbol.py`, the actual backtest-generating script).
+
+**Severe, NOT yet fixed**: `executor_engine.py`'s Traveler cross/fill/rearm
+loops sweep every active account with no positive allowlist of their own
+(unlike Alt Matrix/CME, which both correctly scope via their own Config
+tables). The only guard left standing resolves EVERY account to
+`gate_profile="GATE_TRAVELER"` by default (confirmed: `_VALID_GATE_
+PROFILES` has had only that one legal value since V2 Crown's retirement).
+A normal, correctly-enrolled Alt Matrix account would pass straight
+through into `build_hypothetical_traveler_order()` and could have a real
+BTC/USDT order placed on its real Bitunix credentials -- silently, no
+error, unlike the CME incident which at least failed loudly. **Andy/
+DeepSeek: do you know whether a real LIVE Alt Matrix account exists right
+now?** That determines whether this is an active emergency or a pre-
+emptive fix before Alt Matrix goes live. Full detail + recommended fix
+(give Traveler its own positive allowlist, matching Alt Matrix/CME's
+pattern) in the audit doc, section 5.
+
+**Also found**: `KABRODA_MASTER_ENGINEERING_SPECIFICATION.md` (v3.2,
+labeled a "binding constitution") has fabricated sections that directly
+contradict CLAUDE.md's own protected Traveler invariants -- a wrong entry-
+trigger formula, an invented reachability veto for Traveler (explicitly
+forbidden), and a resurrection of the retired 50%-partial-exit/breakeven
+management style (explicitly measured harmful and deleted). Confirmed
+directly that none of this fabricated content reached the real code --
+documentation-only, but dangerous if ever trusted as a real spec. Detail
+in the audit doc, section 4.
+
+**Andy's specific ask, for whichever of you picks this up next**: he wants
+someone to explain, in plain terms backed by the real backtest data in
+this repo's `brain/audit_evidence/`, WHY the live system now matches the
+backtest -- not just that it does. DeepSeek, you have direct access to
+`lab_touchfill_arms.py`/`lab_composite_stack_results.md`/the CME ledger
+reconstruction scripts this audit's section 3/7 cite -- you're better
+positioned than I am to walk through the actual backtest mechanics and
+confirm (or correct) my read of why the C5/re-arm fix and the CME
+reachability/target/stop math now match what was actually measured. Please
+review the audit doc and add that explanation, either as a new section
+appended to it or a reply here -- whichever fits better.
