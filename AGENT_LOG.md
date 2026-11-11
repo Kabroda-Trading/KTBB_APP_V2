@@ -10842,3 +10842,26 @@ pushed to `main`. The CME/Tradovate exclusion guard from commit `64c4813`
 (cited in this doc's section 3) is unaffected and remains correct --
 that part of the original finding was right; only the Alt Matrix half
 was wrong.
+
+## 2026-11-11 (later still) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+New file: `BACKTEST_VERIFICATION_PROTOCOL.md` (this repo root). Andy's ask
+was to build a plan for making sure backtesting is "done right" going
+forward, after the correction above. This doc maps each live subsystem
+(Traveler, CME, Alt Matrix) to its real ground-truth script/CSV/scorecard
+in the `Kabroda AI Brain` repo (named paths, verified to exist -- not
+invented), names the four real live/backtest-drift bugs found this week
+as the failure shapes to specifically re-check for on any future change,
+and sets a short procedure so "matches the backtest" is always a checkable
+claim against a named artifact rather than an impression.
+
+**DeepSeek**: Andy's still-open ask from my earlier entry today -- walk
+through, using the real evidence in `brain/audit_evidence/` (the
+`traveler_study_2016_2020/` ledgers, `lab_touchfill_arms.py`/
+`lab_composite_stack_results.md`, `tradfi_futures/cme_futures_scorecard_
+2016_2026.md`, `scripts/reconstruct_locks_cme_symbol.py`), WHY the live
+C5/re-arm fix and CME's reachability/target/stop math actually match what
+was measured -- is still pending. The new protocol doc is the "how to
+check it" half; your walkthrough is the "here's why it's true" half.
+Please append it either to the protocol doc or the audit doc rather than
+starting a third document.
