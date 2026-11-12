@@ -11078,3 +11078,58 @@ rather than assuming this is fully closed from the code fix alone.
 Separately: the Veterans-Day "holiday" misattribution in my own and
 DeepSeek's earlier entries tonight should be read as corrected by this
 entry -- the actual cause was this structural bug, not a holiday.
+
+## 2026-11-11 (very late night) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved, pending Andy's live confirmation after Render redeploys
+Full site/code audit night, three parallel passes (background-loop safety,
+external API/integration audit, page/UX audit), all findings verified
+directly against code before acting, several real bugs found and fixed:
+
+**Loop safety** (commits `c0868f7`, `ed57c6e`): `run_cme_session_loop()`
+and `run_alt_matrix_signal_loop()` both had a span outside any try/except
+that could silently kill the bare `asyncio.create_task()` forever (no
+supervisor restarts any background loop in this app). This is almost
+certainly the real cause of tonight's "CME desk shows DATA PENDING /
+HOLIDAY on a confirmed non-holiday day" symptom Andy saw live. Both fixed
+to match their sibling loops' already-correct fully-wrapped pattern. Swept
+all 10 other background loops -- all already correct or already had their
+own precedent fix.
+
+**API/integration audit** (commit `dcf3d3d`): found and fixed a real risk
+bug -- `cme_engine._query_equity()` used to fall back to
+`account.high_water_mark_usd` on a broker balance-query failure, which
+made `trailing_drawdown_usd()` read as zero drawdown and could silently
+ADMIT a new CME position on a day the real equity (unknown) might already
+be in breach of MFFU's rule. Now returns `None` on failure and the
+account's orders are rejected closed (`EQUITY_QUERY_FAILED`) instead.
+Also (commit `797b7af`): removed two dead dependencies (yfinance,
+google-generativeai), documented `EXECUTOR_CREDENTIAL_KEY` (was missing
+from CLAUDE.md despite being the most security-critical env var in the
+app), marked `COINALYZE_API_KEY` stale/vestigial.
+
+**Page/UX audit** (commit `ce1335e`): `/suite` (Session Control/
+"BattleBox", the post-login landing page) has been completely broken for
+6 months -- its only action called a function deleted in a 2026-05-03
+refactor, every click 500'd. Andy's own call, confirmed right: "I don't
+think it's even used" -- retired rather than fixed, redirects to
+`/suite/dashboard` now (matching the established `/suite/lti` pattern).
+Market Radar confirmed redundant with Traveler Desk (same data, same
+endpoint) -- its one real feature (copy-to-clipboard) ported into
+Traveler Desk's session card, removed from the operator nav (the public,
+no-login `/suite/radar` route itself stays live per Andy's own prior
+2026-08-27 instruction). `executor_admin.html`'s Step 3/4/6 account-type
+scoping bug fixed (crypto/Traveler/Alt-Matrix steps no longer render on
+CME/Tradovate account cards) plus a newly-found instance of the same bug
+class (the "SIZING NOT CONFIRMED" badge was permanently wrong on every
+CME account -- now checks real `CMEConfig` state instead of the crypto
+sizing preset). Also fixed three dead links in `account.html`'s own
+separate mini-nav (system-monitor/omega/research-lab routes don't exist
+anywhere in main.py).
+
+Full test suite verified clean in one uncontested run (no concurrent test
+processes): **1277 passed, 0 failed.** The page/UX template changes
+(login redirect, nav.html, traveler_desk.html's new copy buttons) were
+NOT verified live in a browser -- only via code review + exact-pattern-
+matching against already-proven code in this same file. Worth a real
+look at kabroda.com after Render redeploys, not assumed correct from
+tests alone.
