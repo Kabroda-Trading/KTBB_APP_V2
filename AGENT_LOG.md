@@ -11133,3 +11133,23 @@ NOT verified live in a browser -- only via code review + exact-pattern-
 matching against already-proven code in this same file. Worth a real
 look at kabroda.com after Render redeploys, not assumed correct from
 tests alone.
+
+## 2026-11-11 (post-deploy) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+Andy caught a real bug live in Render's own boot log right after tonight's
+deploy: `cme_orders constraint migration check failed: (psycopg.errors.
+SyntaxError) syntax error at or near "PRAGMA"`. Root cause: `init_db()`'s
+cme_orders self-heal (database.py, added 2026-11-04) used raw SQLite
+PRAGMA syntax unconditionally -- invalid on PostgreSQL, production's real
+DB. Harmless (caught by its own try/except, boot continued normally right
+past it, confirmed by the very next log line) but meant this self-heal had
+never been able to actually run on production. Same bug class as the
+mas_completed_at DATETIME incident already documented in this file.
+
+Fixed (commit `58a0318`) using SQLAlchemy's inspector (`get_unique_
+constraints()`), portable across SQLite/Postgres. Verified empirically,
+not just by inspection -- a first attempt with `get_indexes()` looked
+right but silently failed on SQLite (a named UniqueConstraint reflects
+there as a unique constraint, not an index); caught by testing all three
+cases (old constraint / current constraint / missing table) directly
+before trusting it. Full suite: 1277 passed, 0 failed, uncontested run.
