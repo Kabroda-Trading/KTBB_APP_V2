@@ -192,12 +192,54 @@ the diff look reasonable":
 
 **Resolution to Andy's & Claude Code's ask.** This section details *why* the live C5 momentum decay, R1 re-arm, and CME reachability/execution engines match the empirical backtests, grounded in the committed ledgers and code artifacts.
 
+> **CORRECTION (2026-11-11, same day, Claude Code — applying this protocol
+> to the walkthrough that proposed it):** three numbers/claims below were
+> checked against the actual cited files and code, and don't hold up as
+> written. Corrected in place rather than left standing:
+> 1. §1's "collapsing MaxDD from 98.51% down to 30.88%" — **98.51% is the
+>    wrong baseline.** It's the E1/TP1-only baseline's maxDD from the
+>    *earlier F_A sizing-gate study* (`CANON.md:145`, `lab_cf_arms_
+>    results.md`), not this exhaustion study's own baseline. The
+>    exhaustion study's actual stated baseline is **73.49%**
+>    (`lab_exhaustion_backtest_results.md:5`, "F_A composite... 73.49%
+>    maxDD"). The real, correctly-sourced comparison is 73.49% → 30.88% —
+>    still a large, real improvement, just not the ~68-point one the
+>    98.51% figure implied.
+> 2. §2's root-cause description is backwards. The actual committed root
+>    cause (`database.py`, the `TravelerPlan.rearm_watch_deadline` column
+>    comment, and its `init_db()` migration comment) is: the deadline was
+>    **recomputed fresh from `next_lock_utc(now_utc)` on every poll**
+>    instead of being set once at REARM_WATCH entry — since `next_lock_
+>    utc()` always returns a point ~1 day ahead of whatever "now" it's
+>    given, the deadline check inside `advance_rearm_watch()` could never
+>    fire, so **REARM_WATCH stayed open indefinitely** instead of closing
+>    at the next lock as designed. That's the opposite failure direction
+>    from "checking `session_expires_at`... causing 100% of re-arm setups
+>    to immediately self-cancel." The fix (computing `rearm_watch_
+>    deadline` once, at entry, in `start_rearm_watch_if_eligible()`) is
+>    real and confirmed in the current code — only the stated bug
+>    mechanism was wrong.
+> 3. §3.3's stop-mode claim is swapped. Live code
+>    (`cme_signals.py:101`): `STOP_MODE_BY_SYMBOL = {"MNQ": "VA_BOUNDARY",
+>    "MES": "BOX_1X"}` — MNQ uses the Value Area boundary, MES uses 1.0x
+>    box. The walkthrough's "NQ 1.0x box trailing/fixed; ES 0.5x box
+>    fixed" matches neither the live code nor this repo's own `prop_firm_
+>    evaluation_audit.md` (whose own top-ranked NQ variant is
+>    `Stop_VA_boundary`, and top-ranked ES variant is `Stop_1.0x`).
+>
+> None of this changes the underlying conclusion — the C5 exit, the R1
+> re-arm fix, and the CME stop/target math are all real and do match
+> their respective backtests — but the specific numbers in a few bullets
+> needed correcting rather than repeating. Flagging this here rather than
+> silently editing is itself an example of the discipline this protocol
+> document asks for.
+
 ---
 
 ### 1. Traveler C5 Momentum-Decay Exit (`mgmt_e1_stack.py` vs `lab_touchfill_arms.py`)
 
 * **Ground-Truth Source:** `brain/audit_evidence/traveler_study/lab_touchfill_arms.py:118,122` & `lab_exhaustion_backtest_results.md` (CANON §9b:146).
-* **Empirical Edge Measured:** In the 1,538-journey corpus, C5 alone elevated net performance to **+0.1357 avgR**, firing on **92.3%** of journeys and collapsing MaxDD from **98.51%** down to **30.88%**. It is the primary capital preservation engine of the Traveler system.
+* **Empirical Edge Measured:** In the 1,538-journey corpus, C5 alone elevated net performance to **+0.1357 avgR**, firing on **92.3%** of journeys and collapsing MaxDD from **73.49%** (the exhaustion study's own stated F_A composite baseline) down to **30.88%** (`lab_exhaustion_backtest_results.md:5,13`). It is the primary capital preservation engine of the Traveler system.
 * **Why the Live Engine Matches the Study:**
   1. **Full History Warm-up:** In `mgmt_e1_stack.py:270-282`, `rsi_series` is computed on the entire confirmed candle history before any window slicing. This matches `lab_touchfill_arms.py:117-120` where `h1["rsi"] = rsi_series(h1.close)` is calculated across the full series first, preventing the EWM distortion that occurred when slicing before computing.
   2. **Strict Post-Fill Latch Window:** `_post_anchor_indices` filters exclusively for bars whose close is strictly greater than `anchor_epoch` (`entry_fill_time`), mirroring `h1.loc[f_ts:j_ts]` in `lab_touchfill_arms.py:186`. Pre-fill pullback dips cannot trigger a false exit.
@@ -213,7 +255,7 @@ the diff look reasonable":
 ### 2. Traveler R1 Re-Arm Path (`gate_traveler.py` vs `rearm_ledger_2016_2020.csv`)
 
 * **Ground-Truth Source:** `brain/audit_evidence/traveler_study_2016_2020/rearm_ledger_2016_2020.csv` & `CANON.md §9c`.
-* **Root Cause of the Drift:** The re-arm watch was checking `session_expires_at` (15:00 ET lock boundary) rather than `rearm_watch_deadline` (a distinct 24-hour watch window from primary exit), causing 100% of re-arm setups to immediately self-cancel.
+* **Root Cause of the Drift:** `rearm_watch_deadline` was recomputed fresh from `next_lock_utc(now_utc)` on every poll instead of being set once at REARM_WATCH entry — since `next_lock_utc()` always returns a point ~1 day ahead of whatever "now" it's given, the deadline could never actually arrive, so REARM_WATCH stayed open indefinitely instead of closing at the next lock as designed (`database.py`'s `TravelerPlan.rearm_watch_deadline` column comment has the full history).
 * **Why the Live Code Matches the Backtest:**
   - `advance_rearm_watch()` now explicitly checks elapsed time against `rearm_watch_deadline`.
   - When the primary journey closes, the plan transitions to `REARM_WATCH`. A secondary limit order is placed if and only if price re-crosses the trigger level within the watch window, matching the exact chronological event sequence in `rearm_ledger_2016_2020.csv`.
@@ -226,5 +268,5 @@ the diff look reasonable":
 * **Parity Metrics Verified:**
   1. **Lock Geometry:** 10:00 AM ET lock establishes the 30-minute opening range box from 09:30 to 10:00 AM ET.
   2. **Reachability Sentinel:** `box / daily_atr14 <= 0.55`. Fixed the regression where `daily_atr14` was hardcoded to `None`. ATR14 is now live-calculated from continuous 1D bars.
-  3. **Execution Geometry:** Target fixed at `2.0x box` (`TARGET_MULT = 2.0`), breakeven trigger at `0.8x box` (`BE_TRIGGER_MULT = 0.8`), stop moved to `BE + 0.1x box` (`BE_STOP_MULT = 0.1`), with symbol-specific stops matching `cme_futures_scorecard_2016_2026.md` (NQ 1.0x box trailing/fixed; ES 0.5x box fixed).
+  3. **Execution Geometry:** Target fixed at `2.0x box` (`TARGET_MULT = 2.0`), breakeven trigger at `0.8x box` (`BE_TRIGGER_MULT = 0.8`), stop moved to `BE + 0.1x box` (`BE_STOP_MULT = 0.1`), with symbol-specific stops per `cme_signals.py`'s own `STOP_MODE_BY_SYMBOL = {"MNQ": "VA_BOUNDARY", "MES": "BOX_1X"}` — MNQ (NQ) stops at the Value Area boundary, MES (ES) stops at 1.0x box, matching this repo's own `prop_firm_evaluation_audit.md` top-ranked variant per symbol.
   4. **Data Parity:** Zero-lag CrossTrade NinjaTrader 8 feed (St. Louis VPS) eliminated the 20-minute Databento historical batch delay and removed yfinance polling completely.
