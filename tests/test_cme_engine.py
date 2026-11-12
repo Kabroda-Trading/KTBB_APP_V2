@@ -338,6 +338,35 @@ def test_persist_missed_window_rows_is_idempotent(db):
     assert mes.status == "MISSED_WINDOW"   # MES still gets its own row
 
 
+# ------------------------------------------------------------------ run_cme_session_loop() iteration-level robustness (2026-11-11)
+# Real production incident: the clock-arithmetic/catchup-window span at the
+# top of each iteration used to sit OUTSIDE any try/except, unlike
+# run_cme_watch_loop()'s own fully-wrapped body. A single uncaught exception
+# there would silently end this bare asyncio.create_task() forever -- no
+# supervisor restarts it (see main.py's lifespan()). Proves one bad tick no
+# longer kills the loop.
+
+def test_run_cme_session_loop_survives_an_exception_in_the_clock_span(monkeypatch):
+    calls = {"clock": 0, "sleep": 0}
+
+    def _boom_once(now):
+        calls["clock"] += 1
+        if calls["clock"] == 1:
+            raise RuntimeError("simulated cme_clock failure")
+        raise asyncio.CancelledError()   # stop the infinite loop on the 2nd iteration
+    monkeypatch.setattr(cc, "most_recent_lock_utc", _boom_once)
+
+    async def _fake_sleep(seconds):
+        calls["sleep"] += 1
+    monkeypatch.setattr(ce.asyncio, "sleep", _fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        _run(ce.run_cme_session_loop())
+
+    assert calls["clock"] == 2   # survived the first failure and tried again
+    assert calls["sleep"] >= 1   # the outer except's backoff sleep actually ran
+
+
 def test_process_symbol_lock_stand_down_creates_plan_but_no_orders(db, monkeypatch):
     account = _account(db)
     _config(db, account)

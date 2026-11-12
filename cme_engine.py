@@ -266,35 +266,59 @@ def _persist_missed_window_rows(lock_instant: datetime.datetime) -> None:
 async def run_cme_session_loop() -> None:
     """Background task (registered in main.py's lifespan()) -- the D1 lock
     tick, boundary-anchored to the real 10:00 ET lock (DST-aware, see
-    cme_clock.py's own header for the Part-0 bug this fixes)."""
+    cme_clock.py's own header for the Part-0 bug this fixes).
+
+    2026-11-11 (real incident -- the CME desk showed zero activity all day
+    on a confirmed NON-holiday trading day): the catchup-window check and
+    boundary sleep below used to sit OUTSIDE any try/except, unlike
+    run_cme_watch_loop()'s own fully-wrapped body in this same file.
+    main.py registers every background loop as a bare asyncio.create_task()
+    with no supervisor -- nothing restarts a dead task. A single uncaught
+    exception anywhere in that unwrapped span (cme_clock arithmetic, or
+    anything else) would silently end this loop FOREVER, with the desk
+    showing a stale "no lock yet" indistinguishable from a lock that
+    genuinely hasn't happened yet. The whole iteration is now wrapped
+    end-to-end, matching run_cme_watch_loop()'s already-correct pattern --
+    one bad tick can never kill the loop again."""
     print(">>> CME SESSION LOOP: Initializing (D1 lock, 10:00 ET-boundary-anchored)...")
     while True:
-        now = datetime.datetime.now(UTC)
-        lock_instant = cme_clock.most_recent_lock_utc(now)
-        if not cme_clock.is_within_catchup_window(lock_instant, now, _DEFAULT_CATCHUP_WINDOW_SECONDS):
-            _persist_missed_window_rows(lock_instant)
-            # Overshoot buffer: sleep slightly PAST the boundary so the wake
-            # always lands strictly after the lock (see Bug 2 note on
-            # _LOCK_BOUNDARY_BUFFER_SECONDS above) -- never a millisecond
-            # early, which would re-resolve to yesterday's lock.
-            await asyncio.sleep(cme_clock.seconds_until_next_lock(now) + _LOCK_BOUNDARY_BUFFER_SECONDS)
+        try:
             now = datetime.datetime.now(UTC)
             lock_instant = cme_clock.most_recent_lock_utc(now)
+            if not cme_clock.is_within_catchup_window(lock_instant, now, _DEFAULT_CATCHUP_WINDOW_SECONDS):
+                _persist_missed_window_rows(lock_instant)
+                # Overshoot buffer: sleep slightly PAST the boundary so the wake
+                # always lands strictly after the lock (see Bug 2 note on
+                # _LOCK_BOUNDARY_BUFFER_SECONDS above) -- never a millisecond
+                # early, which would re-resolve to yesterday's lock.
+                await asyncio.sleep(cme_clock.seconds_until_next_lock(now) + _LOCK_BOUNDARY_BUFFER_SECONDS)
+                now = datetime.datetime.now(UTC)
+                lock_instant = cme_clock.most_recent_lock_utc(now)
 
-        date_key = lock_instant.astimezone(cme_clock.NY_TZ).strftime("%Y-%m-%d")
-        db = None
-        try:
-            db = SessionLocal()
-            for symbol in SYMBOLS:
-                await _process_one_symbol_lock_tick(db, symbol, date_key)
+            date_key = lock_instant.astimezone(cme_clock.NY_TZ).strftime("%Y-%m-%d")
+            db = None
+            try:
+                db = SessionLocal()
+                for symbol in SYMBOLS:
+                    await _process_one_symbol_lock_tick(db, symbol, date_key)
+            except Exception as e:
+                print(f"|| CME SESSION LOOP ERROR: {e}")
+                traceback.print_exc()
+            finally:
+                if db is not None:
+                    db.close()
+
+            await asyncio.sleep(cme_clock.seconds_until_next_lock(datetime.datetime.now(UTC)) + _LOCK_BOUNDARY_BUFFER_SECONDS)
         except Exception as e:
-            print(f"|| CME SESSION LOOP ERROR: {e}")
+            # Last-resort catch-all for the span above that used to be
+            # unwrapped (clock arithmetic, _persist_missed_window_rows, the
+            # catchup sleep). Never let this bare task die silently -- log
+            # loudly, back off briefly, then let the next iteration
+            # re-resolve the real lock boundary fresh rather than
+            # tight-looping on a persistent error.
+            print(f"|| CME SESSION LOOP ERROR (outer, loop continues): {e}")
             traceback.print_exc()
-        finally:
-            if db is not None:
-                db.close()
-
-        await asyncio.sleep(cme_clock.seconds_until_next_lock(datetime.datetime.now(UTC)) + _LOCK_BOUNDARY_BUFFER_SECONDS)
+            await asyncio.sleep(60)
 
 
 # ------------------------------------------------------------------ watch loop (D2/D3, 30s)
