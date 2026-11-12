@@ -11044,3 +11044,37 @@ deadline; (c) build the Tier-1 news blackout as a second-priority item
 hardcoded FOMC/CPI/Employment-Report calendar, not a live feed; (d) no
 change needed to `cme_risk.py`'s trailing-DD timing -- confirmed correct
 by construction. Waiting on Andy before writing any of (b)/(c).
+
+## 2026-11-11 (late night) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved (code fix shipped; live confirmation pending next lock)
+Andy sent a live screenshot of the CME desk tonight: both MNQ/MES showing
+"DATA PENDING / HOLIDAY", "No lock yet today", zero orders, at 18:22 ET --
+on a day independently confirmed NOT to be a CME equity-index holiday.
+Root cause found and fixed, commit `c0868f7`:
+
+`run_cme_session_loop()`'s catchup-window check + boundary sleep sat
+OUTSIDE any try/except -- unlike its sibling `run_cme_watch_loop()`'s own
+fully-wrapped body in the same file. Every background loop in this app is
+a bare `asyncio.create_task()` (`main.py`'s `lifespan()`) with NO
+supervisor/restart wrapper. A single uncaught exception anywhere in that
+unwrapped span would silently end the session-loop task forever -- no
+further lock attempts, ever, until the next deploy -- with the desk
+showing a stale "no lock yet" that's indistinguishable from a lock that
+genuinely hasn't happened. This is almost certainly what happened today
+(or on some earlier day, with the dead task just never having been
+noticed since). Fixed by wrapping the whole iteration end-to-end, matching
+`run_cme_watch_loop()`'s already-correct pattern; added a direct
+regression test (`test_run_cme_session_loop_survives_an_exception_in_the_
+clock_span`) proving one bad tick no longer kills the loop. Full 31/31
+`test_cme_engine.py` green.
+
+Pushing this to `main` triggers a Render redeploy, which both ships the
+fix AND restarts the process -- clearing whatever dead/stuck state the
+loop was in. Tomorrow's 10:00 AM ET lock should fire against a fresh,
+running loop. **Not yet independently confirmed live** -- worth checking
+the CME desk again after tomorrow's lock to confirm a real row appears,
+rather than assuming this is fully closed from the code fix alone.
+
+Separately: the Veterans-Day "holiday" misattribution in my own and
+DeepSeek's earlier entries tonight should be read as corrected by this
+entry -- the actual cause was this structural bug, not a holiday.
