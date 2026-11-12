@@ -75,7 +75,10 @@
 
     <div class="grid-2">
         <div class="card">
-            <div class="card-header"><span class="card-title">Today's Session</span></div>
+            <div class="card-header">
+                <span class="card-title">Today's Session</span>
+                <button class="mini-copy" id="copyAllLevelsBtn" onclick="copyAllLevels(this)" title="Copy all 6 levels, comma-separated, for pasting into a charting tool" style="font-size:11px; opacity:0.85;">📋 COPY TRIGGERS</button>
+            </div>
             <div class="card-body" id="tdeskSession">
                 <div class="empty">Loading…</div>
             </div>
@@ -197,11 +200,31 @@
     //    traveler-snapshot route; admin-plan-status adds the D3 management
     //    detail for admins -- same data traveler_radar.py already computes,
     //    not duplicated here). ───────────────────────────────────────
+    let _tdeskLevels = null;
+
+    // Exact same 6-value, comma-separated format and order as market_radar.
+    // html's own _travelerIndicatorString() (2026-11-11 port -- this is the
+    // actual feature Andy wanted off Radar: pasting all 6 levels into a
+    // charting tool's "Levels" field in one action, not per-field copying).
+    function _travelerIndicatorString(l) {
+        return `${l.breakout_trigger||0},${l.breakdown_trigger||0},${l.daily_resistance||0},${l.daily_support||0},${l.range30m_high||0},${l.range30m_low||0}`;
+    }
+
+    function copyAllLevels(btn) {
+        if (!_tdeskLevels) return;
+        navigator.clipboard.writeText(_travelerIndicatorString(_tdeskLevels)).then(() => {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '✓ COPIED';
+            setTimeout(() => btn.innerHTML = orig, 1200);
+        });
+    }
+
     async function loadSession() {
         try {
             const d = await _api('/api/radar/traveler-snapshot');
             if (!d.ok) throw new Error(d.error || 'unknown error');
             const l = d.levels || {};
+            _tdeskLevels = l;
             document.getElementById('tdeskSession').innerHTML = `
                 <div class="row-line"><span>Locked</span><span>${d.locked ? 'Yes' : 'No'}</span></div>
                 <div class="row-line"><span>Anchor price (at lock)</span><span>${_fmtUsd(d.price)}${_copyBtn(d.price)}</span></div>
