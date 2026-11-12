@@ -875,7 +875,15 @@ def get_user_context(request: Request, db: Session):
 async def home(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
     if ctx["is_logged_in"]:
-        return RedirectResponse(url="/suite/radar", status_code=303)
+        # 2026-11-11 (page audit, Andy's call): Market Radar duplicates
+        # Traveler Desk's own session card (same /api/radar/traveler-
+        # snapshot endpoint, same fields) and is no longer the real
+        # multi-subsystem view -- /suite/dashboard is. Radar's one unique
+        # feature (copy-to-clipboard) was ported to Traveler Desk; the
+        # /suite/radar route itself is left live and public (Andy's
+        # explicit 2026-08-27 instruction, "let anyone go to the radar and
+        # use it") -- only the logged-in landing target changed.
+        return RedirectResponse(url="/suite/dashboard", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
 
 
@@ -897,15 +905,27 @@ async def health():
 # --- SUITE ROUTES ---
 @app.get("/suite")
 async def suite(request: Request, db: Session = Depends(get_db)):
+    # Session Control / "BattleBox" retired 2026-11-11 (page audit, Andy's
+    # call: "What is DMR BattleBox, I don't think it's even used?" -- he
+    # was right). Its only action called battlebox_pipeline.get_session_
+    # review(), deleted in a 2026-05-03 refactor (commit 755df1d) and never
+    # updated here -- every click has 500'd for 6 months. The whole manual
+    # copy-paste-into-an-external-ChatGPT-GPT workflow predates the now-
+    # fully-automated Traveler/CME/Alt-Matrix system and doesn't fit it.
+    # Route stays defined so no dangling crash for the URL/old bookmarks,
+    # matching the established /suite/lti retirement pattern below.
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    return _template_or_fallback(request, templates, "session_control.html", ctx)
+    return RedirectResponse(url="/suite/dashboard", status_code=303)
 
 @app.get("/suite/battle-control")
 async def battle_control_page(request: Request, db: Session = Depends(get_db)):
+    # Retired alongside /suite above -- its only distinct card WAS Session
+    # Control; the other three (Radar, Indicators, Profile) just duplicated
+    # nav.html links. Same redirect treatment, same reasoning.
     ctx = get_user_context(request, db)
     if not ctx["is_logged_in"]: return RedirectResponse(url="/login", status_code=303)
-    return _template_or_fallback(request, templates, "suite_home.html", ctx)
+    return RedirectResponse(url="/suite/dashboard", status_code=303)
 
 # /suite/research-lab removed 2026-08-30 -- research_lab.py archived, real
 # backtest validation lives in the Kabroda AI Brain repo now.
@@ -1973,8 +1993,26 @@ def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, An
         # or never-touched account reads as today's exact v2 behavior.
         "gate_profile": _executor_accounts.gate_profile_of(account),
         "mgmt_profile": _executor_accounts.mgmt_profile_of(account),
-        "sizing_confirmed": policy.preset_name not in (None, "steady_grow", "conservative"),
+        # 2026-11-11 (page-audit finding): this used to always read the
+        # crypto sizing-policy preset, even on a Tradovate/CME account --
+        # which has no sizing policy at all, so the badge showed "SIZING
+        # NOT CONFIRMED" on every CME account permanently, regardless of
+        # whether CMEConfig was ever filled in. Mirrors set_account_mode()'s
+        # own `(account.exchange or "").strip().lower() == "tradovate"`
+        # branch (executor_accounts.py) -- same CME-correct question
+        # ("has a real risk config ever been explicitly saved"), not the
+        # crypto-only preset check.
+        "sizing_confirmed": (
+            _cme_sizing_confirmed(db, account)
+            if (account.exchange or "").strip().lower() == "tradovate"
+            else policy.preset_name not in (None, "steady_grow", "conservative")
+        ),
     }
+
+
+def _cme_sizing_confirmed(db: Session, account: "_ExecutorAccount") -> bool:
+    cfg = db.query(_CMEConfig).filter_by(account_id=account.id).first()
+    return cfg is not None and cfg.contracts_cap > 0 and cfg.daily_risk_budget_usd > 0
 
 
 @app.get("/api/admin/alt-matrix-status")
@@ -3677,7 +3715,7 @@ async def telegram_test_alert(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin")
 async def admin_roster_page(request: Request, db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
-    if not ctx["is_admin"]: return RedirectResponse("/suite")
+    if not ctx["is_admin"]: return RedirectResponse("/suite/dashboard")
     users = db.query(UserModel).all()
     ctx["users"] = users
     # latest_daily_digest/recent_suggestions (DailyAuditLog/AuditSuggestionLog)
@@ -3754,7 +3792,7 @@ async def admin_delete_email_subscriber(request: Request, db: Session = Depends(
 @app.post("/admin/delete-user")
 async def admin_delete_user(request: Request, user_id: str = Form(...), db: Session = Depends(get_db)):
     ctx = get_user_context(request, db)
-    if not ctx.get("is_admin"): return RedirectResponse("/suite")
+    if not ctx.get("is_admin"): return RedirectResponse("/suite/dashboard")
     user_to_delete = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
     if user_to_delete:
         db.delete(user_to_delete)
@@ -3822,7 +3860,7 @@ async def admin_interpreter_log(request: Request, db: Session = Depends(get_db))
     Used for weekly JA quality audits and bias_model wiring review."""
     ctx = get_user_context(request, db)
     if not ctx.get("is_admin"):
-        return RedirectResponse("/suite")
+        return RedirectResponse("/suite/dashboard")
 
     rows = (
         db.query(InterpreterLog)
@@ -3941,18 +3979,15 @@ async def admin_interpreter_log(request: Request, db: Session = Depends(get_db))
 # --- API EXECUTION ROUTES ---
 @app.post("/api/dmr/run-raw")
 async def dmr_run_raw(request: Request, db: Session = Depends(get_db)):
+    # Retired alongside GET /suite (session_control.html) above -- this was
+    # its only caller. Had called battlebox_pipeline.get_session_review(),
+    # deleted 2026-05-03 (commit 755df1d) and never updated here, so this
+    # route has 500'd with an AttributeError on every real call for 6
+    # months already. Honest 410 now, matching the /api/lti/protocol
+    # retirement pattern, instead of leaving a route that still crashes.
     uid = request.session.get(auth.SESSION_KEY)
     if not uid: raise HTTPException(status_code=401)
-    
-    payload = await request.json()
-    symbol = (payload.get("symbol") or "BTCUSDT").strip().upper()
-    session_id = payload.get("session_id")
-    
-    if session_id:
-        out = await battlebox_pipeline.get_session_review(symbol=symbol, session_id=session_id)
-    else:
-        out = await battlebox_pipeline.get_session_review(symbol=symbol)
-    return JSONResponse(out)
+    return JSONResponse({"ok": False, "error": "Session Control / BattleBox has been retired."}, status_code=410)
 
 # /api/dmr/live removed 2026-08-30 -- returned battlebox_pipeline.py's entire
 # unfiltered get_live_battlebox() payload, but had zero frontend callers

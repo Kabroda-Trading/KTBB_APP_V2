@@ -17,7 +17,14 @@
 
         <ul class="nav-links" id="navLinks">
             {% if is_logged_in %}
-                <li><a href="/suite/radar" style="color: #06b6d4; font-weight: 800;">MARKET RADAR</a></li>
+                <!-- MARKET RADAR link removed 2026-11-11 (page audit, Andy's
+                     call) -- confirmed redundant with Traveler Desk's own
+                     session card (identical /api/radar/traveler-snapshot
+                     data). Its one distinct feature, copy-to-clipboard, was
+                     ported to Traveler Desk below. The /suite/radar route
+                     itself stays live and public (Andy's 2026-08-27 "let
+                     anyone go to the radar and use it" instruction) -- only
+                     the operator nav link is gone, not the page. -->
                 <li><a href="/suite/gravity-map" style="color: #eab308; font-weight: 800;">GRAVITY MAP</a></li>
                 <!-- CONFLUENCE link removed 2026-08-30 -- /suite/confluence route and
                      confluence.html archived alongside the jewel/confluence purge. -->

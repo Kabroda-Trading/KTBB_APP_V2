@@ -310,7 +310,9 @@ async function loadAccounts() {
                     <span class="badge ${a.mode === 'LIVE' ? 'badge-danger' : 'badge-ok'}" style="margin-left:4px;">${escapeHtml(a.mode)}</span>
                     ${a.kill_switch_engaged ? '<span class="badge badge-danger" style="margin-left:4px;">KILL SWITCH ENGAGED</span>' : '<span class="badge badge-ok" style="margin-left:4px;">ACTIVE</span>'}
                     ${a.has_credentials ? '' : '<span class="badge badge-warn" style="margin-left:4px;">NO CREDENTIALS SET</span>'}
-                    ${a.sizing_confirmed ? '' : '<span class="badge badge-warn" style="margin-left:4px;" title="Real order placement is blocked until a sizing preset is explicitly saved (Step 3 below) -- this is not just a display default.">SIZING NOT CONFIRMED</span>'}
+                    ${a.sizing_confirmed ? '' : (a.exchange || '').toLowerCase() === 'tradovate'
+                        ? '<span class="badge badge-warn" style="margin-left:4px;" title="Real order placement is blocked until a real CME risk configuration (contracts cap + daily risk budget) has been explicitly saved (CME Micro Futures step below) -- this is not just a display default.">SIZING NOT CONFIRMED</span>'
+                        : '<span class="badge badge-warn" style="margin-left:4px;" title="Real order placement is blocked until a sizing preset is explicitly saved (Step 3 below) -- this is not just a display default.">SIZING NOT CONFIRMED</span>'}
                     ${(a.gate_profile !== 'GATE_TRAVELER' || a.mgmt_profile !== 'MGMT_E1_STACK')
                         ? `<span class="badge badge-warn" style="margin-left:4px;" title="GATE_V2/MGMT_SPLIT were retired 2026-09-24 (V2 Crown retirement) -- this account still has an old profile value stored from before that. Set it to GATE_TRAVELER/MGMT_E1_STACK below.">${escapeHtml(a.gate_profile)} / ${escapeHtml(a.mgmt_profile)}</span>`
                         : ''}
@@ -357,6 +359,7 @@ async function loadAccounts() {
                 <div id="testResult-${a.id}" class="empty" style="margin-top:8px; display:none; white-space:pre-wrap;"></div>
             </div>
 
+            ${(a.exchange || "").toLowerCase() !== "tradovate" ? `
             <div class="setup-step" id="sizingPolicy-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
                 <div class="setup-step-title" style="color:#93c5fd;"><span class="setup-step-num">3</span> Sizing Policy</div>
                 <div class="sizing-balance-line" id="sizingBalance-${a.id}">Current balance: loading...</div>
@@ -505,12 +508,14 @@ async function loadAccounts() {
                 </div>
                 <p class="empty" id="profileSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
             </div>
+            ` : ''}
 
             <div class="setup-step go-live-step" id="goLive-${a.id}">
                 <div class="setup-step-title" style="color:#fbbf24;"><span class="setup-step-num">5</span> Go Live</div>
                 <div id="goLiveBody-${a.id}"><p class="empty">Loading...</p></div>
             </div>
 
+            ${(a.exchange || "").toLowerCase() !== "tradovate" ? `
             <div class="setup-step" id="altMatrix-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">
                 <div class="setup-step-title" style="color:#93c5fd;"><span class="setup-step-num">6</span> Alt Matrix (SOL/ETH 4H swing)</div>
                 <p class="empty" style="padding:0 0 8px;">A fully separate system from this account's own BTC Traveler trading above -- own schema, own loops, own risk sizing. This account's gate_profile/mgmt_profile (step 4) are unaffected either way; this only controls whether the Alt Matrix engine will ever place an order for THIS account on the symbol(s) checked below.</p>
@@ -521,6 +526,7 @@ async function loadAccounts() {
                 </div>
                 <p class="empty" id="altMatrixSaveResult-${a.id}" style="margin-top:6px; display:none;"></p>
             </div>
+            ` : ''}
 
             ${(a.exchange || "").toLowerCase() === "tradovate" ? `
             <div class="setup-step" id="cmeFutures-${a.id}" style="border-color:#1e3a5f; background:rgba(30,58,95,0.08);">

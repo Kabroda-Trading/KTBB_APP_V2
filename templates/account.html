@@ -57,20 +57,15 @@
     <nav class="navbar">
         <div class="nav-brand">KABRODA // ACCOUNT</div>
         <div class="nav-links">
-            <a href="/suite" class="nav-item">SESSION CONTROL</a>
-            <a href="/suite/battle-control" class="nav-item">BATTLE CONTROL</a>
-            
-            {% if is_admin %}
-            <div class="ts-wrapper">
-                <div class="ts-btn">⚠ TOP SECRET ▼</div>
-                <div class="ts-menu">
-                    <a href="/suite/system-monitor" class="ts-item">SYSTEM MONITOR</a>
-                    <a href="/suite/omega" class="ts-item">PROJECT OMEGA</a>
-                    <a href="/suite/research-lab" class="ts-item">RESEARCH LAB</a>
-                </div>
-            </div>
-            {% endif %}
-            
+            <!-- 2026-11-11 (page audit): SESSION CONTROL/BATTLE CONTROL were
+                 retired (both now redirect to /suite/dashboard -- see
+                 main.py's own GET /suite comment), replaced with a single
+                 link to the real destination. The TOP SECRET dropdown
+                 (SYSTEM MONITOR / PROJECT OMEGA / RESEARCH LAB) pointed to
+                 three routes that don't exist anywhere in main.py --
+                 confirmed dead, removed rather than left as broken links. -->
+            <a href="/suite/dashboard" class="nav-item">DASHBOARD</a>
+
             <a href="/account" class="nav-item active" style="margin-left:20px;">ACCOUNT</a>
             <a href="/logout" class="nav-item">LOGOUT</a>
         </div>

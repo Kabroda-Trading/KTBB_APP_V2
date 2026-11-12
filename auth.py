@@ -75,7 +75,10 @@ def login_action(request: Request, email: str = Form(...), password: str = Form(
         return RedirectResponse(url="/login?error=Invalid+Credentials", status_code=303)
     
     request.session[SESSION_KEY] = int(u.id)
-    return RedirectResponse(url="/suite", status_code=303)
+    # 2026-11-11 (page audit): /suite (Session Control/BattleBox) retired --
+    # see main.py's own GET /suite comment. Land on the same page a return
+    # visit to "/" already does, consistent landing target either way.
+    return RedirectResponse(url="/suite/dashboard", status_code=303)
 
 # Public self-registration is closed (site is invite-only, not currently offering
 # memberships). These routes stay defined -- harmless redirect for any stale

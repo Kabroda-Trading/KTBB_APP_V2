@@ -26,6 +26,15 @@
         .row-line span:first-child { color: #3f6b7d; }
         .row-line span:last-child { color: #cdeaf5; font-weight: 700; }
 
+        /* Copy-to-clipboard buttons on the session-level values -- ported
+           from market_radar.html's own .mini-copy (2026-11-11 page audit:
+           this was Radar's one real distinct feature, and the actual
+           complaint -- "I can't just copy the levels from Traveler Desk").
+           Radar itself is retired from the operator nav; this is where the
+           feature belongs now. */
+        .mini-copy { background: none; border: none; color: #3f6b7d; cursor: pointer; font-size: 12px; opacity: 0.6; padding: 0 0 0 6px; vertical-align: middle; }
+        .mini-copy:hover { opacity: 1; color: #cdeaf5; }
+
         .badge { padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono'; text-transform: uppercase; }
         .badge-ok { background: rgba(45,212,191,0.12); color: #2dd4bf; border: 1px solid rgba(45,212,191,0.35); }
         .badge-warn { background: rgba(250,204,21,0.12); color: #facc15; border: 1px solid rgba(250,204,21,0.35); }
@@ -106,6 +115,24 @@
         if (n == null) return '—';
         return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
+
+    // Copies the raw numeric value (not the formatted "$1,234.56" display
+    // text) so it pastes cleanly into a chart/order ticket. `n` is the same
+    // raw number passed to _fmtUsd() for that field -- ported from
+    // market_radar.html's copyVal(id), adapted to take the value directly
+    // since loadSession() already has it in scope (no DOM round-trip needed).
+    function copyVal(n, btn) {
+        if (n == null) return;
+        navigator.clipboard.writeText(String(n)).then(() => {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '✓';
+            setTimeout(() => btn.innerHTML = orig, 1000);
+        });
+    }
+    function _copyBtn(n) {
+        if (n == null) return '';
+        return `<button class="mini-copy" onclick="copyVal(${n}, this)" title="Copy value">📋</button>`;
+    }
     function _fmtR(n) {
         if (n == null) return '—';
         const v = Number(n);
@@ -177,11 +204,11 @@
             const l = d.levels || {};
             document.getElementById('tdeskSession').innerHTML = `
                 <div class="row-line"><span>Locked</span><span>${d.locked ? 'Yes' : 'No'}</span></div>
-                <div class="row-line"><span>Anchor price (at lock)</span><span>${_fmtUsd(d.price)}</span></div>
-                <div class="row-line"><span>Breakout trigger (bo)</span><span>${_fmtUsd(l.breakout_trigger)}</span></div>
-                <div class="row-line"><span>Breakdown trigger (bd)</span><span>${_fmtUsd(l.breakdown_trigger)}</span></div>
-                <div class="row-line"><span>30m range high / low</span><span>${_fmtUsd(l.range30m_high)} / ${_fmtUsd(l.range30m_low)}</span></div>
-                <div class="row-line"><span>Daily resistance / support</span><span>${_fmtUsd(l.daily_resistance)} / ${_fmtUsd(l.daily_support)}</span></div>
+                <div class="row-line"><span>Anchor price (at lock)</span><span>${_fmtUsd(d.price)}${_copyBtn(d.price)}</span></div>
+                <div class="row-line"><span>Breakout trigger (bo)</span><span>${_fmtUsd(l.breakout_trigger)}${_copyBtn(l.breakout_trigger)}</span></div>
+                <div class="row-line"><span>Breakdown trigger (bd)</span><span>${_fmtUsd(l.breakdown_trigger)}${_copyBtn(l.breakdown_trigger)}</span></div>
+                <div class="row-line"><span>30m range high / low</span><span>${_fmtUsd(l.range30m_high)}${_copyBtn(l.range30m_high)} / ${_fmtUsd(l.range30m_low)}${_copyBtn(l.range30m_low)}</span></div>
+                <div class="row-line"><span>Daily resistance / support</span><span>${_fmtUsd(l.daily_resistance)}${_copyBtn(l.daily_resistance)} / ${_fmtUsd(l.daily_support)}${_copyBtn(l.daily_support)}</span></div>
             `;
         } catch (e) {
             document.getElementById('tdeskSession').innerHTML = '<div class="empty" style="color:#f87171;">Failed to load session levels.</div>';

@@ -25,6 +25,7 @@ import database
 from database import (
     SessionLocal, UserModel, ExecutorAccount, ExecutorRiskState, ExecutorOrder,
     ExecutorAuditLog, ExecutorGlobalConfig, ExecutorMechanismTest, ExecutorSizingPolicy,
+    CMEConfig,
 )
 import auth
 import executor_accounts as ea
@@ -49,7 +50,7 @@ def env(monkeypatch):
     _clean_db_files()
     database.init_db()
     db = SessionLocal()
-    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, ExecutorAccount, ExecutorGlobalConfig, ExecutorMechanismTest):
+    for model in (ExecutorOrder, ExecutorAuditLog, ExecutorRiskState, ExecutorSizingPolicy, CMEConfig, ExecutorAccount, ExecutorGlobalConfig, ExecutorMechanismTest):
         db.query(model).delete()
     db.query(UserModel).filter(UserModel.email.in_([
         "exec_admin@kabroda.com", "exec_owner@kabroda.com", "exec_other@kabroda.com",
@@ -371,6 +372,62 @@ def test_sizing_confirmed_stays_false_for_steady_grow_or_conservative(env):
     client.post(f"/api/executor/accounts/{aid}/sizing-policy", json={"preset_name": "steady_grow"})
     resp = client.get("/api/executor/accounts")
     assert resp.json()["accounts"][0]["sizing_confirmed"] is False
+
+
+# ------------------------------------------------------------------ sizing_confirmed on a Tradovate/CME account (page-audit finding, 2026-11-11)
+# A Tradovate account has no sizing policy at all -- sizing_confirmed used
+# to always read the crypto preset (always None/untouched for a CME
+# account), so the "SIZING NOT CONFIRMED" badge showed permanently
+# regardless of real CMEConfig state. Must read CMEConfig instead.
+
+def test_sizing_confirmed_false_on_a_fresh_tradovate_account_with_no_cme_config(env):
+    db = env["db"]
+    account = ea.create_account(db, user_id=env["owner_id"], label="owner_cme", exchange="tradovate")
+    db.commit()
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/executor/accounts")
+    accounts = {a["id"]: a for a in resp.json()["accounts"]}
+    assert accounts[account.id]["sizing_confirmed"] is False
+
+
+def test_sizing_confirmed_false_on_a_tradovate_account_with_zero_contracts_cap(env):
+    db = env["db"]
+    account = ea.create_account(db, user_id=env["owner_id"], label="owner_cme", exchange="tradovate")
+    db.commit()
+    db.add(CMEConfig(account_id=account.id, daily_risk_budget_usd=350.0, contracts_cap=0))
+    db.commit()
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/executor/accounts")
+    accounts = {a["id"]: a for a in resp.json()["accounts"]}
+    assert accounts[account.id]["sizing_confirmed"] is False
+
+
+def test_sizing_confirmed_true_on_a_tradovate_account_with_a_real_cme_config(env):
+    db = env["db"]
+    account = ea.create_account(db, user_id=env["owner_id"], label="owner_cme", exchange="tradovate")
+    db.commit()
+    db.add(CMEConfig(account_id=account.id, daily_risk_budget_usd=350.0, contracts_cap=1))
+    db.commit()
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    resp = client.get("/api/executor/accounts")
+    accounts = {a["id"]: a for a in resp.json()["accounts"]}
+    assert accounts[account.id]["sizing_confirmed"] is True
+
+
+def test_sizing_confirmed_on_tradovate_account_never_reads_crypto_sizing_policy(env):
+    # A tradovate account with an untouched/default crypto sizing policy
+    # (steady_grow) but a real, complete CMEConfig must read as confirmed --
+    # proves the branch never falls through to the crypto preset check.
+    db = env["db"]
+    account = ea.create_account(db, user_id=env["owner_id"], label="owner_cme", exchange="tradovate")
+    db.commit()
+    db.add(CMEConfig(account_id=account.id, daily_risk_budget_usd=350.0, contracts_cap=1))
+    db.commit()
+    client = _login("exec_owner@kabroda.com", "ownerpass123")
+    client.post(f"/api/executor/accounts/{account.id}/sizing-policy", json={"preset_name": "steady_grow"})
+    resp = client.get("/api/executor/accounts")
+    accounts = {a["id"]: a for a in resp.json()["accounts"]}
+    assert accounts[account.id]["sizing_confirmed"] is True
 
 
 def test_profile_route_rejects_unknown_gate_profile_with_400(env):
