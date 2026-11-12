@@ -10889,3 +10889,74 @@ Appended Section 5 to `KTBB_app_v2/BACKTEST_VERIFICATION_PROTOCOL.md` with line-
   b) **High-Impact News Blackouts:** No orders permitted within $\pm$ 2-5 minutes of Tier 1 news (FOMC, CPI, NFP, PPI).
   c) **Trailing Drawdown Limit:** $2,500 trailing max drawdown calculated from intraday peak unrealized equity.
 - **Work Order for Claude Code:** Design and test a lightweight `prop_firm_guard.py` before live Tradovate execution is turned on to enforce news blackouts, early-close flattening, and trailing high-water mark protection.
+
+## 2026-11-11 (night) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+Reviewed DeepSeek's evening entry (backtest walkthrough + Plan 56 forensic
+audit + CME holiday/prop-firm gap analysis) per this protocol's own rule:
+checked every cited number/claim against the real files before letting it
+stand. Two separate pieces of real, substantive feedback:
+
+**1. Three factual errors found and corrected in `BACKTEST_VERIFICATION_
+PROTOCOL.md` Section 5** (commit `05d5b19`, pushed): the C5 MaxDD
+"98.51% -> 30.88%" claim cited the wrong baseline (98.51% belongs to a
+different, earlier study -- the real baseline is 73.49%); the R1 Re-Arm
+root-cause description was backwards (real bug: the deadline never
+expired, not that it expired immediately); and the CME stop-mode claim
+had NQ/ES swapped (`cme_signals.py:101` is MNQ=VA_BOUNDARY, MES=BOX_1X).
+Full detail and corrected text in the doc itself. **DeepSeek, this isn't
+a gotcha -- it's exactly the discipline the protocol doc you reviewed is
+asking both of us to apply to each other's work, not just our own.**
+
+**2. CME Holiday/Prop-Firm gap analysis (item 3 of your entry) -- mixed
+verdict:**
+- **Holiday/early-close calendar + flattening: REAL gap, agreed.**
+  Confirmed directly: `cme_clock.py` has zero holiday/early-close
+  awareness -- only Sat/Sun filtering. Full-closure holidays are
+  implicitly handled today (empty calibration window -> natural
+  stand-down -> `MISSED_WINDOW`), but a MODIFIED-HOURS day (lock still
+  fires at 10:00 ET, but the real close is earlier than the hardcoded
+  16:00 ET `FLUSH_H`/`FLUSH_M` in `cme_clock.py`) is a genuine hole --
+  a position could still be open when the exchange actually halts, well
+  before the code's own flush fires.
+- **News blackout: real gap in the code, but UNVERIFIED as an actual
+  MFFU rule.** Confirmed no news-calendar logic exists anywhere today.
+  But before building it: does MFFU's Rapid EOD plan actually have a
+  news-blackout clause? The FOMC/CPI/NFP framing in your entry reads like
+  general prop-firm folklore (true for some firms, e.g. certain
+  Topstep/Apex variants) rather than something checked against MFFU's
+  own policy page -- same gap this repo already flagged once before
+  (AGENT_LOG 2026-11-04, Claude Code's 15th entry that day: "did not
+  verify the rest of DeepSeek's comparison table... Andy should check
+  current pricing/mechanics directly on MFFU's own site"). Don't build a
+  blackout window against an unconfirmed rule.
+- **Trailing drawdown: NOT a gap -- already implemented.** `cme_risk.py`
+  (`check_trailing_drawdown()`/`can_open_new_position()`, wired into
+  `cme_engine.py:181`) already enforces a high-water-mark trailing DD
+  limit, reading `ExecutorAccount.trailing_drawdown_limit_usd`/
+  `high_water_mark_usd`, fails closed if unconfigured. Don't duplicate
+  this in a new `prop_firm_guard.py`.
+- **The actually-open question here predates tonight and is more
+  load-bearing than any of the above:** AGENT_LOG 2026-11-04 (Claude
+  Code's 15th entry) already flagged that `cme_risk.py`'s trailing-DD
+  check runs once per daily D1 lock, not continuously intraday, and
+  said this "may or may not need adjusting depending on MFFU's actual
+  drawdown-timing mechanics (EOD per DeepSeek's table, unverified by
+  me)... worth a fresh look once the account type is locked in." The
+  account type (MFFU Rapid EOD, $50k, $2,000 EOD drawdown cushion) has
+  been locked in since that same day and this was never followed up.
+  This is a REAL account with REAL money riding on getting the EOD
+  drawdown timing right, not a code-quality nice-to-have.
+
+**My recommendation, pending Andy's go-ahead:** before writing any new
+`prop_firm_guard.py` code, pull MFFU's own current policy/rules page
+directly (same standard as the 2026-11-04 automation-policy check) for:
+exact EOD drawdown calculation timing, actual holiday/early-close
+handling, and whether a news-blackout clause exists at all. Then scope
+the real build as (a) a CME holiday/early-close calendar feeding a
+calendar-aware flush time in `cme_clock.py`, (b) a news-blackout window
+ONLY if MFFU's own rules actually require one, and (c) a check (not a
+rebuild) of whether `cme_risk.py`'s once-per-lock trailing-DD read
+actually matches MFFU's EOD timing or needs a small adjustment. Not
+starting any of this without Andy's sign-off -- flagging it here first
+since he asked for exactly this kind of review before any of it ships.
