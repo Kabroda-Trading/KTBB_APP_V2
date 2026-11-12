@@ -503,30 +503,48 @@ async def run_alt_matrix_signal_loop() -> None:
     boundary is simply skipped (left as a permanent gap, matching the
     approved plan's own "record MISSED rather than guess" intent; a
     dedicated MISSED row is not written here, since nothing was ever
-    fetched for that boundary to attach one to)."""
+    fetched for that boundary to attach one to).
+
+    2026-11-11 (same bug class as cme_engine.run_cme_session_loop(), found
+    in a sweep after that real production incident): the catchup-window
+    check/sleep below used to sit OUTSIDE any try/except. main.py registers
+    every background loop as a bare asyncio.create_task() with no
+    supervisor -- a single uncaught exception in that unwrapped span (e.g.
+    alt_matrix_clock arithmetic) would silently end this loop FOREVER.
+    Wrapped end-to-end now, matching run_alt_matrix_watch_loop()'s own
+    already-correct pattern."""
     print(">>> ALT MATRIX SIGNAL LOOP: Initializing (D1 gate + D3 management, 4H-boundary-anchored)...")
     while True:
-        now = datetime.datetime.now(UTC)
-        eval_instant = alt_matrix_clock.most_recent_eval_utc(now)
-        if not alt_matrix_clock.is_within_catchup_window(eval_instant, now, _DEFAULT_CATCHUP_WINDOW_SECONDS):
-            await asyncio.sleep(alt_matrix_clock.seconds_until_next_eval(now))
+        try:
             now = datetime.datetime.now(UTC)
             eval_instant = alt_matrix_clock.most_recent_eval_utc(now)
+            if not alt_matrix_clock.is_within_catchup_window(eval_instant, now, _DEFAULT_CATCHUP_WINDOW_SECONDS):
+                await asyncio.sleep(alt_matrix_clock.seconds_until_next_eval(now))
+                now = datetime.datetime.now(UTC)
+                eval_instant = alt_matrix_clock.most_recent_eval_utc(now)
 
-        eval_instant_naive = eval_instant.replace(tzinfo=None)
-        db = None
-        try:
-            db = SessionLocal()
-            for symbol in SYMBOLS:
-                await _process_one_symbol_tick(db, symbol, eval_instant_naive)
+            eval_instant_naive = eval_instant.replace(tzinfo=None)
+            db = None
+            try:
+                db = SessionLocal()
+                for symbol in SYMBOLS:
+                    await _process_one_symbol_tick(db, symbol, eval_instant_naive)
+            except Exception as e:
+                print(f"|| ALT MATRIX SIGNAL LOOP ERROR: {e}")
+                traceback.print_exc()
+            finally:
+                if db is not None:
+                    db.close()
+
+            await asyncio.sleep(alt_matrix_clock.seconds_until_next_eval(datetime.datetime.now(UTC)))
         except Exception as e:
-            print(f"|| ALT MATRIX SIGNAL LOOP ERROR: {e}")
+            # Last-resort catch-all for the previously-unwrapped span above
+            # (clock arithmetic, the catchup sleep). Never let this bare
+            # task die silently -- log loudly, back off briefly, then let
+            # the next iteration re-resolve the real boundary fresh.
+            print(f"|| ALT MATRIX SIGNAL LOOP ERROR (outer, loop continues): {e}")
             traceback.print_exc()
-        finally:
-            if db is not None:
-                db.close()
-
-        await asyncio.sleep(alt_matrix_clock.seconds_until_next_eval(datetime.datetime.now(UTC)))
+            await asyncio.sleep(60)
 
 
 async def run_alt_matrix_watch_loop() -> None:
