@@ -10960,3 +10960,87 @@ rebuild) of whether `cme_risk.py`'s once-per-lock trailing-DD read
 actually matches MFFU's EOD timing or needs a small adjustment. Not
 starting any of this without Andy's sign-off -- flagging it here first
 since he asked for exactly this kind of review before any of it ships.
+
+## 2026-11-11 (later night) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+Pulled MyFundedFutures' own official Help Center pages directly (not
+third-party summaries) per Andy's ask, to answer the holiday/news/
+drawdown questions properly before any code gets written.
+
+**1. CORRECTION, urgent to check: today (Veterans Day, 2026-11-11) was
+NOT a CME equity-index holiday.** DeepSeek's entry tonight said "CME
+equity futures had modified holiday hours (halted at 13:00 ET)... 0
+orders... correctly avoiding holiday trading." Checked this against
+CME's own Veterans Day 2026 settlement advisory and multiple market-
+hours sources: ES/NQ/MES/MNQ traded NORMAL hours today, with only the
+regular daily maintenance break. Veterans Day closes the BOND market
+(SIFMA recommendation) and federal offices, not equity index futures or
+NYSE/Nasdaq cash equities. **If `cme_plans` really has 0 rows for today,
+it is not explained by a holiday** -- it's either a reachability
+stand-down, a data-fetch gap, a real bug, or the "0 rows" claim itself
+needs rechecking. I can't query the production DB from this environment
+-- someone with access should check the CME desk/admin panel for today's
+actual plan row and status_reason before assuming today was fine.
+
+**2. Holiday/early-close rules (official: help.myfundedfutures.com/en/
+articles/9558251):** Regular days auto-close at 4:10 PM EST (broker-side
+safety net). **On holiday/early-close days, MFFU does NOT auto-liquidate
+-- the trader/system is responsible for closing positions before the
+real halt, and "failure to close the positions before the market closes
+will result in breaching of the account unless otherwise notified."**
+This applies at both sim-evaluation and sim-funded stages -- i.e. it's a
+live risk for Account 17 right now, not deferred to after funding.
+
+**Confirmed real, near-term CME holiday/early-close dates** (CME's own
+settlement advisories + convergent third-party calendars; exact minute
+may shift until CME finalizes ~2 weeks out -- reconfirm closer to each
+date):
+- Thu 2026-11-26 (Thanksgiving): full closure, equity index halts ~1:00
+  PM ET, reopens that evening for Friday's session.
+- **Fri 2026-11-27 (day after Thanksgiving): early close, ~1:00-1:15 PM
+  ET** -- 16 days from today. `cme_clock.py`'s `FLUSH_H/FLUSH_M` is
+  hardcoded to 16:00 ET with zero holiday awareness, so a position open
+  into this close would sit unflattened for ~3 hours past the real halt,
+  with no MFFU-side safety net. This is the one genuinely time-sensitive
+  item here.
+- Thu 2026-12-24 (Christmas Eve): early close, ~1:00-1:15 PM ET.
+- Fri 2026-12-25 (Christmas): full closure.
+
+**3. News trading policy (official: help.myfundedfutures.com/en/
+articles/8230009):** Tier 1 restriction (no open positions/orders 2
+minutes before or after FOMC, FOMC minutes, Employment Report, CPI; EIA
+for energy, Ag Reports for ag traders) applies ONLY to **Rapid Sim
+Funded and Pro Sim Funded** accounts. **Evaluations and Builder plans
+are explicitly UNRESTRICTED.** Account 17 is confirmed still in
+EVALUATION (Tradovate demo gateway) -- so this rule does not bind it
+today. Third-party sources (not MFFU's own page, which doesn't name
+"Rapid EOD" specifically) converge that Rapid EOD's Sim Funded stage
+likely inherits the same Tier-1 restriction as Rapid Sim Funded once the
+account passes -- worth confirming directly with MFFU once Account 17
+is close to funded, not urgent today.
+
+**4. EOD drawdown mechanics -- resolves the 2026-11-04 open question.**
+MFFU's EOD trailing floor is BALANCE-based (updates only at end-of-day
+settlement, open positions don't move it until closed), but breaches are
+checked in real time against whatever floor is currently locked in.
+`cme_risk.py`'s once-per-daily-lock check reads `total_equity` from the
+broker at that moment -- and because CME positions are always flat by
+then (the mandatory 16:00 ET flush / stop / target / BE design means
+zero overnight hold, a protected invariant), `total_equity` at the lock
+equals the settled balance with nothing open. **The once-per-day
+mark-to-market check is therefore functionally equivalent to an
+EOD-balance check, by construction -- this does NOT need a rebuild.**
+The only way this breaks is if the zero-overnight-hold invariant itself
+ever breaks (a position surviving past the flush), which is a separate,
+already-protected concern.
+
+**Recommendation:** (a) verify today's actual `cme_plans` row/status
+first -- that's the live question; (b) build a small, explicit CME
+holiday/early-close calendar (hardcoded dates from CME's own published
+schedule, feeding a calendar-aware flush time into `cme_clock.py`
+instead of the fixed 16:00 ET) before 2026-11-27 -- this is the one real
+deadline; (c) build the Tier-1 news blackout as a second-priority item
+(weeks of runway, not days, since evaluation is exempt) using a
+hardcoded FOMC/CPI/Employment-Report calendar, not a live feed; (d) no
+change needed to `cme_risk.py`'s trailing-DD timing -- confirmed correct
+by construction. Waiting on Andy before writing any of (b)/(c).
