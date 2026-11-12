@@ -429,6 +429,49 @@ def test_process_symbol_lock_armed_fans_out_long_and_short_orders_per_enabled_ac
     assert all(o.contracts > 0 for o in orders)
 
 
+def test_process_symbol_lock_rejects_closed_on_equity_query_failure(db, monkeypatch):
+    # Real risk finding, 2026-11-11 (external audit): _query_equity() used
+    # to fall back to account.high_water_mark_usd on a broker-query failure,
+    # which made trailing_drawdown_usd() read as zero drawdown and silently
+    # ADMIT a new position on a day the real equity (unknown) could already
+    # be in breach of the MFFU trailing-DD rule. Proves a failed equity
+    # query now fails this account's orders CLOSED (REJECTED,
+    # EQUITY_QUERY_FAILED) instead of being admitted on a fabricated value.
+    account = _account(db, mode="DRY_RUN")
+    account.trailing_drawdown_limit_usd = 2000.0
+    account.high_water_mark_usd = 50000.0
+    db.commit()
+    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
+    monkeypatch.setattr(cx, "_client_for", lambda account_: object())
+
+    async def _fake_calib(symbol, date_key):
+        return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
+    monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
+
+    async def _failed_equity(account_):
+        return None   # simulates _query_equity()'s own real contract on a broker-query failure
+    monkeypatch.setattr(ce, "_query_equity", _failed_equity)
+    _capture_emails(monkeypatch)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    plan = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-04").first()
+    assert plan is not None and plan.status == "ARMED"   # the plan itself is unaffected
+    orders = db.query(CMEOrder).filter_by(cme_plan_id=plan.id, account_id=account.id).all()
+    assert {o.direction for o in orders} == {"LONG", "SHORT"}
+    assert all(o.decision == "REJECTED" for o in orders)
+    assert all(o.decision_reason == "EQUITY_QUERY_FAILED -- broker balance query failed, cannot verify trailing drawdown" for o in orders)
+    assert all(o.contracts == 0 for o in orders)
+
+
+def test_query_equity_returns_none_never_fabricates_a_value(monkeypatch):
+    account = ExecutorAccount(high_water_mark_usd=50000.0)
+    monkeypatch.setattr(cx, "_client_for", lambda account_: (_ for _ in ()).throw(RuntimeError("no client")))
+    result = _run(ce._query_equity(account))
+    assert result is None
+
+
 def test_process_symbol_lock_admits_both_directions_independently_same_tick(db, monkeypatch):
     # Proves both directions of the OCO-style fan-out get admitted on
     # their own merits in the same tick -- not a reproduced live bug (see

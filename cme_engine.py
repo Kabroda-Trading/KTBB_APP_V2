@@ -82,19 +82,29 @@ def _enabled_accounts_for_symbol(db: Session, symbol: str) -> List[ExecutorAccou
     return accounts
 
 
-async def _query_equity(account: ExecutorAccount) -> float:
-    """Real equity for the trailing-DD check. Falls back to the account's
-    own high_water_mark_usd (last known value) on a query failure -- never
-    crashes the whole tick over one failed balance call, but also never
-    silently treats a failure as "equity is fine" (the caller's own
-    trailing-DD check still runs against whatever value this returns)."""
+async def _query_equity(account: ExecutorAccount) -> Optional[float]:
+    """Real equity for the trailing-DD check. Returns None on a query
+    failure -- never raises (one account's broker hiccup must never roll
+    back an already-created CMEPlan or other accounts' orders for the same
+    symbol), but also never fabricates a number.
+
+    2026-11-11 (real risk finding, external audit): this used to fall back
+    to account.high_water_mark_usd on failure. cme_risk.trailing_drawdown_
+    usd() computes max(0, hwm - current_equity) -- substituting hwm AS the
+    current equity makes that subtraction hwm - hwm = 0 every time, so a
+    broker outage was silently indistinguishable from "account sitting
+    exactly at its all-time peak, zero drawdown" and would PASS the
+    trailing-DD admission check on a day the real equity (unknown, because
+    the query failed) could already be in breach of MFFU's rule. The
+    caller must treat None as "equity unknown, stand down" -- never
+    substitute a value that happens to read as zero drawdown."""
     try:
         client = cme_executor._client_for(account)
         balance = await client.get_balance()
         return balance["total_equity"]
     except Exception as e:
-        print(f"|| CME ENGINE || equity query failed for account {account.id}: {e} -- using last known high-water mark")
-        return account.high_water_mark_usd or 0.0
+        print(f"|| CME ENGINE || equity query failed for account {account.id}: {e} -- EQUITY_QUERY_FAILED, standing this account down rather than guessing")
+        return None
 
 
 # ------------------------------------------------------------------ session loop (D1, once daily)
@@ -178,6 +188,23 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
     for account, cfg in accounts:
         for direction, trig, stop in (("LONG", plan.bo, plan.stop_long), ("SHORT", plan.bd, plan.stop_short)):
             equity = await _query_equity(account)
+            if equity is None:
+                # Real risk finding, 2026-11-11: never call can_open_new_position()
+                # with a fabricated equity value just because the broker query
+                # failed -- that would let trailing_drawdown_usd() read as zero
+                # drawdown and admit a new position on a day the real equity
+                # (unknown) could already be in breach. Fail this account closed.
+                order = CMEOrder(
+                    cme_plan_id=plan.id, account_id=account.id, mode=account.mode,
+                    symbol=symbol, direction=direction, box_at_entry=plan.box,
+                    contracts=0, point_multiplier=cme_signals.POINT_MULTIPLIER.get(symbol, 2.0),
+                    risk_dollars_used=0.0,
+                    decision="REJECTED",
+                    decision_reason="EQUITY_QUERY_FAILED -- broker balance query failed, cannot verify trailing drawdown",
+                    management_state="PENDING_ENTRY",
+                )
+                db.add(order)
+                continue
             admission = cme_risk.can_open_new_position(
                 db, account, symbol, date_key, equity,
                 cfg.daily_risk_budget_usd, cfg.contracts_cap, plan.box,
