@@ -11153,3 +11153,24 @@ right but silently failed on SQLite (a named UniqueConstraint reflects
 there as a unique constraint, not an index); caught by testing all three
 cases (old constraint / current constraint / missing table) directly
 before trusting it. Full suite: 1277 passed, 0 failed, uncontested run.
+
+## 2026-11-12 (early morning) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved, pending manual Render deploy
+Built the two items flagged earlier tonight (commit `c7ff199`): a real,
+explicit CME holiday/early-close calendar (`cme_calendar.py`, new) and
+the MFFU Tier-1 news-blackout rule, both wired into live code, not just
+documented as gaps. Full detail in the commit message. Full suite: 1297
+passed, 0 failed, uncontested run.
+
+**IMPORTANT, also discovered this session:** Render here does NOT auto-
+deploy on a GitHub push -- it requires a manual "Deploy latest commit"
+trigger from the dashboard (confirmed by Andy's own screenshot: a deploy
+several commits behind `main` was still running, still hitting the
+PRAGMA bug fixed hours earlier in commit `58a0318`, still installing
+yfinance/google-generativeai removed in commit `797b7af`). Every "pushing
+this triggers a redeploy" statement earlier in tonight's log entries was
+WRONG -- flagging that correction here rather than leaving it silently
+uncorrected. Going forward: after any push meant for production, confirm
+a FRESH manual deploy was triggered and check the deploy page's SOURCE
+hash actually matches the intended commit, rather than assuming the push
+alone was sufficient.
