@@ -11174,3 +11174,11 @@ uncorrected. Going forward: after any push meant for production, confirm
 a FRESH manual deploy was triggered and check the deploy page's SOURCE
 hash actually matches the intended commit, rather than assuming the push
 alone was sufficient.
+
+## 2026-11-12 — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open
+Forensic audit of today's (Nov 12) operations across BTC Traveler (Plan 57), CME Desk (Plans 17 & 18), and the notification subsystem. Root cause findings documented in canonical file `LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md` in both repo roots:
+1. BTC Plan 57: Breakout/down math (D1) was 100% accurate at 72,410.00. However, Live orders (Andy #1, Dawson #11, Terry #15) placed at 14:05:55 with effect="POST_ONLY" were canceled immediately (134ms) by Bitunix as IOC because market price was already below trigger. At 14:10:05, dry run candle simulator detected a wick touch and booked a simulated fill, riding to a +1.418R win on C5 exit at 71,609.90. Live accounts took $0.
+2. CME Desk: Plans 17 (MNQ) and 18 (MES) locked cleanly at 15:00 UTC, but all 8 orders were rejected immediately because Account 17 (Andy MFFU) had `trailing_drawdown_limit_usd = NULL` in `executor_accounts` (triggering the newly shipped `NO_TRAILING_DD_LIMIT_CONFIGURED` fail-closed check), while dry-run Account 16 threw `EQUITY_QUERY_FAILED` attempting a live balance query without credentials.
+3. Notification Chaos: Broadcast emails fired off dry-run candle simulation events, broadcasting "Entry Triggered" (14:10) and "Closed +1.418R" (15:00) to subscribers 4 minutes after emailing Andy that his live entry was canceled on the exchange.
+Work order for CC detailed in `LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md`: D2 order execution mechanics fix, seed Account 17 trailing DD limit in DB, and decouple broadcast notifications from simulation events when live accounts exist.
