@@ -101,6 +101,7 @@ def build_cme_breakeven_email(order: Dict[str, Any]) -> Tuple[str, str]:
 _EXIT_LABELS = {
     "STOP": "Full Stop", "BE_STOP": "Breakeven Stop", "TARGET": "Target Hit",
     "TIME_FLUSH": "16:00 ET Session Flush", "MANUAL": "Manually Closed", "ERROR": "Closed (Error)",
+    "NEWS_BLACKOUT": "Tier-1 News Blackout Flatten",
 }
 
 

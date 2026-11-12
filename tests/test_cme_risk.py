@@ -18,6 +18,7 @@ import database
 from database import SessionLocal, ExecutorAccount, CMEOrder, CMEPlan
 import executor_accounts as ea
 import cme_risk
+import cme_calendar
 
 
 def _clean_db_files():
@@ -165,6 +166,33 @@ def test_risk_budget_full_when_other_symbols_order_already_closed(db):
     _order(db, plan, account, symbol="MES", management_state="CLOSED_TARGET")
     budget = cme_risk.risk_budget_for_symbol(db, account.id, "MNQ", 350.0, "2026-11-04")
     assert budget == 350.0
+
+
+# ------------------------------------------------------------------ can_open_new_position -- Tier-1 news blackout (2026-11-11)
+# MFFU's own rule: no open positions/orders 2 minutes before or after a
+# Tier-1 release. Checked first, ahead of every other admission check --
+# proves it rejects closed during the window and the existing checks still
+# work on an ordinary moment (now_utc defaults to real time if omitted).
+
+def test_can_open_new_position_rejects_during_a_news_blackout_window(db, monkeypatch):
+    account = _ready_account(db)
+    monkeypatch.setattr(cme_risk.cme_calendar, "news_blackout_reason", lambda now: "FOMC Decision (Jan 2026)")
+    result = cme_risk.can_open_new_position(
+        db, account, "MNQ", "2026-11-04", current_equity=50000.0,
+        daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+    )
+    assert result["admitted"] is False
+    assert result["reason"] == "NEWS_BLACKOUT (FOMC Decision (Jan 2026))"
+
+
+def test_can_open_new_position_admits_normally_outside_any_news_blackout(db, monkeypatch):
+    monkeypatch.setattr(cme_risk.cme_calendar, "news_blackout_reason", lambda now: None)
+    account = _ready_account(db)
+    result = cme_risk.can_open_new_position(
+        db, account, "MNQ", "2026-11-04", current_equity=50000.0,
+        daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+    )
+    assert result["admitted"] is True
 
 
 # ------------------------------------------------------------------ can_open_new_position

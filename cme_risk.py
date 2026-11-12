@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from database import CMEOrder, CMEPlan, ExecutorAccount
+import cme_calendar
 import cme_signals
 
 OTHER_SYMBOL = {"MNQ": "MES", "MES": "MNQ"}
@@ -127,13 +128,28 @@ def risk_budget_for_symbol(db: Session, account_id: int, symbol: str, daily_risk
 def can_open_new_position(
     db: Session, account: ExecutorAccount, symbol: str, date_key: str,
     current_equity: float, daily_risk_budget_usd: float, contracts_cap: int,
-    box_points: float,
+    box_points: float, now_utc: Optional[datetime.datetime] = None,
 ) -> Dict[str, Any]:
     """CME's own admission check -- NOT a port of alt_matrix_portfolio.py's
     shape (no cross-system read; CME shares no account with Bitunix). Checks,
-    in order: already-open-on-this-symbol-today, trailing drawdown, then
-    computes the risk-budget-aware contract count. ANY check failing means
-    stand down -- never guess."""
+    in order: Tier-1 news blackout, already-open-on-this-symbol-today,
+    trailing drawdown, then computes the risk-budget-aware contract count.
+    ANY check failing means stand down -- never guess.
+
+    2026-11-11: the Tier-1 news-blackout check (cme_calendar.py) is real
+    and wired in regardless of whether it currently binds this account --
+    MFFU's own rule only applies to Sim Funded accounts, not evaluation
+    (Account 17 is still evaluation as of this date), but the check costs
+    nothing to run and is already correct the moment an account
+    transitions, rather than a thing to remember to add later. now_utc
+    defaults to real current time if not passed -- a parameter so tests
+    can set a deterministic time instead of a real blackout window
+    happening to be active or not when the suite runs."""
+    now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    news_reason = cme_calendar.news_blackout_reason(now_utc)
+    if news_reason is not None:
+        return {"admitted": False, "reason": f"NEWS_BLACKOUT ({news_reason})", "contracts": 0, "risk_budget_usd": 0.0}
+
     existing = (
         db.query(CMEOrder)
         .join(CMEPlan, CMEOrder.cme_plan_id == CMEPlan.id)

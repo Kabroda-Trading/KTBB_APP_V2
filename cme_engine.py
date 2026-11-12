@@ -41,6 +41,7 @@ from typing import List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+import cme_calendar
 import cme_clock
 import cme_executor
 import cme_market
@@ -117,6 +118,21 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
     accounts = _enabled_accounts_for_symbol(db, symbol)
     if not accounts:
         return   # nobody has this symbol enabled -- skip the (paid, per-call) market-data fetch entirely
+
+    # 2026-11-11 (real gap found live -- see cme_calendar.py's own header
+    # for the full incident this fixes): a known full-closure CME holiday
+    # now short-circuits here, BEFORE any fetch attempt, and is persisted
+    # as an explicit, unambiguous HOLIDAY_CLOSED row -- "was today a
+    # holiday" becomes a fact the system states directly, never something
+    # to infer from an empty calibration window (indistinguishable from a
+    # genuine data-fetch failure or a dead background loop).
+    if cme_calendar.holiday_status(date_key) == "CLOSED":
+        db.add(CMEPlan(
+            symbol=symbol, date_key=date_key, lock_time=datetime.datetime.utcnow(),
+            status="HOLIDAY_CLOSED", status_reason="CME equity index futures closed for the holiday calendar (cme_calendar.py)",
+        ))
+        db.flush()
+        return
 
     try:
         bars_1m = await cme_market.fetch_calibration_1m(symbol, date_key)
@@ -397,6 +413,19 @@ async def _advance_open_position(db: Session, order_row: CMEOrder) -> None:
         return
 
     now_utc = datetime.datetime.now(UTC)
+
+    # 2026-11-11: MFFU's Tier-1 news-trading rule requires zero open
+    # positions/orders within the blackout window (cme_calendar.py) --
+    # checked before the normal TIME_FLUSH/stop/target priority below,
+    # same "mandatory override, not a normal exit" treatment TIME_FLUSH
+    # already gets. Does not currently bind Account 17 (still evaluation,
+    # not Sim Funded -- see cme_calendar.py's own header), but is wired in
+    # now regardless so it's already correct the moment that changes.
+    news_reason = cme_calendar.news_blackout_reason(now_utc)
+    if news_reason is not None:
+        await cme_executor.market_close(db, account, order_row, exit_reason="NEWS_BLACKOUT")
+        return
+
     if now_utc >= cme_clock.today_flush_utc(now_utc):
         await cme_executor.market_close(db, account, order_row, exit_reason="TIME_FLUSH")
         return

@@ -25,6 +25,8 @@
 import datetime
 import pytz
 
+import cme_calendar
+
 NY_TZ = pytz.timezone("America/New_York")
 
 OPEN_H, OPEN_M = 9, 30     # NY cash open -- start of the 30-minute calibration window
@@ -52,7 +54,19 @@ def today_lock_utc(now_utc: datetime.datetime) -> datetime.datetime:
 
 
 def today_flush_utc(now_utc: datetime.datetime) -> datetime.datetime:
-    """Today's 4:00 PM ET mandatory session-flush instant, as a UTC instant."""
+    """Today's mandatory session-flush instant, as a UTC instant -- 4:00 PM
+    ET on a normal day, or the real early-close time on a known CME
+    holiday early-close day (cme_calendar.py). 2026-11-11 (real gap found
+    live): this used to be hardcoded to 4:00 PM ET unconditionally, which
+    would leave a position open for ~3 hours past the real halt on a day
+    like the Friday after Thanksgiving (~1:00 PM ET close) -- MFFU does
+    NOT auto-liquidate on early-close days, so that gap was a real account-
+    breach risk, not a cosmetic one."""
+    now_local = now_utc.astimezone(NY_TZ)
+    date_key = now_local.strftime("%Y-%m-%d")
+    early = cme_calendar.early_close_time_et(date_key)
+    if early is not None:
+        return _local_today_at(now_utc, early.hour, early.minute)
     return _local_today_at(now_utc, FLUSH_H, FLUSH_M)
 
 

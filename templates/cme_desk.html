@@ -193,6 +193,7 @@
         if (s === 'STAND_DOWN_UNREACHABLE') return `<span class="badge badge-warn">STAND DOWN &mdash; CAPITAL PROTECTED</span>`;
         if (s === 'STAND_DOWN_NO_RETEST' || s === 'NO_RETEST') return `<span class="badge badge-neutral">STAND DOWN &mdash; NO RETEST</span>`;
         if (s === 'MISSED_WINDOW') return `<span class="badge badge-warn">MISSED WINDOW &mdash; NOT CHECKED TODAY</span>`;
+        if (s === 'HOLIDAY_CLOSED') return `<span class="badge badge-neutral">MARKET HOLIDAY &mdash; CME CLOSED TODAY</span>`;
         return `<span class="badge badge-neutral">${escapeHtml(s || '&mdash;')}</span>`;
     }
 

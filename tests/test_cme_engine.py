@@ -25,6 +25,7 @@ import database
 from database import SessionLocal, ExecutorAccount, CMEPlan, CMEOrder, CMEConfig, CMETransition
 import executor_accounts as ea
 import executor_control as ec
+import cme_calendar as ccal
 import cme_engine as ce
 import cme_executor as cx
 import cme_market as cm
@@ -367,6 +368,52 @@ def test_run_cme_session_loop_survives_an_exception_in_the_clock_span(monkeypatc
     assert calls["sleep"] >= 1   # the outer except's backoff sleep actually ran
 
 
+# ------------------------------------------------------------------ cme_calendar.py full-closure short-circuit (2026-11-11)
+# Real gap found live: "was today a holiday" used to be inferred only from
+# an empty calibration window (indistinguishable from a data-fetch failure
+# or a dead background loop -- the exact ambiguity behind the 2026-11-11
+# "was it closed for Veterans Day?" confusion). Proves a known full-closure
+# day short-circuits BEFORE any fetch attempt and persists an explicit,
+# unambiguous HOLIDAY_CLOSED row.
+
+def test_process_symbol_lock_short_circuits_on_a_known_holiday_before_any_fetch(db, monkeypatch):
+    account = _account(db)
+    _config(db, account)
+
+    async def _boom_if_called(symbol, date_key):
+        raise AssertionError("fetch_calibration_1m should never be called on a known full-closure day")
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _boom_if_called)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-26"))   # Thanksgiving -- known full closure
+
+    plan = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-26").first()
+    assert plan is not None and plan.status == "HOLIDAY_CLOSED"
+    assert db.query(CMEOrder).count() == 0
+
+
+def test_process_symbol_lock_proceeds_normally_on_a_known_early_close_day(db, monkeypatch):
+    # An early-close day is NOT a full closure -- the holiday short-circuit
+    # must not fire for it (the flush-time override is cme_clock.py's job,
+    # not this one's).
+    account = _account(db)
+    _config(db, account)
+    monkeypatch.setattr(cx, "_client_for", lambda account_: object())
+
+    async def _fake_calib(symbol, date_key):
+        return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
+    monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
+    async def _fake_equity(account_):
+        return 50000.0
+    monkeypatch.setattr(ce, "_query_equity", _fake_equity)
+    _capture_emails(monkeypatch)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-27"))   # day after Thanksgiving -- early close, not closed
+
+    plan = db.query(CMEPlan).filter_by(symbol="MNQ", date_key="2026-11-27").first()
+    assert plan is not None and plan.status == "ARMED"
+
+
 def test_process_symbol_lock_stand_down_creates_plan_but_no_orders(db, monkeypatch):
     account = _account(db)
     _config(db, account)
@@ -667,6 +714,44 @@ def test_advance_open_position_time_flush_closes_regardless_of_price(db, monkeyp
 
     _run(ce._advance_open_position(db, order))
     assert called.get("exit_reason") == "TIME_FLUSH"
+
+
+def test_advance_open_position_news_blackout_closes_regardless_of_price(db, monkeypatch):
+    # 2026-11-11: MFFU's Tier-1 news rule requires zero open positions
+    # within the blackout window -- checked ahead of TIME_FLUSH/stop/
+    # target, same "mandatory override" treatment TIME_FLUSH already gets.
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0,
+                    sl_price_current=4480.0, be_amended=False)
+
+    monkeypatch.setattr(ccal, "news_blackout_reason", lambda now: "FOMC Decision (Jan 2026)")
+
+    called = {}
+    async def _fake_close(db_, account_, order_, exit_reason):
+        called["exit_reason"] = exit_reason
+    monkeypatch.setattr(cx, "market_close", _fake_close)
+
+    _run(ce._advance_open_position(db, order))
+    assert called.get("exit_reason") == "NEWS_BLACKOUT"
+
+
+def test_advance_open_position_no_news_blackout_falls_through_to_normal_checks(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0,
+                    sl_price_current=4480.0, be_amended=False)
+
+    monkeypatch.setattr(ccal, "news_blackout_reason", lambda now: None)
+    monkeypatch.setattr(cc, "today_flush_utc", lambda now: now - datetime.timedelta(seconds=1))
+
+    called = {}
+    async def _fake_close(db_, account_, order_, exit_reason):
+        called["exit_reason"] = exit_reason
+    monkeypatch.setattr(cx, "market_close", _fake_close)
+
+    _run(ce._advance_open_position(db, order))
+    assert called.get("exit_reason") == "TIME_FLUSH"   # falls through past the (inactive) news check
 
 
 def test_advance_open_position_breakeven_ratchet_fires_and_returns_before_exit_check(db, monkeypatch):

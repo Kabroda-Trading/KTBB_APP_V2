@@ -43,6 +43,24 @@ def test_today_open_and_flush_also_shift_correctly_in_edt():
     assert cc.today_flush_utc(now) == datetime.datetime(2026, 7, 15, 20, 0, 0, tzinfo=UTC)
 
 
+# ------------------------------------------------------------------ today_flush_utc -- cme_calendar.py early-close override (2026-11-11)
+# Real gap found live: this used to be hardcoded to 16:00 ET unconditionally,
+# which would leave a position open ~3 hours past the real halt on a day
+# like the Friday after Thanksgiving. Proves the flush time shifts on a
+# known early-close day and stays the normal 16:00 ET otherwise.
+
+def test_today_flush_utc_uses_the_early_close_time_on_a_known_early_close_day():
+    # 2026-11-27 (day after Thanksgiving) -- known 1:00 PM ET early close,
+    # which is EST (UTC-5) that late in November -> 18:00 UTC.
+    now = datetime.datetime(2026, 11, 27, 12, 0, 0, tzinfo=UTC)
+    assert cc.today_flush_utc(now) == datetime.datetime(2026, 11, 27, 18, 0, 0, tzinfo=UTC)
+
+
+def test_today_flush_utc_stays_normal_16_00_et_on_an_ordinary_day():
+    now = datetime.datetime(2026, 11, 12, 12, 0, 0, tzinfo=UTC)   # a normal Thursday, not in the calendar
+    assert cc.today_flush_utc(now) == datetime.datetime(2026, 11, 12, 21, 0, 0, tzinfo=UTC)   # 16:00 EST = 21:00 UTC
+
+
 # ------------------------------------------------------------------ next_lock_utc -- spring-forward (2026-03-08)
 
 def test_next_lock_utc_spring_forward_eve_gives_correct_next_day_lock():
