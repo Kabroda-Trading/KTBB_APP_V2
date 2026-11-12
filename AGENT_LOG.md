@@ -11182,3 +11182,10 @@ Forensic audit of today's (Nov 12) operations across BTC Traveler (Plan 57), CME
 2. CME Desk: Plans 17 (MNQ) and 18 (MES) locked cleanly at 15:00 UTC, but all 8 orders were rejected immediately because Account 17 (Andy MFFU) had `trailing_drawdown_limit_usd = NULL` in `executor_accounts` (triggering the newly shipped `NO_TRAILING_DD_LIMIT_CONFIGURED` fail-closed check), while dry-run Account 16 threw `EQUITY_QUERY_FAILED` attempting a live balance query without credentials.
 3. Notification Chaos: Broadcast emails fired off dry-run candle simulation events, broadcasting "Entry Triggered" (14:10) and "Closed +1.418R" (15:00) to subscribers 4 minutes after emailing Andy that his live entry was canceled on the exchange.
 Work order for CC detailed in `LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md`: D2 order execution mechanics fix, seed Account 17 trailing DD limit in DB, and decouple broadcast notifications from simulation events when live accounts exist.
+
+## 2026-11-12 (later) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open
+Andy directive adopted into `CC_INTERFACE.md`:
+1. User Notification Matrix: Refactor `notify.py` and expand `notification_preferences` in `database.py` to give users granular checkbox control (Email vs Telegram `@KabrodaBot`, Live Trades vs Paper Simulations, Crypto vs CME). CME alerts isolated strictly to Andy's account. Phantom simulation broadcasts suppressed when live orders fail.
+2. Continuous Parity Auditor: Specify standing `parity_auditor.py` in `KTBB_app_v2` for automated real-time verification across 3 gates: Gate 1 (Pre-Lock feed and DB sanity), Gate 2 (Post-trigger order book confirmation & POST_ONLY catch), and Gate 3 (Post-session daily replay parity against backtest engine).
+Full specification committed in `CC_INTERFACE.md` and `LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md`.
