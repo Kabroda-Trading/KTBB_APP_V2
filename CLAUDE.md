@@ -52,7 +52,19 @@ DATABASE_URL          # Default: sqlite:///./kabroda.db (prod: PostgreSQL)
 PUBLIC_BASE_URL       # Used to auto-detect HTTPS for secure cookies
 ADMIN_EMAIL           # Bootstrap admin on first boot
 ADMIN_PASSWORD        # Bootstrap admin password
-COINALYZE_API_KEY     # Optional — open interest fuel multiplier
+EXECUTOR_CREDENTIAL_KEY  # REQUIRED, not optional -- a Fernet key (executor_crypto.py) encrypting every
+                      # Bitunix/Tradovate/CrossTrade credential stored on an ExecutorAccount.
+                      # validate_key_configured() raises at boot if this is missing. Documented here
+                      # 2026-11-11 (external audit found it was the single most security-critical var
+                      # in the app and wasn't listed) -- the code itself already fails loudly and
+                      # correctly if it's unset; this was a pure documentation gap, not a code problem.
+COINALYZE_API_KEY     # STALE / VESTIGIAL (2026-11-11) -- no longer read by any live code path.
+                      # Its one real consumer, fuel_gate.py's open-interest fuel multiplier, was
+                      # deleted outright in the 2026-09-24 V2 Crown retirement (see "Strategic
+                      # Direction" above) along with every other V2-only file. Confirmed via grep:
+                      # zero live code anywhere references Coinalyze or an open-interest field under
+                      # any name. Left as a documented vestige for Render rather than silently removed,
+                      # same "real tool, not wired in" treatment already used for DATABENTO_API_KEY below.
 GATE_LOG_EXPORT_API_KEY  # Optional — required only to use GET /api/export/traveler-log.csv
                          # (the Kabroda AI Brain's forward-test log pull; X-API-Key header). Name is now a
                          # minor legacy misnomer -- it originally gated GET /api/export/gate-log.csv (the
