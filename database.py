@@ -1,5 +1,5 @@
 # database.py
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, text, UniqueConstraint, Index
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, text, UniqueConstraint, Index, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -563,26 +563,34 @@ def init_db():
     # before that, zero CMEConfig rows ever existing). Never drops a
     # non-empty table -- that would be a real data-loss risk instead of a
     # schema fix, so it logs and leaves it alone for a human to handle.
+    # REAL PRODUCTION BUG (2026-11-11, found reading a live Render boot log):
+    # this used raw SQLite PRAGMA syntax (index_list/index_info)
+    # unconditionally -- invalid on PostgreSQL (production's real DB),
+    # throwing psycopg.errors.SyntaxError on every single boot. Caught by
+    # this block's own except below, so it never crashed the app, but it
+    # meant this self-heal had never actually been able to run on
+    # production at all -- same bug CLASS as the mas_completed_at DATETIME
+    # incident below (SQLite silently accepts something Postgres rejects,
+    # invisible in local/CI testing because that only ever runs against
+    # SQLite). Fixed with SQLAlchemy's inspector instead, which reflects
+    # indexes/constraints portably across both backends -- no new
+    # dialect-specific raw-SQL path to get this wrong again.
     try:
-        with engine.connect() as conn:
-            idx_rows = conn.execute(text("PRAGMA index_list('cme_orders')")).fetchall()
-            has_old_constraint = False
-            for row in idx_rows:
-                idx_name, is_unique = row[1], row[2]
-                if not is_unique:
-                    continue
-                cols = {r[2] for r in conn.execute(text(f"PRAGMA index_info('{idx_name}')")).fetchall()}
-                if cols == {"cme_plan_id", "account_id"}:
-                    has_old_constraint = True
-                    break
+        inspector = inspect(engine)
+        if "cme_orders" in inspector.get_table_names():
+            has_old_constraint = any(
+                set(uc["column_names"]) == {"cme_plan_id", "account_id"}
+                for uc in inspector.get_unique_constraints("cme_orders")
+            )
             if has_old_constraint:
-                count = conn.execute(text("SELECT COUNT(*) FROM cme_orders")).scalar()
-                if count == 0:
-                    conn.execute(text("DROP TABLE cme_orders"))
-                    conn.commit()
-                    Base.metadata.create_all(bind=engine)
-                else:
-                    print(f"WARNING: cme_orders has the old 2-column unique constraint but holds {count} row(s) -- cannot auto-migrate, needs manual review before CME can run")
+                with engine.connect() as conn:
+                    count = conn.execute(text("SELECT COUNT(*) FROM cme_orders")).scalar()
+                    if count == 0:
+                        conn.execute(text("DROP TABLE cme_orders"))
+                        conn.commit()
+                        Base.metadata.create_all(bind=engine)
+                    else:
+                        print(f"WARNING: cme_orders has the old 2-column unique constraint but holds {count} row(s) -- cannot auto-migrate, needs manual review before CME can run")
     except Exception as e:
         print(f"cme_orders constraint migration check failed: {e}")
 
