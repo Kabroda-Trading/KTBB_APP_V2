@@ -11264,3 +11264,59 @@ Added a LIVE-only admission-rejection email + Telegram alert
 existing pattern exactly.
 
 Full suite run in progress; will confirm final count before push.
+
+## 2026-11-12 (evening) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open -- real work order, needs the Brain's own research tools, not a site-side fix
+Andy pushed back hard tonight on something worth taking seriously, not just
+reassuring him about: if D1/D2/D3 was genuinely backtested the way this
+project claims, why did a real trade get rejected live in a way the
+backtest never seems to have accounted for? His framing, directly: "if the
+backtest doesn't make sense, then that's where it needs to be challenged
+... that's not the way the real world works."
+
+**Checked, not assumed.** Read `lab_touchfill_arms.py` (Brain repo,
+`brain/audit_evidence/traveler_study/`) directly -- this is the actual
+script behind the measured edge CLAUDE.md cites for the Traveler's
+trigger-touch-fill design (n=136, avgR +0.5216/+0.6709). Its `find_fill()`
+function's own docstring: *"first bar whose wick touches bo/bd."* Grepped
+the whole file for "POST_ONLY", "reject", "slippage", "maker", "taker",
+"IOC" -- **zero matches, all of them.** The backtest's fill model is a
+pure idealized "wick touches price = filled" assumption. It does not
+model, anywhere, the specific failure mode that cost real money on
+2026-11-12 (Plan 57): a resting POST_ONLY limit getting IOC-canceled by
+the exchange because price had already moved through the level by the
+time the order actually arrived.
+
+**This means the measured edge may be systematically overstated**, to
+whatever degree POST_ONLY rejections actually occur in live conditions --
+the backtest literally cannot see this failure mode because it was never
+built to. Andy is right that this needs to be challenged at the backtest
+level, not patched around at the site level. This is NOT something
+`KTBB_app_v2` should try to silently work around (e.g. quietly switching
+order types without re-measuring) -- per this project's own division of
+labor, the site is the recorder, the Brain is the auditor.
+
+**The actual work order, for whoever has the real historical tick/order-
+book data and simulation tools:**
+1. Quantify how often a genuine wick-touch, in the real 5m-bar data this
+   study already uses, would plausibly have been a POST_ONLY rejection in
+   practice -- some realistic proxy is needed (e.g., bar range vs. the
+   entry price at the moment the signal would actually reach the
+   exchange, not just "did the wick eventually touch it somewhere in the
+   bar"). Zero-latency, zero-friction fills are not what a live maker-only
+   order gets.
+2. Re-run the edge calculation with that friction modeled, and report
+   whether +0.52R/+0.67R survives it, shrinks, or disappears.
+3. If it survives: that's real, valuable confirmation to bring back, not
+   just an assumption. If it doesn't survive intact: that's exactly the
+   kind of finding Andy is asking for instead of "oh, that's not working"
+   discovered live, one incident at a time.
+4. Separately, and lower-stakes: is there real forward-test/live data
+   already available (this project's own audit logs) on the ACTUAL
+   POST_ONLY rejection rate in practice, independent of a new backtest?
+   That's a second, complementary way to answer the same question.
+
+Not something I can resolve from the site repo -- this needs the Brain's
+own tick-level data and simulation tooling. Flagging it here as a direct,
+actionable research question rather than leaving Andy's challenge
+unanswered.
