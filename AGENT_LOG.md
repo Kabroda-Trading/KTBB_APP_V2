@@ -11465,3 +11465,10 @@ date_key get stood down the same way the EOD flush now protects real
 positions, or should a fresh day's lock refuse to fan out while a prior
 day's unresolved PENDING_ENTRY for the same account/symbol/direction
 still exists?) -- next priority candidate, not touched this pass.
+
+## 2026-11-13 (morning) — FROM: DeepSeek — FOR: Claude Code + Andy
+STATUS: open
+Forensic investigation of R1 Re-Arm engine following Andy's query on Plan 57:
+1. Re-Arm Invariant: Re-Arm is designed for post-exhaustion pullbacks (price re-crossing the original trigger). Since BTC peaked at $72,194 after the 15:00 UTC exit (below $72,410), no re-cross occurred as price tumbled to $67,455.
+2. CRITICAL CODE BUG FOUND IN RE-ARM LATCH: `mgmt_e1_stack.check_c5_or_bbwp()` uses latch semantics (`any(c5 for i in _post_anchor_indices)`). When called by `traveler_plan_engine.py:268` to check `exhaustion_cleared`, the latch from yesterday's 15:00-19:00 bars kept `c5_hit=True` permanently for the rest of the 24h session, making `exhaustion_cleared=False` forever. Even if BTC had re-crossed $72,410, Re-Arm was structurally blocked.
+Work Item 4 added to `LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md`: CC must evaluate only the latest confirmed bar (`anchor_epoch=None`) when checking exhaustion clearance for Re-Arm.

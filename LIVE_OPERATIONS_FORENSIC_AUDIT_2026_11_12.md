@@ -166,3 +166,26 @@ CC must not guess or write pleaser responses. We require clean, code-verified an
 ---
 
 *Authored by Antigravity / DeepSeek. Committed to project roots for CC execution.*
+
+
+---
+
+## 7. Forensic Audit of R1 Re-Arm Engine (`gate_traveler.py` & `mgmt_e1_stack.py`)
+
+### Andy's Live Investigation (2026-11-13 Morning):
+Andy questioned why yesterday's Traveler Desk still displays `Re-arm status: REARM_WATCH` after his live entry was canceled, and whether Re-Arm would have triggered as Bitcoin dropped from `$71,600` past `$70,000` down to `$67,455`.
+
+### Finding 1: Why Re-Arm Did Not (and Should Not) Trigger on the Dump
+* **The Rule (§ R1 RE-ARM AMENDMENT):** Re-Arm is designed to re-enter a trade *after a pullback*. For a SHORT breakdown at `$72,410.00`, price must pull back *above* `$72,410.00` and then confirm a fresh 5-minute close *below* `$72,410.00` (re-cross).
+* **The Market Reality:** Between C5 exit at 15:00 UTC (`$71,609.90`) and 13:00 UTC today, the maximum bounce was **`$72,194.00`** (216 points short of the trigger). Price tumbled in a straight line to `$67,455.50`. Because price never pulled back into the box, zero re-cross occurred. The system correctly did not chase the falling market at $70,000.
+
+### Finding 2: THE RE-ARM LATCH BUG (Smoking Gun in `mgmt_e1_stack.py`)
+Code inspection and live test script `test_rearm_eval.py` revealed a critical bug that **permanently disabled Re-Arm**:
+* In `mgmt_e1_stack.py:313-318`, `check_c5_or_bbwp()` implements **LATCH SEMANTICS** across all bars since `anchor_epoch` (`any(c5 for i in _post_anchor_indices)`).
+* This latch was designed for trade exits (if C5 ever hit during a trade, exit).
+* However, `traveler_plan_engine.py:268` calls this *same* function with `anchor_epoch` to check `exhaustion_cleared = not (c5_hit or bbwp_hit)`.
+* Because bars 15:00, 16:00, 17:00 experienced C5 decay, `c5_hit` latched to `True` for the **entire 24-hour session**.
+* Result: `exhaustion_cleared` remained permanently `False`. Even if price had re-crossed `$72,410`, Re-Arm would have been silently blocked by this stale latch.
+
+### Work Item 4 for Claude Code (CC):
+* **Fix in `traveler_plan_engine.py`:** When calling `mgmt_e1_stack.check_c5_or_bbwp()` to test if exhaustion has cleared, pass `anchor_epoch=None` so it evaluates only the **latest confirmed 1H/4H bar**, or explicitly verify `not si.c5_momentum_decay(rsi_1h, -1, 6)`. Do not use historical latches for clearance checks.
