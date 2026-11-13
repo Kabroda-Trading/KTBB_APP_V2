@@ -11320,3 +11320,22 @@ Not something I can resolve from the site repo -- this needs the Brain's
 own tick-level data and simulation tooling. Flagging it here as a direct,
 actionable research question rather than leaving Andy's challenge
 unanswered.
+
+## 2026-11-12 (night) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved
+Built the email notification opt-out Andy asked for (commit `b74f4ce`).
+A fork first mapped every real email/Telegram call site in the codebase
+before any design -- found a genuine bug independent of Andy's ask: Alt
+Matrix's entry/breakeven emails on DRY_RUN accounts carry no "simulated"
+marker at all (unlike their own exit email, which does), reading exactly
+like a real fill. Flagging that here in case it's worth its own fix later
+-- not addressed in this pass, since Andy's actual ask turned out to be
+broader (all routine email, dry-run and live both) than that one bug.
+
+Shipped: NotificationPreference.notify_email_enabled, a single per-user
+master switch for routine trade-flow email (entry/fill/breakeven/close),
+independent of the three existing Telegram category toggles. "Problem"
+category (unprotected position, placement failed, admission rejected)
+is never gated, matching Telegram's own always-on exception exactly.
+New "EMAIL ALERTS" card on /account. Full suite: 1317 passed, 0 failed,
+one truly isolated run.
