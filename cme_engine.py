@@ -457,7 +457,14 @@ async def _advance_open_position(db: Session, order_row: CMEOrder) -> None:
         await cme_executor.market_close(db, account, order_row, exit_reason="NEWS_BLACKOUT")
         return
 
-    if now_utc >= cme_clock.today_flush_utc(now_utc):
+    # 2026-11-13 (real gap found live, Account 17): anchored to the
+    # POSITION's own trading day (plan.date_key), never to today_flush_utc
+    # (now_utc) -- see cme_clock.flush_utc_for_date_key()'s own docstring
+    # for why. A position overdue on its own entry day must stay overdue
+    # on every later poll, on every later calendar day, until it actually
+    # closes -- not get a fresh future deadline just because the wall
+    # clock crossed midnight while it was still open.
+    if now_utc >= cme_clock.flush_utc_for_date_key(plan.date_key):
         await cme_executor.market_close(db, account, order_row, exit_reason="TIME_FLUSH")
         return
 

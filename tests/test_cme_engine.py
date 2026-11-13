@@ -779,7 +779,33 @@ def test_advance_open_position_time_flush_closes_regardless_of_price(db, monkeyp
     order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0,
                     sl_price_current=4480.0, be_amended=False)
 
-    monkeypatch.setattr(cc, "today_flush_utc", lambda now: now - datetime.timedelta(seconds=1))
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) - datetime.timedelta(seconds=1))
+
+    called = {}
+    async def _fake_close(db_, account_, order_, exit_reason):
+        called["exit_reason"] = exit_reason
+    monkeypatch.setattr(cx, "market_close", _fake_close)
+
+    _run(ce._advance_open_position(db, order))
+    assert called.get("exit_reason") == "TIME_FLUSH"
+
+
+def test_advance_open_position_flush_deadline_is_anchored_to_the_plans_own_date_key_not_today(db, monkeypatch):
+    # 2026-11-13 real finding (Account 17): _advance_open_position() used
+    # to call cme_clock.today_flush_utc(now_utc), which recomputes a FRESH
+    # future deadline every time "today" (relative to the real wall clock)
+    # advances -- so a position that survived past its own entry day's
+    # 4:00 PM ET flush (loop downtime, an exchange outage, a failed
+    # market_close() retry) got a silent extra day's grace once the
+    # calendar rolled over, instead of staying overdue. This test uses a
+    # plan dated far in the past with NO monkeypatch on the clock at all --
+    # proving the real flush_utc_for_date_key(plan.date_key) anchor, not a
+    # stubbed one, is what closes it on the very next poll regardless of
+    # what day it actually is right now.
+    account = _account(db, mode="LIVE")
+    plan = _plan(db, date_key="2020-01-02")   # a Thursday, long since past
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0,
+                    sl_price_current=4480.0, be_amended=False)
 
     called = {}
     async def _fake_close(db_, account_, order_, exit_reason):
@@ -817,7 +843,7 @@ def test_advance_open_position_no_news_blackout_falls_through_to_normal_checks(d
                     sl_price_current=4480.0, be_amended=False)
 
     monkeypatch.setattr(ccal, "news_blackout_reason", lambda now: None)
-    monkeypatch.setattr(cc, "today_flush_utc", lambda now: now - datetime.timedelta(seconds=1))
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) - datetime.timedelta(seconds=1))
 
     called = {}
     async def _fake_close(db_, account_, order_, exit_reason):
@@ -835,7 +861,7 @@ def test_advance_open_position_breakeven_ratchet_fires_and_returns_before_exit_c
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=False,
                     sl_exchange_order_id="1")
 
-    monkeypatch.setattr(cc, "today_flush_utc", lambda now: now + datetime.timedelta(hours=1))
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
     async def _fake_bars(symbol, since):
         return [{"close": 4520.0, "high": 4522.0, "low": 4518.0}]   # past be_trigger_long=4516
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
@@ -864,7 +890,7 @@ def test_advance_open_position_stop_hit_closes_with_correct_reason(db, monkeypat
     order = _order(db, account, plan, direction="LONG", management_state="FILLED",
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=True)
 
-    monkeypatch.setattr(cc, "today_flush_utc", lambda now: now + datetime.timedelta(hours=1))
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
     async def _fake_bars(symbol, since):
         return [{"close": 4475.0, "high": 4481.0, "low": 4478.0}]   # low <= stop 4480
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
@@ -884,7 +910,7 @@ def test_advance_open_position_no_action_leaves_order_untouched(db, monkeypatch)
     order = _order(db, account, plan, direction="LONG", management_state="FILLED",
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=True)
 
-    monkeypatch.setattr(cc, "today_flush_utc", lambda now: now + datetime.timedelta(hours=1))
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
     async def _fake_bars(symbol, since):
         return [{"close": 4508.0, "high": 4510.0, "low": 4506.0}]   # flat -- no stop/target touch
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)

@@ -53,21 +53,57 @@ def today_lock_utc(now_utc: datetime.datetime) -> datetime.datetime:
     return _local_today_at(now_utc, LOCK_H, LOCK_M)
 
 
-def today_flush_utc(now_utc: datetime.datetime) -> datetime.datetime:
-    """Today's mandatory session-flush instant, as a UTC instant -- 4:00 PM
-    ET on a normal day, or the real early-close time on a known CME
-    holiday early-close day (cme_calendar.py). 2026-11-11 (real gap found
-    live): this used to be hardcoded to 4:00 PM ET unconditionally, which
-    would leave a position open for ~3 hours past the real halt on a day
-    like the Friday after Thanksgiving (~1:00 PM ET close) -- MFFU does
-    NOT auto-liquidate on early-close days, so that gap was a real account-
-    breach risk, not a cosmetic one."""
-    now_local = now_utc.astimezone(NY_TZ)
-    date_key = now_local.strftime("%Y-%m-%d")
+def _at_date(date_key: str, hour: int, minute: int) -> datetime.datetime:
+    """HH:MM NY-local on an EXPLICIT calendar date (not "today" relative to
+    the caller's clock), converted to a UTC-aware datetime via pytz the
+    same DST-correct way _local_today_at() does. The deliberate split from
+    _local_today_at() exists so a deadline anchored to a SPECIFIC trading
+    day (flush_utc_for_date_key() below) can be computed once and stay
+    fixed forever, never re-derived from "now" on a later call."""
+    y, m, d = (int(x) for x in date_key.split("-"))
+    naive = datetime.datetime(y, m, d, hour, minute)
+    local = NY_TZ.localize(naive)
+    return local.astimezone(pytz.utc)
+
+
+def flush_utc_for_date_key(date_key: str) -> datetime.datetime:
+    """The mandatory flush instant for a SPECIFIC trading day (a CMEPlan's
+    own date_key) -- 4:00 PM ET on a normal day, or the real early-close
+    time on a known CME holiday early-close day (cme_calendar.py). Same
+    normal/early-close logic today_flush_utc() below uses, just anchored
+    to an explicit date instead of "now."
+
+    2026-11-13 (real gap found live, Account 17): cme_engine.py's
+    _advance_open_position() used to call today_flush_utc(now_utc), which
+    recomputes a FRESH, FUTURE deadline every time it's called, relative
+    to whatever "now" happens to be -- including after the wall clock
+    crosses midnight. If a position ever survived past its own day's 4:00
+    PM ET flush (a dead/restarting loop, an exchange-side outage, a failed
+    market_close() retry that never got re-attempted before midnight), the
+    very next calendar day's check would see a BRAND NEW future 4pm
+    deadline and treat the position as not-yet-overdue -- silently
+    granting a full extra day's grace on a mandatory zero-overnight-hold
+    rule (MFFU's own rule, see cme_clock.py's module header). Callers that
+    need "is THIS position's own trading day's flush deadline already
+    past" (i.e. _advance_open_position()) must anchor to the position's
+    OWN date_key via this function, never to "today" via today_flush_utc()
+    -- a fixed-in-the-past instant can never roll forward again."""
     early = cme_calendar.early_close_time_et(date_key)
     if early is not None:
-        return _local_today_at(now_utc, early.hour, early.minute)
-    return _local_today_at(now_utc, FLUSH_H, FLUSH_M)
+        return _at_date(date_key, early.hour, early.minute)
+    return _at_date(date_key, FLUSH_H, FLUSH_M)
+
+
+def today_flush_utc(now_utc: datetime.datetime) -> datetime.datetime:
+    """Today's mandatory session-flush instant, as a UTC instant -- see
+    flush_utc_for_date_key() for the normal/early-close logic itself. Only
+    a "what time is today's flush" convenience (e.g. for a countdown
+    display) -- NOT for checking whether an existing position is overdue;
+    see flush_utc_for_date_key()'s own docstring for why that distinction
+    matters."""
+    now_local = now_utc.astimezone(NY_TZ)
+    date_key = now_local.strftime("%Y-%m-%d")
+    return flush_utc_for_date_key(date_key)
 
 
 def _next_weekday_lock(now_utc: datetime.datetime) -> datetime.datetime:

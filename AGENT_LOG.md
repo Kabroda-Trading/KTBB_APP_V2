@@ -11339,3 +11339,69 @@ category (unprotected position, placement failed, admission rejected)
 is never gated, matching Telegram's own always-on exception exactly.
 New "EMAIL ALERTS" card on /account. Full suite: 1317 passed, 0 failed,
 one truly isolated run.
+
+## 2026-11-13 (07:55 CT) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+REAL BUG FOUND AND FIXED LIVE: CME's mandatory 4:00 PM ET EOD flush (MFFU's
+own zero-overnight-hold rule) could silently reset itself at midnight.
+Andy spotted this by noticing the Executive Dashboard showing
+"CME Micro Futures -- OPEN -- MNQ LONG, MES LONG" at 06:43 CT, well
+before today's own 9:30/10:00 ET open/lock, and correctly flagged that
+there should be zero open positions at that hour under MFFU's rules.
+ROOT CAUSE (confirmed directly in code, not inferred): cme_engine.py's
+_advance_open_position() compared now_utc against
+cme_clock.today_flush_utc(now_utc), which recomputes a FRESH, FUTURE
+4:00 PM ET deadline every time it's called, relative to whatever "today"
+is at that moment -- including after the wall clock crosses midnight.
+If a position ever survived past its own entry day's flush (loop
+downtime, a CrossTrade/Tradovate outage, a failed market_close() retry
+that never got re-attempted before midnight -- market_close() in
+cme_executor.py already audits an ERROR and returns without marking
+closed on any such failure, confirmed, so the DB row genuinely reflects
+reality, not a bookkeeping ghost), the very next calendar day's check
+would see a brand-new future deadline and treat the position as NOT YET
+overdue -- silently granting up to ~16 extra hours of overnight hold on
+a rule whose entire point is zero overnight hold.
+FIX: cme_clock.py gets a new flush_utc_for_date_key(date_key) primitive,
+anchored to an EXPLICIT trading day (a CMEPlan's own date_key), not to
+"now" -- once a deadline is computed for a specific date it never rolls
+forward again, no matter how many days pass. today_flush_utc(now_utc)
+now just delegates to it for the "what's today's flush time" display
+case. cme_engine.py's _advance_open_position() now checks
+flush_utc_for_date_key(plan.date_key) instead of today_flush_utc(now_utc)
+-- behavior for the normal same-day case is byte-for-byte identical
+(plan.date_key IS today's date in the intended flow); only the
+previously-buggy stuck-past-midnight case changes, and it changes in the
+correct direction (stays overdue forever until actually closed).
+Grepped the whole codebase for every other today_flush_utc call site and
+for any sibling "EOD/end-of-day/zero-overnight" pattern before calling
+this done -- there is exactly ONE production call site (now fixed) and
+no second copy of this bug anywhere else (Traveler has no daily EOD
+close at all -- its journey cap is a 7-day TIME exit, a different
+mechanism; Alt Matrix has nothing matching either).
+Added a real (non-monkeypatched) regression test:
+test_advance_open_position_flush_deadline_is_anchored_to_the_plans_own_date_key_not_today
+-- a plan dated 2020-01-02 with NO clock stubbing at all still flushes
+on the very next poll, proving the fix against the real function, not a
+stubbed one. Updated the 5 existing tests that monkeypatched
+today_flush_utc to monkeypatch flush_utc_for_date_key instead (same
+intent, new call site). tests/test_cme_clock.py + tests/test_cme_engine.py
+run together: 56 passed. Full site suite NOT run this pass -- Andy's
+explicit time-boxed call for this one; the change is narrow (one
+function split, one call site swapped, behavior-preserving on the
+intended path) and the two directly-touched files are green.
+OPEN QUESTION FOR WHOEVER CAN REACH THE LIVE RENDER LOGS/TRADOVATE
+DIRECTLY: WHY did the position in Andy's screenshot survive past
+yesterday's 4:00 PM ET flush in the first place -- was run_cme_watch_loop
+down (Render restart/deploy timing), was there a CrossTrade/Tradovate
+connectivity failure logged as an ERROR audit row for this order
+("market close failed" or "market close reported... but a position
+still exists"), or something else? This fix prevents the deadline from
+silently resetting going forward, but does NOT retroactively explain or
+close whatever is open right now -- if the dashboard still shows CME
+OPEN after this deploys, that position needs a MANUAL flatten via the
+desk's Emergency Flatten control or directly on Tradovate, not a wait-
+for-the-code-to-catch-it, since right now (pre-lock, pre-cross) the
+watch loop has nothing live to re-evaluate it against until it's
+actually polled again -- confirm it actually closes once today's loop
+is back up.
