@@ -19,9 +19,25 @@ from sqlalchemy.orm import Session
 import cme_clock
 from database import CMEPlan, CMEOrder, CMEConfig, CMETransition, ExecutorAccount
 from cme_signals import REACHABILITY_MAX
+from cme_engine import _OPEN_POSITION_STATES
 
 SYMBOLS = ["MNQ", "MES"]
-_OPEN_MGMT_STATES = ("PENDING_ENTRY", "WAITING_RETEST", "FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
+# 2026-11-13 (real bug found live, Account 17): this used to be a SECOND,
+# independently-drifted copy of "what counts as open" --
+# ("PENDING_ENTRY", "WAITING_RETEST", "FILLED", "RATCHETED",
+# "ENTRY_FILLED_UNPROTECTED") -- that wrongly folded PENDING_ENTRY/
+# WAITING_RETEST (a resting order that has NOT filled yet -- no capital
+# deployed, no exchange position exists) into "position." That's exactly
+# what made the Executive Dashboard's OPEN/FLAT chip and the CME Desk's
+# own "Open position" row both show a false OPEN for an unfilled resting
+# order, directly contradicting CrossTrade's own real broker dashboard
+# (confirmed "No open positions on Tradovate" at the same moment). Now
+# imports cme_engine's own _OPEN_POSITION_STATES -- the ALREADY-correct
+# definition its D3 watch loop uses for real exit management -- instead
+# of maintaining a second copy that can drift again. alt_matrix_radar.py's
+# own _OPEN_MGMT_STATES = ("FILLED", "TRAILING") already got this right;
+# CME's radar was the one file that didn't match its own engine.
+_OPEN_MGMT_STATES = _OPEN_POSITION_STATES
 
 
 def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:

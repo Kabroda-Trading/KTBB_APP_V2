@@ -11405,3 +11405,63 @@ for-the-code-to-catch-it, since right now (pre-lock, pre-cross) the
 watch loop has nothing live to re-evaluate it against until it's
 actually polled again -- confirm it actually closes once today's loop
 is back up.
+
+## 2026-11-13 (08:20 CT) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+CORRECTION + THE REAL BUG: Andy pushed back correctly on the earlier
+08:20-ish entry in this file -- he checked the CME Desk directly (no
+FILLED state, entry_fill_price "--", state PENDING_ENTRY) and then
+checked CrossTrade's own dashboard directly ("No open positions on
+Tradovate", 0 signals in 24h, last real signal Nov 4). Ground truth:
+THERE WAS NEVER A REAL OPEN POSITION. My earlier instruction to go
+manually flatten something on Tradovate was wrong and is retracted --
+the midnight-rollover flush fix from earlier today (commit 5b59fb8) is
+still a real, legitimate fix, it just was not the explanation for what
+Andy was actually looking at.
+REAL ROOT CAUSE (confirmed directly in code): cme_radar.py's
+_OPEN_MGMT_STATES = ("PENDING_ENTRY", "WAITING_RETEST", "FILLED",
+"RATCHETED", "ENTRY_FILLED_UNPROTECTED") wrongly folded PENDING_ENTRY/
+WAITING_RETEST -- a resting order that has NOT filled, no capital
+deployed, no real exchange position exists -- into "position." That
+field feeds BOTH the Executive Dashboard's OPEN/FLAT chip (suite_
+dashboard.html's loadWhatsOpen()) AND the CME Desk's own "Open position"
+row (templates/cme_desk.html, which has its OWN separate copy of the
+same wrong list for the admin-view fallback path). cme_engine.py
+already has the CORRECT list (_OPEN_POSITION_STATES = ("FILLED",
+"RATCHETED", "ENTRY_FILLED_UNPROTECTED")) for its own D3 exit-management
+loop, and alt_matrix_radar.py's own equivalent constant already gets
+this right too (("FILLED", "TRAILING") -- no pending states). CME's
+radar was the one file that drifted from its own engine's definition.
+FIX: cme_radar.py now imports _OPEN_POSITION_STATES directly from
+cme_engine instead of maintaining a second, independently-drifted copy
+-- same "fix it at the correct place, not a surface patch" standard
+applied to the earlier flush fix today. templates/cme_desk.html's JS
+OPEN_MGMT_STATES fallback constant (used only because /api/admin/
+cme-status has no "position" key at all, unlike the public snapshot)
+narrowed to match exactly. PENDING_ENTRY/WAITING_RETEST orders are still
+fully visible in the Recent Orders table either way -- nothing is
+hidden, they're just no longer mislabeled as an open position.
+New tests/test_cme_radar.py (zero prior coverage existed for this
+module) -- 4 tests, directly proving the fixed bug: a PENDING_ENTRY or
+WAITING_RETEST order produces position=None; a FILLED or
+ENTRY_FILLED_UNPROTECTED order still correctly produces a real position
+dict. tests/test_cme_radar.py + test_cme_engine.py + test_cme_clock.py
+together: 60 passed.
+REAL OPEN QUESTION, FLAGGED NOT FIXED (time-boxed today, Andy's call):
+_advance_pending_order()'s PENDING_ENTRY branch has NO expiration at
+all -- if cross is None it just returns, forever, every 30s, with no
+EOD stand-down the way WAITING_RETEST has (RETEST_WINDOW_BARS cancel)
+or a real open position has (today's flush fix). A PENDING_ENTRY resting
+order from ANY past day that never crossed will sit there indefinitely
+and could fire a REAL order days or weeks later against a STALE bo/bd
+level and stale risk sizing computed at that old lock, if price ever
+happens to cross it later. The CME Desk screenshot showing exactly 4
+PENDING_ENTRY rows per symbol (2 accounts x 2 directions, matching one
+day's fan-out) and CrossTrade's own "last signal 8 days ago" are BOTH
+consistent with this -- nothing has crossed in over a week, so nothing
+has gone stale-fired yet, but the gap itself is real and unaddressed.
+Worth a real look (should PENDING_ENTRY rows past their own plan's
+date_key get stood down the same way the EOD flush now protects real
+positions, or should a fresh day's lock refuse to fan out while a prior
+day's unresolved PENDING_ENTRY for the same account/symbol/direction
+still exists?) -- next priority candidate, not touched this pass.

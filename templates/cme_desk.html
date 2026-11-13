@@ -155,14 +155,22 @@
         return 'status-' + String(s || '').toLowerCase();
     }
 
-    // Mirrors cme_radar.py's own _OPEN_MGMT_STATES -- the admin route
-    // (/api/admin/cme-status) has no "position" key at all (only plan +
-    // recent_orders), unlike the public snapshot. Deriving the open-
-    // position view from recent_orders here instead of assuming a
-    // "position" field that only exists on the public response -- found
-    // and fixed before this was reported done: without this, an admin
-    // viewer would never see an open position at all.
-    const OPEN_MGMT_STATES = ['PENDING_ENTRY', 'WAITING_RETEST', 'FILLED', 'RATCHETED', 'ENTRY_FILLED_UNPROTECTED'];
+    // Mirrors cme_radar.py's _OPEN_POSITION_STATES import from cme_engine.py
+    // -- the admin route (/api/admin/cme-status) has no "position" key at
+    // all (only plan + recent_orders), unlike the public snapshot. Deriving
+    // the open-position view from recent_orders here instead of assuming a
+    // "position" field that only exists on the public response.
+    // 2026-11-13 (real bug found live, Account 17): this used to ALSO
+    // include 'PENDING_ENTRY'/'WAITING_RETEST' -- a resting order that has
+    // NOT filled yet, no capital deployed, no real exchange position --
+    // which is exactly what made this page's own "Open position" row show
+    // a false SHORT/LONG @ -- (no entry price, because nothing ever
+    // filled) for an unfilled resting order. Narrowed to the three states
+    // that mean a real fill actually happened, matching cme_radar.py/
+    // cme_engine.py's own definition exactly. PENDING_ENTRY/WAITING_RETEST
+    // rows are still fully visible below in the Recent Orders table --
+    // nothing is hidden, they're just no longer promoted to "Open position."
+    const OPEN_MGMT_STATES = ['FILLED', 'RATCHETED', 'ENTRY_FILLED_UNPROTECTED'];
 
     // DeepSeek's "Executive CME Dashboard" spec (AGENT_LOG, 2026-11-05 third
     // entry) -- status badge / parameter checklist / one-sentence verdict,
