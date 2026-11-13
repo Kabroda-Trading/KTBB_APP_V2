@@ -11517,3 +11517,19 @@ GLOBAL_PARITY_SENTINEL_SPEC.md and CC_INTERFACE.md's CME dashboard section
 is the same already-corrected error (real MFFU figure is $2,000, confirmed
 against their own published rule, logged earlier today) -- these docs
 haven't picked up that correction yet.
+
+## 2026-11-13 (10:05 CT) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: open
+Drafted (not a fix, per Andy's explicit "don't just do stuff" instruction
+tonight): `CC_LIVE_MECHANICS_AND_CAUSAL_PARITY_REQUEST_2026_11_13.md`,
+committed to the Brain repo root. Documents the real live D1/D2/D3/Re-Arm
+mechanics from source (file:line), the real entry-placement-lag/POST_ONLY-
+rejection gap (no retry, backtest has zero model of it), and the real,
+measured, still-UNEXPLAINED near-instant C5_EXIT anomaly found tonight by
+querying production directly (~27 live trades closing 0.6-1.1 minutes
+after entry -- a direct reproduction against real candle_history data did
+NOT reproduce it, so the mechanism is not yet confirmed and nothing was
+shipped against it). Sets one explicit rule for any backtest-vs-live
+comparison: candles must be processed causally/in real arrival order with
+zero lookahead, across D1, D2, AND D3 (Andy's own correction -- not an
+entry-only concern). No code changed in this repo this entry.
