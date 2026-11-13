@@ -1165,6 +1165,62 @@ def test_rearm_full_dry_run_walk_primary_c5_exit_to_rearm_fill_and_close(poll_en
     assert primary_order.management_state == "CLOSED_C5_EXIT"
 
 
+def test_rearm_watch_calls_check_c5_or_bbwp_with_anchor_epoch_none_not_the_exit_epoch(poll_env, monkeypatch):
+    # 2026-11-13 real bug: _advance_rearm_one() used to pass
+    # anchor_epoch=_primary_exit_epoch(row) into check_c5_or_bbwp(), which
+    # invokes that function's LATCH semantics -- "has C5/BBWP fired on ANY
+    # bar since the exit" -- instead of "is the CURRENT bar clear." Because
+    # the bar that caused the original C5_EXIT is itself always a post-exit
+    # bar showing decay, the latch locked exhaustion_cleared to False for
+    # the entire REARM_WATCH session on nearly every real journey.
+    # Independently re-verified against the full 488-trade Arm A re-arm
+    # corpus (replaying DeepSeek's own measurement script against the real
+    # backtest data): the latch blocked 79.71% of valid re-arms; passing
+    # anchor_epoch=None (check_c5_or_bbwp()'s own "current confirmed state"
+    # default) correctly clears 87.09% of exhaustion windows and triggers
+    # 74.18% of them at re-cross. This test proves the exact call site is
+    # fixed and stays fixed -- a regression here would silently reintroduce
+    # a bug that blocks the large majority of real re-arms.
+    poll_env["make_plan"](breakout_trigger=50000.0, breakdown_trigger=49000.0, r30_high=50000.0, r30_low=49000.0)
+    poll_env["make_traveler_account"]()
+    ct = 1700000000
+    fake_htf = [{"close": 50000.0, "time": ct}]
+
+    cross_candles = [_c5m(49500.0, ct + i * 300) for i in range(5)] + [_c5m(50500.0, ct + 5 * 300)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": cross_candles}, polls=1)
+    touch_candles = cross_candles + [_c5m(50200.0, ct + 6 * 300, low=49950.0, high=50300.0)]
+    poll_env["run_polls"](candles_5m_by_symbol={"BTC/USDT": touch_candles}, polls=1)
+
+    monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", lambda *a, **kw: (True, False))
+    c5_poll_candles = touch_candles + [_c5m(50100.0, ct + 7 * 300)]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": c5_poll_candles},
+        candles_1h_by_symbol={"BTC/USDT": fake_htf}, candles_4h_by_symbol={"BTC/USDT": fake_htf},
+        polls=1,
+    )
+    assert poll_env["get_plan"]().rearm_status == "REARM_WATCH"
+
+    captured_kwargs = {}
+    def _spy(*a, **kw):
+        captured_kwargs.update(kw)
+        return (False, False)
+    monkeypatch.setattr(tpe.mgmt_e1_stack, "check_c5_or_bbwp", _spy)
+    post_exit_htf = [{"close": 50000.0, "time": ct + 7 * 300 + 3600}]
+    poll_env["run_polls"](
+        candles_5m_by_symbol={"BTC/USDT": [_c5m(50600.0, ct + 10 * 300)]},
+        candles_1h_by_symbol={"BTC/USDT": post_exit_htf}, candles_4h_by_symbol={"BTC/USDT": post_exit_htf},
+        polls=1,
+    )
+
+    assert "anchor_epoch" in captured_kwargs
+    assert captured_kwargs["anchor_epoch"] is None
+    # And the pipeline actually acts correctly on the now-current-bar-only
+    # reading: a qualifying re-cross with exhaustion_cleared=True transitions
+    # REARM_WATCH -> REARM_WAITING_TOUCH, proving this isn't just a captured
+    # kwarg with no real effect downstream.
+    assert poll_env["get_plan"]().rearm_status == "REARM_WAITING_TOUCH"
+
+
 def test_rearm_watch_closes_at_its_own_persisted_deadline_not_a_freshly_recomputed_one(poll_env, monkeypatch):
     # 2026-10-11 regression test for a real production incident: a plan
     # sat in REARM_WATCH for FOUR real days (should have closed out at

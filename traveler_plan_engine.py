@@ -265,9 +265,28 @@ async def _advance_rearm_one(db, row: TravelerPlan, now_utc: datetime) -> None:
         if not candles_1h or not candles_4h:
             return  # can't check exhaustion-cleared this poll -- try again next cycle, never guess
         anchor_epoch = _primary_exit_epoch(row)
+        # 2026-11-13 (real bug found live + independently re-verified against
+        # the full Arm A re-arm corpus, n=488): passing anchor_epoch here used
+        # to invoke check_c5_or_bbwp()'s LATCH semantics -- "has C5/BBWP fired
+        # on ANY bar since anchor_epoch" -- which is the right question for an
+        # EXIT decision (once decay starts, you're out, forever, for that
+        # trade) but the WRONG question for "has exhaustion cleared AS OF
+        # NOW" (a Re-Arm readiness check). The bar that caused the original
+        # C5_EXIT itself is, by definition, a post-anchor bar showing decay --
+        # so the latch locked exhaustion_cleared to False for the entire
+        # session on nearly every journey, regardless of what later bars
+        # showed. Measured: the live latch blocked 79.71% of the 488 real
+        # Arm A re-arm trades that should have fired at re-cross; passing
+        # anchor_epoch=None here (check_c5_or_bbwp()'s own documented "current
+        # confirmed state" default -- evaluates only the LATEST confirmed
+        # bar) clears 87.09% of exhaustion windows and correctly triggers
+        # 74.18% of them at re-cross. anchor_epoch (the real primary-exit
+        # epoch) is still used below, unchanged, for has_post_anchor_bar --
+        # that guard (at least one bar must have closed after the exit before
+        # ANY "cleared" read is trusted) is correct and untouched by this fix.
         c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(
             candles_1h, candles_4h, now_ts=now_utc.timestamp(), candles_4h_bbwp=candles_4h,
-            anchor_epoch=anchor_epoch)
+            anchor_epoch=None)
         # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 8 Item C): the
         # re-arm exhaustion check must NOT declare "cleared" until at least
         # one confirmed 1H bar has closed STRICTLY AFTER the primary exit

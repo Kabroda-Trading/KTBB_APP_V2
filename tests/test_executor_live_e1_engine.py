@@ -1664,6 +1664,37 @@ def test_rearm_watch_live_closes_at_its_own_persisted_deadline_not_a_freshly_rec
     assert cross_calls == []
 
 
+def test_rearm_watch_live_calls_check_c5_or_bbwp_with_anchor_epoch_none_not_the_exit_epoch(db, monkeypatch):
+    # 2026-11-13 real bug, LIVE/REAL-MONEY side (same root cause as the
+    # DRY_RUN fix in test_traveler_plan_engine.py): _advance_live_rearm_
+    # watch() used to pass anchor_epoch=_primary_exit_epoch(row) into
+    # check_c5_or_bbwp(), invoking its LATCH semantics ("has C5/BBWP fired
+    # on ANY bar since the exit") instead of "is the CURRENT bar clear."
+    # Because the bar that caused the original C5_EXIT is itself always a
+    # post-exit bar showing decay, this locked exhaustion_cleared to False
+    # for the entire REARM_WATCH session on nearly every real journey --
+    # independently re-verified against the full 488-trade Arm A re-arm
+    # corpus: 79.71% of valid re-arms were blocked. This test proves the
+    # exact call site is fixed and stays fixed.
+    plan = _traveler_plan(db, status="FILLED")
+    plan.rearm_status = "REARM_WATCH"
+    plan.primary_exit_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=3)
+    db.flush()
+    _fake_rearm_candle_fetchers(monkeypatch)
+
+    captured_kwargs = {}
+    def _spy(*a, **kw):
+        captured_kwargs.update(kw)
+        return (False, False)
+    monkeypatch.setattr(mgmt_e1_stack, "check_c5_or_bbwp", _spy)
+    monkeypatch.setattr(e1e.gate_traveler, "advance_rearm_watch", lambda *a, **kw: {})
+
+    _run(e1e._advance_live_rearm_watch(db, plan, datetime.datetime.now(datetime.timezone.utc)))
+
+    assert "anchor_epoch" in captured_kwargs
+    assert captured_kwargs["anchor_epoch"] is None
+
+
 # ------------------------------------------------------------------ 2026-10-06 (R1 re-arm): the REARM_WATCH-entry hook inside _finalize_traveler_close()
 # mgmt_e1_stack.start_rearm_watch_if_eligible() itself is already covered
 # by its own module's test (test_mgmt_e1_stack.py / this session's own

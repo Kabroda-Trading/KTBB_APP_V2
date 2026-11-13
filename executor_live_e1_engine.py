@@ -960,9 +960,26 @@ async def _advance_live_rearm_watch(db: Session, traveler_plan_row: TravelerPlan
     if not candles_1h or not candles_4h:
         return  # can't check exhaustion-cleared this poll -- try again next cycle, never guess
     anchor_epoch = _primary_exit_epoch(traveler_plan_row)
+    # 2026-11-13 (real bug found live on REAL MONEY accounts, independently
+    # re-verified against the full Arm A re-arm corpus, n=488): passing
+    # anchor_epoch here invoked check_c5_or_bbwp()'s LATCH semantics -- "has
+    # C5/BBWP fired on ANY bar since anchor_epoch" -- correct for the
+    # in-trade EXIT check above (entry_fill_anchor, line ~923: once decay
+    # starts you're out, forever, for that trade) but wrong for "has
+    # exhaustion cleared AS OF NOW" (a Re-Arm readiness check). The bar that
+    # caused the original C5_EXIT is itself always a post-exit bar showing
+    # decay, so the latch locked exhaustion_cleared to False for the entire
+    # REARM_WATCH session on nearly every real journey -- measured: 79.71%
+    # of the 488 real Arm A trades that should have re-armed were blocked.
+    # anchor_epoch=None (check_c5_or_bbwp()'s own "current confirmed state"
+    # default) evaluates only the LATEST confirmed bar instead, correctly
+    # clearing 87.09% of exhaustion windows and triggering 74.18% of them at
+    # re-cross. anchor_epoch itself is still used below, unchanged, for
+    # has_post_anchor_bar -- see traveler_plan_engine.py's own DRY_RUN
+    # mirror of this exact fix for the full writeup.
     c5_hit, bbwp_hit = mgmt_e1_stack.check_c5_or_bbwp(
         candles_1h, candles_4h, now_ts=now_utc.timestamp(), candles_4h_bbwp=candles_4h,
-        anchor_epoch=anchor_epoch)
+        anchor_epoch=None)
     # 2026-11-08 (Antigravity ruling, AGENT_LOG Session 8 Item C): the re-arm
     # exhaustion check must NOT declare "cleared" until at least one
     # confirmed 1H bar has closed STRICTLY AFTER the primary exit. Right
