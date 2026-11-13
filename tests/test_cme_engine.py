@@ -414,6 +414,78 @@ def test_process_symbol_lock_proceeds_normally_on_a_known_early_close_day(db, mo
     assert plan is not None and plan.status == "ARMED"
 
 
+# ------------------------------------------------------------------ CME admission-rejection notification (2026-11-12)
+# Real gap found live: unlike the Traveler's own placement-failure email,
+# a CME admission rejection notified NOBODY -- Account 17 saw a cheerful
+# "Session Locked, ARMED" email, then silence, with the real reason
+# (NO_TRAILING_DD_LIMIT_CONFIGURED) sitting only in a CMEOrder row.
+
+def test_process_symbol_lock_notifies_live_account_on_admission_rejection(db, monkeypatch):
+    # Real trailing-DD breach (equity $3000 under HWM, over the $2000
+    # limit) -- CMEConfig.trailing_dd_limit_usd is nullable=False with a
+    # schema default of 2000.0, so "unconfigured" can no longer actually
+    # happen for a real CMEConfig row; a genuine breach is the realistic
+    # way a LIVE account gets rejected post-fix.
+    account = _account(db, mode="LIVE")
+    account.high_water_mark_usd = 50000.0
+    db.commit()
+    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3, trailing_dd_limit_usd=2000.0)
+    monkeypatch.setattr(cx, "_client_for", lambda account_: object())
+
+    async def _fake_calib(symbol, date_key):
+        return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
+    monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
+
+    async def _fake_equity(account_):
+        return 47000.0   # $3000 under HWM -- over the $2000 limit
+    monkeypatch.setattr(ce, "_query_equity", _fake_equity)
+    _capture_emails(monkeypatch)
+
+    import notify
+    account_emails = []
+    telegram_calls = []
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id: account_emails.append(subject) or True)
+    monkeypatch.setattr(notify, "send_account_telegram", lambda category, text, account_id: telegram_calls.append(text) or True)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert all(o.decision == "REJECTED" for o in orders)
+    assert len(account_emails) == 2   # one per direction (LONG + SHORT fan-out)
+    assert all("REJECTED" in s and "MNQ" in s for s in account_emails)
+    assert len(telegram_calls) == 2
+    assert all("TRAILING_DD_BREACHED" in t for t in telegram_calls)
+
+
+def test_process_symbol_lock_does_not_notify_a_dry_run_account_on_rejection(db, monkeypatch):
+    account = _account(db, mode="DRY_RUN")
+    account.high_water_mark_usd = 50000.0
+    db.commit()
+    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3, trailing_dd_limit_usd=2000.0)
+    monkeypatch.setattr(cx, "_client_for", lambda account_: object())
+
+    async def _fake_calib(symbol, date_key):
+        return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
+    monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
+
+    async def _fake_equity(account_):
+        return 47000.0   # $3000 under HWM -- over the $2000 limit
+    monkeypatch.setattr(ce, "_query_equity", _fake_equity)
+    _capture_emails(monkeypatch)
+
+    import notify
+    account_emails = []
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id: account_emails.append(subject) or True)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert all(o.decision == "REJECTED" for o in orders)
+    assert account_emails == []   # DRY_RUN -- no real consequence, no human needs alerting
+
+
 def test_process_symbol_lock_stand_down_creates_plan_but_no_orders(db, monkeypatch):
     account = _account(db)
     _config(db, account)
@@ -449,7 +521,6 @@ _ARMED_LOCK = {
 
 def test_process_symbol_lock_armed_fans_out_long_and_short_orders_per_enabled_account(db, monkeypatch):
     account = _account(db, mode="DRY_RUN")
-    account.trailing_drawdown_limit_usd = 2000.0
     account.high_water_mark_usd = 50000.0
     db.commit()
     _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
@@ -485,7 +556,6 @@ def test_process_symbol_lock_rejects_closed_on_equity_query_failure(db, monkeypa
     # query now fails this account's orders CLOSED (REJECTED,
     # EQUITY_QUERY_FAILED) instead of being admitted on a fabricated value.
     account = _account(db, mode="DRY_RUN")
-    account.trailing_drawdown_limit_usd = 2000.0
     account.high_water_mark_usd = 50000.0
     db.commit()
     _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
@@ -529,7 +599,6 @@ def test_process_symbol_lock_admits_both_directions_independently_same_tick(db, 
     # a future refactor (e.g. adding an early flush inside the loop)
     # could silently reintroduce.
     account = _account(db, mode="DRY_RUN")
-    account.trailing_drawdown_limit_usd = 2000.0
     account.high_water_mark_usd = 50000.0
     db.commit()
     _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
@@ -560,9 +629,8 @@ def test_process_symbol_lock_respects_a_real_risk_rejection_not_just_a_mock(db, 
     # engine actually wires risk admission through, not just a fake.
     account = _account(db, mode="DRY_RUN")
     account.high_water_mark_usd = 50000.0
-    account.trailing_drawdown_limit_usd = 2000.0
     db.commit()
-    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3)
+    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3, trailing_dd_limit_usd=2000.0)
     monkeypatch.setattr(cx, "_client_for", lambda account_: object())
 
     async def _fake_calib(symbol, date_key):

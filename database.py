@@ -2568,7 +2568,13 @@ class ExecutorAccount(Base):
     # its own CMEConfig table instead (see that class's own docstring).
     market_type = Column(String, nullable=True, default="CRYPTO_PERP")   # CRYPTO_PERP (default) | CME_FUTURES
     account_category = Column(String, nullable=True, default="PERSONAL")  # PERSONAL | PROP_EVALUATION | PROP_FUNDED
-    trailing_drawdown_limit_usd = Column(Float, nullable=True)   # Apex-style trailing DD floor, e.g. 2000.0
+    # VESTIGIAL as of 2026-11-12 -- cme_risk.py no longer reads this column at
+    # all (see that file's own header for the real bug this fix closed: the
+    # only admin UI that ever existed for "trailing DD" wrote to CMEConfig.
+    # trailing_dd_limit_usd, a different column entirely, so this one could
+    # never actually be set by anyone). Left in place per this file's own
+    # "no migration framework, leave the column" convention, not dropped.
+    trailing_drawdown_limit_usd = Column(Float, nullable=True)   # Apex-style trailing DD floor, e.g. 2000.0 -- UNUSED, see comment above
     high_water_mark_usd = Column(Float, nullable=True)           # running peak equity, cme_risk.py's own write path
     tradovate_account_id = Column(Integer, nullable=True)
     tradovate_account_name = Column(String, nullable=True)       # e.g. "APEX6918900000001" -- not a secret, stored plain

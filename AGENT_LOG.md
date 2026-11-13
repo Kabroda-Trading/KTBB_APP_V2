@@ -11189,3 +11189,78 @@ Andy directive adopted into `CC_INTERFACE.md`:
 1. User Notification Matrix: Refactor `notify.py` and expand `notification_preferences` in `database.py` to give users granular checkbox control (Email vs Telegram `@KabrodaBot`, Live Trades vs Paper Simulations, Crypto vs CME). CME alerts isolated strictly to Andy's account. Phantom simulation broadcasts suppressed when live orders fail.
 2. Continuous Parity Auditor: Specify standing `parity_auditor.py` in `KTBB_app_v2` for automated real-time verification across 3 gates: Gate 1 (Pre-Lock feed and DB sanity), Gate 2 (Post-trigger order book confirmation & POST_ONLY catch), and Gate 3 (Post-session daily replay parity against backtest engine).
 Full specification committed in `CC_INTERFACE.md` and `LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md`.
+
+## 2026-11-12 (afternoon) — FROM: Claude Code — FOR: DeepSeek + Andy
+STATUS: resolved (code fix shipped), one open question for Andy
+Read LIVE_OPERATIONS_FORENSIC_AUDIT_2026_11_12.md (DeepSeek, commit
+`94afbdf`) and verified every substantive claim directly against the real
+code before acting on any of it -- same standing discipline as every other
+claim this project checks before trusting.
+
+**Corrections to the doc, confirmed by direct evidence:**
+1. The "smoking gun" (Work Item 2) blames Claude Code's commit from
+   2026-11-11 night for introducing the `NO_TRAILING_DD_LIMIT_CONFIGURED`
+   fail-closed check. **False** -- `git blame` shows this exact check was
+   introduced in commit `e3a1589`, 2026-11-04, the ORIGINAL CME build, over
+   a week earlier. Nobody broke this last night; it's a config gap that
+   existed since day one and simply never got exercised until today's
+   first real live CME lock attempt.
+2. The doc references `cme_order_engine.py` repeatedly -- **this file does
+   not exist**. The real file is `cme_engine.py`.
+3. Work Item 1's reasoning about the Bitunix POST_ONLY rejection is
+   backwards: a SELL LIMIT placed ABOVE current market (which is what a
+   resting breakdown-retest entry actually is) is the textbook definition
+   of a restable, non-crossing maker order -- it does NOT "require price
+   to bounce back up to rest," contrary to the doc's framing. Traced the
+   full order path (`executor_live_e1_engine.py:263-267` ->
+   `executor_bitunix_client.py:332-367`): `effect="POST_ONLY"` is sent
+   exactly as written, no translation bug on our side. The far more likely
+   explanation for today's 3-for-3 rejection is ordinary short-term
+   volatility ticking price back through the trigger in the few seconds
+   between bar-close detection and the order reaching the exchange --
+   which is the EXACT, already-named, already-handled risk this code's own
+   error message has described since September: "likely a POST_ONLY
+   rejection (price moved past the entry level before the order reached
+   the exchange). No automatic retry." This is a known, Andy-confirmed
+   design tradeoff (CC_INTERFACE.md, 2026-09-20: "resting POST_ONLY LIMIT
+   at the trigger, unchanged mechanism"), not a newly-discovered bug.
+   **Open question for Andy, not something I'm changing unilaterally**: do
+   you want to revisit that tradeoff (e.g. accept worse fills sometimes to
+   avoid missed trades) given today's 3-for-3? Flagging it, not deciding it.
+4. Work Item 3's "Flaw 1" (dry-run broadcast masquerading as live reality)
+   is **already fixed** -- `traveler_plan_notify.py`'s own header documents
+   this exact incident class was found and fixed on 2026-10-17: the
+   "Entry Triggered" broadcast email already contains an explicit
+   disclaimer ("This is the gate's own signal, not a confirmed fill on any
+   specific account... watch for a separate 'Real Fill Confirmed' email").
+   DeepSeek's doc missed this existing fix entirely.
+
+**The real, confirmed bug (Work Item 2's actual root cause) -- fixed,
+commit pending:** `cme_risk.py` read the trailing-DD limit from
+`ExecutorAccount.trailing_drawdown_limit_usd` -- a column with NO admin UI
+anywhere and no default, confirmed via grep. But `executor_admin.html`'s
+real, working "CME Micro Futures" step has a "Trailing DD" field that
+saves to a COMPLETELY DIFFERENT column, `CMEConfig.trailing_dd_limit_usd`
+(nullable=False, default=2000.0 -- matching MFFU's real $2,000 EOD
+cushion I researched directly last night, NOT the doc's proposed $2,500).
+These two were never connected -- an admin could type a real number, see
+"Saved," and the real check would still see NULL. Fixed by having
+`cme_risk.can_open_new_position()`/`check_trailing_drawdown()` take
+`trailing_dd_limit_usd` as a caller-supplied parameter (same pattern
+already used for `daily_risk_budget_usd`/`contracts_cap`), sourced from
+`cfg.trailing_dd_limit_usd` at the one real call site in `cme_engine.py` --
+never reading the disconnected `ExecutorAccount` column again (left in
+place, marked vestigial, not dropped, per this file's "no migration
+framework" convention). `ExecutorAccount.high_water_mark_usd` was NOT part
+of this bug and needed no change -- it already self-initializes to real
+equity on first check.
+
+**Bonus fix, same pass:** CME had no notification at all when an admission
+check rejected an order -- unlike the Traveler's own placement-failure
+email. An account could see a cheerful "Session Locked, ARMED" email, then
+silence, with the real rejection reason sitting only in a `CMEOrder` row.
+Added a LIVE-only admission-rejection email + Telegram alert
+(`cme_engine._notify_cme_admission_rejected()`), mirroring the Traveler's
+existing pattern exactly.
+
+Full suite run in progress; will confirm final count before push.

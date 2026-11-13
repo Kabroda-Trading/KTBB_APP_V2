@@ -51,12 +51,16 @@ def db(monkeypatch):
     _clean_db_files()
 
 
-def _ready_account(db, trailing_dd_limit=2000.0, hwm=50000.0):
+def _ready_account(db, hwm=50000.0):
+    # 2026-11-12: no longer takes/sets trailing_dd_limit -- that value is
+    # CMEConfig.trailing_dd_limit_usd now (the real, admin-settable column;
+    # see cme_risk.py's own header for the bug this fixes), passed directly
+    # to can_open_new_position()/check_trailing_drawdown() by each test
+    # that needs a specific value, not stored on the account at all.
     account = ea.create_account(db, user_id=1, label="cme_test")
     db.flush()
     account.market_type = "CME_FUTURES"
     account.account_category = "PROP_EVALUATION"
-    account.trailing_drawdown_limit_usd = trailing_dd_limit
     account.high_water_mark_usd = hwm
     db.commit()
     return account
@@ -99,15 +103,15 @@ def test_update_high_water_mark_initializes_from_none():
 # ------------------------------------------------------------------ trailing drawdown check
 
 def test_check_trailing_drawdown_fails_closed_when_unconfigured():
-    account = ExecutorAccount(trailing_drawdown_limit_usd=None, high_water_mark_usd=50000.0)
-    result = cme_risk.check_trailing_drawdown(account, 49000.0)
+    account = ExecutorAccount(high_water_mark_usd=50000.0)
+    result = cme_risk.check_trailing_drawdown(account, 49000.0, None)
     assert result["ok"] is False
     assert result["reason"] == "NO_TRAILING_DD_LIMIT_CONFIGURED"
 
 
 def test_check_trailing_drawdown_ok_well_within_buffer():
-    account = ExecutorAccount(trailing_drawdown_limit_usd=2000.0, high_water_mark_usd=50000.0)
-    result = cme_risk.check_trailing_drawdown(account, 49500.0)
+    account = ExecutorAccount(high_water_mark_usd=50000.0)
+    result = cme_risk.check_trailing_drawdown(account, 49500.0, 2000.0)
     assert result["ok"] is True
     assert result["drawdown_usd"] == pytest.approx(500.0)
     assert result["buffer_remaining_usd"] == pytest.approx(1500.0)
@@ -115,22 +119,22 @@ def test_check_trailing_drawdown_ok_well_within_buffer():
 
 
 def test_check_trailing_drawdown_warns_once_past_half_the_buffer():
-    account = ExecutorAccount(trailing_drawdown_limit_usd=2000.0, high_water_mark_usd=50000.0)
-    result = cme_risk.check_trailing_drawdown(account, 48900.0)   # dd=1100, buffer=900 < 1000 (50%)
+    account = ExecutorAccount(high_water_mark_usd=50000.0)
+    result = cme_risk.check_trailing_drawdown(account, 48900.0, 2000.0)   # dd=1100, buffer=900 < 1000 (50%)
     assert result["ok"] is True
     assert result["warn"] is True
 
 
 def test_check_trailing_drawdown_breached_at_exactly_the_limit():
-    account = ExecutorAccount(trailing_drawdown_limit_usd=2000.0, high_water_mark_usd=50000.0)
-    result = cme_risk.check_trailing_drawdown(account, 48000.0)   # dd == limit exactly
+    account = ExecutorAccount(high_water_mark_usd=50000.0)
+    result = cme_risk.check_trailing_drawdown(account, 48000.0, 2000.0)   # dd == limit exactly
     assert result["ok"] is False
     assert "TRAILING_DD_BREACHED" in result["reason"]
 
 
 def test_check_trailing_drawdown_advances_hwm_before_checking():
-    account = ExecutorAccount(trailing_drawdown_limit_usd=2000.0, high_water_mark_usd=50000.0)
-    result = cme_risk.check_trailing_drawdown(account, 52000.0)   # new peak -- zero drawdown
+    account = ExecutorAccount(high_water_mark_usd=50000.0)
+    result = cme_risk.check_trailing_drawdown(account, 52000.0, 2000.0)   # new peak -- zero drawdown
     assert account.high_water_mark_usd == 52000.0
     assert result["ok"] is True
     assert result["drawdown_usd"] == 0.0
@@ -180,6 +184,7 @@ def test_can_open_new_position_rejects_during_a_news_blackout_window(db, monkeyp
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=50000.0,
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=2000.0,
     )
     assert result["admitted"] is False
     assert result["reason"] == "NEWS_BLACKOUT (FOMC Decision (Jan 2026))"
@@ -191,6 +196,7 @@ def test_can_open_new_position_admits_normally_outside_any_news_blackout(db, mon
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=50000.0,
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=2000.0,
     )
     assert result["admitted"] is True
 
@@ -202,6 +208,7 @@ def test_can_open_new_position_admits_a_clean_candidate(db):
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=50000.0,
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=2000.0,
     )
     assert result["admitted"] is True
     assert result["contracts"] == 3
@@ -223,19 +230,35 @@ def test_can_open_new_position_rejects_if_already_open_on_symbol_today(db):
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=50000.0,
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=2000.0,
     )
     assert result["admitted"] is False
     assert result["reason"] == "ALREADY_OPEN_ON_SYMBOL_TODAY"
 
 
 def test_can_open_new_position_rejects_on_trailing_dd_breach(db):
-    account = _ready_account(db, trailing_dd_limit=2000.0, hwm=50000.0)
+    account = _ready_account(db, hwm=50000.0)
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=47000.0,   # dd=3000 > 2000 limit
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=2000.0,
     )
     assert result["admitted"] is False
     assert "TRAILING_DD_BREACHED" in result["reason"]
+
+
+def test_can_open_new_position_rejects_when_cme_config_has_no_trailing_dd_limit(db):
+    # 2026-11-12 real bug regression: an account with a real high-water
+    # mark but NO trailing_dd_limit_usd passed in (e.g. CMEConfig was never
+    # saved with one) must fail closed, not silently admit.
+    account = _ready_account(db)
+    result = cme_risk.can_open_new_position(
+        db, account, "MNQ", "2026-11-04", current_equity=50000.0,
+        daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=None,
+    )
+    assert result["admitted"] is False
+    assert result["reason"] == "NO_TRAILING_DD_LIMIT_CONFIGURED"
 
 
 def test_can_open_new_position_splits_budget_when_other_symbol_live(db):
@@ -245,6 +268,7 @@ def test_can_open_new_position_splits_budget_when_other_symbol_live(db):
     result = cme_risk.can_open_new_position(
         db, account, "MNQ", "2026-11-04", current_equity=50000.0,
         daily_risk_budget_usd=350.0, contracts_cap=3, box_points=20.0,
+        trailing_dd_limit_usd=2000.0,
     )
     assert result["admitted"] is True
     assert result["risk_budget_usd"] == 175.0

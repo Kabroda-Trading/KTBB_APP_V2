@@ -7,9 +7,24 @@
 # margin pool with Bitunix at all (different broker, Tradovate, a
 # completely separate physical account), so there is no cross-system
 # ExecutorOrder/TravelerPlan read here, and no margin-reserve-floor concept.
-# This module only ever reads/writes ExecutorAccount's own trailing_
-# drawdown_limit_usd/high_water_mark_usd fields and CME's own CMEOrder/
-# CMEConfig tables -- never another subsystem's.
+#
+# 2026-11-12 (real production bug, found live): the trailing-DD LIMIT used
+# to be read from account.trailing_drawdown_limit_usd (an ExecutorAccount
+# column) -- but the only admin UI that ever existed for setting this value
+# (executor_admin.html's CME Micro Futures step, the "Trailing DD" field)
+# saves to a COMPLETELY DIFFERENT column, CMEConfig.trailing_dd_limit_usd.
+# The two were never connected: an admin could type a real number, see
+# "Saved: ... trailing DD $2000," and check_trailing_drawdown() would still
+# read NULL from the column nothing ever wrote to -- confirmed this is
+# exactly what happened to Account 17 today (NO_TRAILING_DD_LIMIT_CONFIGURED
+# on every order, despite the UI reporting a successful save). Fixed by
+# having the caller pass CMEConfig.trailing_dd_limit_usd in explicitly, the
+# same pattern already used for daily_risk_budget_usd/contracts_cap below --
+# this module now never reads account.trailing_drawdown_limit_usd at all.
+# account.high_water_mark_usd is NOT part of this bug -- it's a genuinely
+# per-account, self-initializing running peak (update_high_water_mark()
+# sets it on the first real equity check if it's ever None), not a static
+# setting that needed a UI, and stays exactly where it was.
 #
 # Daily risk-budget split: the business plan's own "Operational Rule"
 # (prop_firm_business_and_execution_plan.md) is $350/day total, split $175
@@ -71,13 +86,15 @@ def trailing_drawdown_usd(account: ExecutorAccount, current_equity: float) -> fl
     return max(0.0, hwm - current_equity)
 
 
-def check_trailing_drawdown(account: ExecutorAccount, current_equity: float, warn_fraction: float = 0.5) -> Dict[str, Any]:
+def check_trailing_drawdown(account: ExecutorAccount, current_equity: float, trailing_dd_limit_usd: Optional[float], warn_fraction: float = 0.5) -> Dict[str, Any]:
     """Updates the high-water mark for a new peak, then checks the resulting
-    drawdown against account.trailing_drawdown_limit_usd. Fails CLOSED
-    (not ok) if the limit itself isn't configured -- an unconfigured
-    trailing-DD limit on a PROP_EVALUATION account is a setup error, never
-    treated as 'no limit.'"""
-    limit = account.trailing_drawdown_limit_usd
+    drawdown against trailing_dd_limit_usd (the caller's CMEConfig.
+    trailing_dd_limit_usd -- the one real, admin-settable value; see this
+    module's own header for why this is no longer read off the account
+    directly). Fails CLOSED (not ok) if the limit itself isn't configured --
+    an unconfigured trailing-DD limit on a PROP_EVALUATION account is a
+    setup error, never treated as 'no limit.'"""
+    limit = trailing_dd_limit_usd
     if limit is None or limit <= 0:
         return {
             "ok": False, "reason": "NO_TRAILING_DD_LIMIT_CONFIGURED",
@@ -128,7 +145,7 @@ def risk_budget_for_symbol(db: Session, account_id: int, symbol: str, daily_risk
 def can_open_new_position(
     db: Session, account: ExecutorAccount, symbol: str, date_key: str,
     current_equity: float, daily_risk_budget_usd: float, contracts_cap: int,
-    box_points: float, now_utc: Optional[datetime.datetime] = None,
+    box_points: float, trailing_dd_limit_usd: Optional[float], now_utc: Optional[datetime.datetime] = None,
 ) -> Dict[str, Any]:
     """CME's own admission check -- NOT a port of alt_matrix_portfolio.py's
     shape (no cross-system read; CME shares no account with Bitunix). Checks,
@@ -164,7 +181,7 @@ def can_open_new_position(
     if existing is not None:
         return {"admitted": False, "reason": "ALREADY_OPEN_ON_SYMBOL_TODAY", "contracts": 0, "risk_budget_usd": 0.0}
 
-    dd_check = check_trailing_drawdown(account, current_equity)
+    dd_check = check_trailing_drawdown(account, current_equity, trailing_dd_limit_usd)
     if not dd_check["ok"]:
         return {"admitted": False, "reason": dd_check["reason"], "contracts": 0, "risk_budget_usd": 0.0}
 

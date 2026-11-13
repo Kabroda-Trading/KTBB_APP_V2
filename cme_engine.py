@@ -220,10 +220,12 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
                     management_state="PENDING_ENTRY",
                 )
                 db.add(order)
+                _notify_cme_admission_rejected(account, symbol, direction, order.decision_reason)
                 continue
             admission = cme_risk.can_open_new_position(
                 db, account, symbol, date_key, equity,
                 cfg.daily_risk_budget_usd, cfg.contracts_cap, plan.box,
+                cfg.trailing_dd_limit_usd,
             )
             order = CMEOrder(
                 cme_plan_id=plan.id, account_id=account.id, mode=account.mode,
@@ -236,7 +238,36 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
                 management_state="PENDING_ENTRY",
             )
             db.add(order)
+            if order.decision == "REJECTED":
+                _notify_cme_admission_rejected(account, symbol, direction, order.decision_reason)
     db.flush()
+
+
+def _notify_cme_admission_rejected(account: ExecutorAccount, symbol: str, direction: str, reason: Optional[str]) -> None:
+    """2026-11-12 (real gap found live): unlike the Traveler's own
+    placement-failure email, a CME admission rejection used to notify
+    NOBODY -- the account owner would see a cheerful 'Session Locked,
+    ARMED' email at the lock and then silence, with the only record of
+    WHY their order never happened sitting in a CMEOrder row nobody but an
+    admin would think to query. LIVE-only (a DRY_RUN rejection is just
+    simulation bookkeeping, no real consequence to alert a human about)."""
+    if (account.mode or "").upper() != "LIVE":
+        return
+    try:
+        import notify
+        notify.send_account_email(
+            f"KABRODA CME ALERT -- {symbol} {direction} order REJECTED at admission ({account.label or account.id})",
+            f"CME order admission was rejected for account {account.label or account.id} "
+            f"({symbol} {direction}).\n\nReason: {reason}\n\n"
+            "The session itself may still be ARMED and tradeable for other accounts -- "
+            "this rejection is specific to this account's own configuration/risk state. "
+            "No automatic retry.",
+            account.id,
+        )
+        notify.send_account_telegram("problem", notify._telegram_problem_text(
+            "CME", symbol, f"{direction} order rejected at admission: {reason}"), account.id)
+    except Exception as e:
+        print(f"|| CME ENGINE || admission-rejection notification failed for account {account.id}: {e}")
 
 
 async def _process_one_symbol_lock_tick(db: Session, symbol: str, date_key: str) -> None:
