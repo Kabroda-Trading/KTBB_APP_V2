@@ -191,7 +191,7 @@ def _resolve_account_owner_email(account_id: int):
         return None
 
 
-def send_account_email(subject: str, body: str, account_id: int) -> bool:
+def send_account_email(subject: str, body: str, account_id: int, category: str = "routine") -> bool:
     """2026-09-28 (Andy's L4 ruling, Kabroda AI Brain CC_INTERFACE.md,
     "RULED BY ANDY 09-28 ~18:09 CT"): trade-execution emails -- fills,
     opens, closes, cancels, unprotected-position/placement errors,
@@ -213,7 +213,36 @@ def send_account_email(subject: str, body: str, account_id: int) -> bool:
     codebase's loud-failure-never-silent-degradation discipline; it
     should never actually happen in practice since
     ExecutorAccount.user_id is a required, non-null column.
-    """
+
+    category (2026-11-12, Andy's own ask -- "don't really need the email
+    ... that's why we built the [Telegram] bot... it's just the emails you
+    get on the dry run and the live run"): "routine" (the default -- fill/
+    open/close/breakeven, exactly what he's asking to mute for himself) is
+    gated by that user's own NotificationPreference.notify_email_enabled
+    (default True -- no behavior change for anyone who hasn't touched this
+    setting). "problem" (unprotected position / placement failed / an
+    admission rejected) is NEVER gated -- same "urgent risk alert, not
+    routine noise a trader should be able to silently mute" exception
+    send_account_telegram()'s own "problem" category already makes; every
+    such call site passes category="problem" explicitly."""
+    if category != "problem":
+        user_id = _resolve_account_owner_user_id(account_id)
+        if user_id is not None:
+            try:
+                from database import SessionLocal, NotificationPreference
+                db = SessionLocal()
+                try:
+                    pref = db.query(NotificationPreference).filter_by(user_id=user_id).first()
+                    if pref is not None and pref.notify_email_enabled is False:
+                        reason = f"user_id={user_id} has routine trade emails turned off (NotificationPreference.notify_email_enabled)"
+                        print(f"[NOTIFY] Skipped — {reason}")
+                        _log_send(subject, body, [], "SKIPPED", reason)
+                        return False
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"[NOTIFY] NotificationPreference lookup failed for user_id={user_id}: {e} -- sending anyway (fail open, never silently lose a real email over a pref-lookup glitch)")
+
     owner_email = _resolve_account_owner_email(account_id)
     if owner_email is None:
         reason = (f"Could not resolve an owner email for account_id={account_id} -- "

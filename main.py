@@ -3627,10 +3627,12 @@ async def account_settings(request: Request, db: Session = Depends(get_db)):
 def _notification_preference_dict(pref, user_id: int) -> Dict[str, Any]:
     if pref is None:
         return {"user_id": user_id, "telegram_chat_id": None,
-                 "notify_fill": True, "notify_breakeven": True, "notify_exit": True}
+                 "notify_fill": True, "notify_breakeven": True, "notify_exit": True,
+                 "notify_email_enabled": True}
     return {
         "user_id": pref.user_id, "telegram_chat_id": pref.telegram_chat_id,
         "notify_fill": pref.notify_fill, "notify_breakeven": pref.notify_breakeven, "notify_exit": pref.notify_exit,
+        "notify_email_enabled": pref.notify_email_enabled,
     }
 
 
@@ -3662,6 +3664,7 @@ async def update_notification_preferences(request: Request, payload: Dict[str, A
     if "notify_fill" in payload: pref.notify_fill = bool(payload["notify_fill"])
     if "notify_breakeven" in payload: pref.notify_breakeven = bool(payload["notify_breakeven"])
     if "notify_exit" in payload: pref.notify_exit = bool(payload["notify_exit"])
+    if "notify_email_enabled" in payload: pref.notify_email_enabled = bool(payload["notify_email_enabled"])
     db.commit()
     return {"ok": True, "preferences": _notification_preference_dict(pref, uid)}
 

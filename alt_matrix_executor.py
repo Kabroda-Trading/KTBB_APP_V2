@@ -167,7 +167,7 @@ def _notify_unprotected(db: Session, account: ExecutorAccount, order_row: AltMat
             f"positionId={order_row.position_id}\n\n"
             f"{detail}\n\nCHECK THE EXCHANGE DIRECTLY NOW and manually place whatever's missing "
             f"(stop at {order_row.sl_price_initial}).",
-            account.id,
+            account.id, category="problem",
         )
         notify.send_account_telegram("problem", notify._telegram_problem_text(
             "Alt Matrix", order_row.symbol, f"unprotected position — {detail}"), account.id)

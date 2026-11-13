@@ -542,7 +542,7 @@ async def check_traveler_entry_fill_and_protect(db: Session, account: ExecutorAc
             f"traveler_plan_id={traveler_plan_row.id}, account={account.id}, positionId={order_row.position_id}\n\n"
             f"{detail_msg}\n\nCHECK THE EXCHANGE DIRECTLY NOW and manually place whatever's missing "
             f"or close the position -- this bot will not act on it further.",
-            account.id,
+            account.id, category="problem",
         )
         notify.send_account_telegram("problem", notify._telegram_problem_text(
             "Traveler", order_row.symbol, "entry filled but stop/T1 placement incomplete"), account.id)

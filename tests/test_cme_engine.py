@@ -444,8 +444,10 @@ def test_process_symbol_lock_notifies_live_account_on_admission_rejection(db, mo
 
     import notify
     account_emails = []
+    email_categories = []
     telegram_calls = []
-    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id: account_emails.append(subject) or True)
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id, category="routine": (
+        account_emails.append(subject), email_categories.append(category), True)[-1])
     monkeypatch.setattr(notify, "send_account_telegram", lambda category, text, account_id: telegram_calls.append(text) or True)
 
     _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
@@ -454,6 +456,10 @@ def test_process_symbol_lock_notifies_live_account_on_admission_rejection(db, mo
     assert all(o.decision == "REJECTED" for o in orders)
     assert len(account_emails) == 2   # one per direction (LONG + SHORT fan-out)
     assert all("REJECTED" in s and "MNQ" in s for s in account_emails)
+    # 2026-11-12: an admission rejection is a "problem" category -- must
+    # never be muted by notify_email_enabled, same as Telegram's own
+    # always-on "problem" category.
+    assert email_categories == ["problem", "problem"]
     assert len(telegram_calls) == 2
     assert all("TRAILING_DD_BREACHED" in t for t in telegram_calls)
 
@@ -477,7 +483,7 @@ def test_process_symbol_lock_does_not_notify_a_dry_run_account_on_rejection(db, 
 
     import notify
     account_emails = []
-    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id: account_emails.append(subject) or True)
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id, category="routine": account_emails.append(subject) or True)
 
     _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
 

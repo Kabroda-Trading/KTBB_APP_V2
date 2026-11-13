@@ -401,6 +401,68 @@ def test_send_account_email_delivers_only_to_the_account_owner_not_the_merged_li
     assert "dawson@y.com" not in to_addrs
 
 
+# ------------------------------------------------------------------ send_account_email -- category gating (2026-11-12)
+# Andy's own ask: turn off routine trade-flow email for himself (he has
+# Telegram) without touching anyone else's, and without ever muting the
+# genuinely urgent "problem" alerts (unprotected position, placement
+# failed). Mirrors send_account_telegram()'s own category convention.
+
+def test_send_account_email_skips_a_routine_category_when_the_user_turned_email_off(smtp_env, monkeypatch, account_and_owner):
+    import database
+    db = database.SessionLocal()
+    account = db.query(database.ExecutorAccount).filter_by(id=account_and_owner).first()
+    user_id = account.user_id
+    db.query(database.NotificationPreference).filter_by(user_id=user_id).delete()
+    db.add(database.NotificationPreference(user_id=user_id, notify_email_enabled=False))
+    db.commit()
+    db.close()
+    try:
+        with patch("smtplib.SMTP") as mock_smtp_cls:
+            ok = notify.send_account_email("subject", "body", account_and_owner)   # category defaults to "routine"
+        assert ok is False
+        mock_smtp_cls.assert_not_called()
+    finally:
+        db = database.SessionLocal()
+        db.query(database.NotificationPreference).filter_by(user_id=user_id).delete()
+        db.commit()
+        db.close()
+
+
+def test_send_account_email_never_skips_a_problem_category_even_with_email_off(smtp_env, monkeypatch, account_and_owner):
+    import database
+    db = database.SessionLocal()
+    account = db.query(database.ExecutorAccount).filter_by(id=account_and_owner).first()
+    user_id = account.user_id
+    db.query(database.NotificationPreference).filter_by(user_id=user_id).delete()
+    db.add(database.NotificationPreference(user_id=user_id, notify_email_enabled=False))
+    db.commit()
+    db.close()
+    try:
+        mock_server = MagicMock()
+        mock_server.__enter__ = MagicMock(return_value=mock_server)
+        mock_server.__exit__ = MagicMock(return_value=False)
+        with patch("smtplib.SMTP", return_value=mock_server):
+            ok = notify.send_account_email("subject", "body", account_and_owner, category="problem")
+        assert ok is True   # urgent risk alerts are never muted, same as Telegram's "problem" category
+    finally:
+        db = database.SessionLocal()
+        db.query(database.NotificationPreference).filter_by(user_id=user_id).delete()
+        db.commit()
+        db.close()
+
+
+def test_send_account_email_sends_normally_when_no_preference_row_exists_yet(smtp_env, monkeypatch, account_and_owner):
+    # No NotificationPreference row at all (the common case, e.g. Dawson/
+    # Terry who never touched this setting) -- must default to sending,
+    # zero behavior change for anyone who hasn't opted out.
+    mock_server = MagicMock()
+    mock_server.__enter__ = MagicMock(return_value=mock_server)
+    mock_server.__exit__ = MagicMock(return_value=False)
+    with patch("smtplib.SMTP", return_value=mock_server):
+        ok = notify.send_account_email("subject", "body", account_and_owner)
+    assert ok is True
+
+
 def test_send_account_email_skips_and_does_not_fall_back_to_merged_list_for_unknown_account(smtp_env, monkeypatch):
     # An unresolvable account must NOT silently broadcast to the merged
     # list -- that would reintroduce the exact cross-account leak L4 exists

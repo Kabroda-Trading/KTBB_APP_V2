@@ -262,7 +262,7 @@ def _notify_cme_admission_rejected(account: ExecutorAccount, symbol: str, direct
             "The session itself may still be ARMED and tradeable for other accounts -- "
             "this rejection is specific to this account's own configuration/risk state. "
             "No automatic retry.",
-            account.id,
+            account.id, category="problem",
         )
         notify.send_account_telegram("problem", notify._telegram_problem_text(
             "CME", symbol, f"{direction} order rejected at admission: {reason}"), account.id)

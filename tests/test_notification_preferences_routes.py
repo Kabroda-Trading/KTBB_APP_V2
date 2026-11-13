@@ -89,6 +89,25 @@ def test_get_preferences_returns_schema_defaults_with_no_row_yet(env):
     assert body["preferences"]["notify_fill"] is True
     assert body["preferences"]["notify_breakeven"] is True
     assert body["preferences"]["notify_exit"] is True
+    assert body["preferences"]["notify_email_enabled"] is True
+
+
+def test_post_preferences_can_turn_off_routine_email_independent_of_telegram(env):
+    # 2026-11-12, Andy's own ask: one master email switch, independent of
+    # the Telegram category toggles -- turning email off must not touch
+    # notify_fill/breakeven/exit (those gate Telegram only).
+    client = _login("np_owner@kabroda.com", "ownerpass123")
+    resp = client.post("/api/account/notification-preferences", json={"notify_email_enabled": False})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["preferences"]["notify_email_enabled"] is False
+    assert body["preferences"]["notify_fill"] is True
+    assert body["preferences"]["notify_breakeven"] is True
+    assert body["preferences"]["notify_exit"] is True
+
+    db = env["db"]
+    row = db.query(NotificationPreference).filter_by(user_id=env["owner_id"]).first()
+    assert row.notify_email_enabled is False
 
 
 def test_post_preferences_lazy_creates_the_row(env):

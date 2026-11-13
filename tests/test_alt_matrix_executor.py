@@ -510,8 +510,8 @@ def _async_fn_returning(value):
 def _capture_account_email(monkeypatch):
     import notify
     calls = []
-    def _fake(subject, body, account_id):
-        calls.append({"subject": subject, "body": body, "account_id": account_id})
+    def _fake(subject, body, account_id, category="routine"):
+        calls.append({"subject": subject, "body": body, "account_id": account_id, "category": category})
         return True
     monkeypatch.setattr(notify, "send_account_email", _fake)
     return calls

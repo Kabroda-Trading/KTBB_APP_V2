@@ -594,6 +594,18 @@ def init_db():
     except Exception as e:
         print(f"cme_orders constraint migration check failed: {e}")
 
+    # --- NOTIFICATION_PREFERENCES.notify_email_enabled (2026-11-12,
+    # Andy's own ask) -- added to an already-deployed table, unlike the
+    # three original notify_fill/breakeven/exit columns (which shipped
+    # with the table itself, no ALTER TABLE needed at the time). See the
+    # NotificationPreference class's own docstring for the full reasoning. ---
+    for _col in ["notify_email_enabled BOOLEAN DEFAULT TRUE"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE notification_preferences ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
     # --- DESK-PAGE REPORTING BUILD (2026-11-xx) -- dollar P&L + entry-fee
     # parity with CMEOrder/AltMatrixOrder, which already have both.
     # _finalize_traveler_close() (executor_live_e1_engine.py) already
@@ -1110,7 +1122,15 @@ class NotificationPreference(Base):
     noise a trader should be able to silently mute.
 
     New table -- picked up by Base.metadata.create_all() on deploy. No
-    ALTER TABLE needed."""
+    ALTER TABLE needed.
+
+    notify_email_enabled (2026-11-12, Andy's own ask) -- the EMAIL
+    counterpart to notify_fill/breakeven/exit above, but a single master
+    switch rather than three: Andy's own framing was "I don't really need
+    the email... that's why we built the [Telegram] bot," i.e. turn off
+    ALL routine trade-flow email for himself, not pick apart which kind.
+    Added to an already-deployed table -- DOES need the ALTER TABLE
+    pattern below, unlike the three original columns above."""
     __tablename__ = "notification_preferences"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -1118,6 +1138,7 @@ class NotificationPreference(Base):
     telegram_chat_id = Column(String, nullable=True)
     notify_fill = Column(Boolean, nullable=False, default=True)
     notify_breakeven = Column(Boolean, nullable=False, default=True)
+    notify_email_enabled = Column(Boolean, nullable=False, default=True)   # master switch for ROUTINE (non-"problem") trade-flow email -- see notify.send_account_email()'s own category param
     notify_exit = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
