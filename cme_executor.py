@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 import executor_accounts
+import executor_control
 import cme_signals
 from database import ExecutorAccount, CMEPlan, CMEOrder, CMETransition
 
@@ -217,6 +218,39 @@ async def _fetch_cme_exit_fee(client, account: ExecutorAccount, order_row: CMEOr
         print(f"|| CME EXECUTOR || exit fee-fetch failed for order {order_row.id}: {e}")
 
 
+def _notify_owner_problem(account: ExecutorAccount, order_row: CMEOrder, subject_tail: str, body: str) -> None:
+    """LIVE-only owner alert for a refusal/cancel decided by this module.
+    Never raises (same pattern as _notify_unprotected)."""
+    if (account.mode or "").upper() != "LIVE":
+        return
+    try:
+        import notify
+        notify.send_account_email(
+            f"KABRODA CME ALERT -- {order_row.symbol} {order_row.direction} {subject_tail} ({account.label or account.id})",
+            body, account.id, category="problem",
+        )
+        notify.send_account_telegram("problem", notify._telegram_problem_text(
+            "CME", order_row.symbol, f"{order_row.direction} {subject_tail}"), account.id)
+    except Exception as e:
+        print(f"|| CME EXECUTOR || owner notification failed for order {order_row.id}: {e}")
+
+
+def refuse_before_placement(db: Session, account: ExecutorAccount, order_row: CMEOrder, terminal_state: str, reason: str) -> None:
+    """Lane H (SPEC-H-20261114 C7.3 step 2 / C9.3 step 2): a confirmed
+    cross that may NOT be turned into a real order. No exchange call. The
+    row goes terminal (never deferred: releasing a switch later in the
+    day must not resurrect a stale entry -- spec N-5)."""
+    from_state = order_row.management_state
+    order_row.management_state = terminal_state
+    order_row.decision_reason = reason
+    order_row.closed_at = datetime.datetime.utcnow()
+    _log_transition(db, order_row, from_state, terminal_state, detail={"reason": reason})
+    _audit(db, "ERROR", f"LIVE-mode CME order {order_row.id} skipped real order placement -- {reason}", account.id, order_row)
+    _notify_owner_problem(account, order_row, "entry NOT placed",
+                          f"A confirmed {order_row.symbol} {order_row.direction} cross was not turned into an order.\n\n"
+                          f"Reason: {reason}\n\nNo order was sent. No automatic retry.")
+
+
 async def place_resting_bracket(db: Session, account: ExecutorAccount, plan_row: CMEPlan, order_row: CMEOrder) -> None:
     """Called once a confirmed cross has been detected for this plan
     (order_row.cross_confirmed_at is already set by the caller). Places the
@@ -227,6 +261,15 @@ async def place_resting_bracket(db: Session, account: ExecutorAccount, plan_row:
     (the watch loop calls this repeatedly until the row leaves
     WAITING_RETEST)."""
     if order_row.entry_exchange_order_id is not None:
+        return
+
+    # Lane H C9 (SPEC-H-20261114, AA-20261114-01): defense in depth at the
+    # ONLY call that opens new CME exchange exposure. Mirrors the Traveler
+    # LIVE gate (executor_engine.py). is_live_orders_enabled fails closed.
+    # Never applied to fills/cancels/BE/closes -- existing exposure is
+    # always managed (C9.3 step 3).
+    if (account.mode or "").upper() == "LIVE" and not executor_control.is_live_orders_enabled(db):
+        refuse_before_placement(db, account, order_row, "SKIPPED_LIVE_ORDERS_OFF", "global Live Orders switch is OFF")
         return
 
     client = _client_for(account)
@@ -282,7 +325,7 @@ async def check_retest_fill_and_confirm(db: Session, account: ExecutorAccount, o
         _audit(db, "ERROR", f"get_positions failed while confirming fill for CME order {order_row.id}: {e}", account.id, order_row)
         return
 
-    matches = [p for p in positions if p.get("contractId") == order_row.symbol or p.get("symbol") == order_row.symbol]
+    matches = [p for p in positions if _position_matches(p, order_row.symbol)]
     if not matches:
         return   # still resting -- recheck next tick
 
@@ -297,24 +340,106 @@ async def check_retest_fill_and_confirm(db: Session, account: ExecutorAccount, o
     _notify_account(db, account, "build_cme_entry_email", order_row)
 
 
-async def cancel_no_retest(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> None:
+def _position_matches(position: Dict[str, Any], symbol: str) -> bool:
+    return position.get("contractId") == symbol or position.get("symbol") == symbol
+
+
+# Lane H C5: broker order states. Field names/values are NOT YET
+# LIVE-VERIFIED for either client (spec gap G-ORD) -- an unrecognized
+# status is treated as "unreadable", never as "still working" or "gone".
+_ORDER_WORKING_STATUSES = {"working", "pendingnew", "pending_new", "accepted", "suspended",
+                           "pendingreplace", "pendingcancel", "pending_cancel", "filled", "partiallyfilled"}
+_ORDER_GONE_STATUSES = {"canceled", "cancelled", "expired", "rejected"}
+
+
+def _order_status_of(detail: Dict[str, Any]) -> Optional[str]:
+    for key in ("ordStatus", "status", "orderStatus", "state"):
+        val = detail.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower().replace(" ", "")
+    return None
+
+
+async def cancel_resting_entry(db: Session, account: ExecutorAccount, order_row: CMEOrder,
+                               terminal_state: str, reason: str) -> str:
+    """Lane H C5.3 steps 2-4 (SPEC-H-20261114): cancel a resting entry and
+    only book it terminal once the cancel is actually confirmed.
+    Returns:
+      "cancelled" -- confirmed gone, row booked terminal_state;
+      "filled"    -- the entry filled before the cancel landed; the row was
+                     handed to check_retest_fill_and_confirm (FILLED path);
+      "failed"    -- not confirmed (cancel returned False/raised, positions
+                     unreadable, or the order still reads as working). State
+                     untouched, ERROR audited, caller retries next tick.
+    Both clients' cancel_order RETURN False on a rejected cancel rather
+    than raising -- the old code only treated an exception as a failure
+    and booked the row closed with the order still resting (a floating
+    order)."""
+    client = _client_for(account)
+    entry_id = order_row.entry_exchange_order_id
+    cancel_ok, cancel_err = True, None
+    if entry_id:
+        try:
+            cancel_ok = bool(await client.cancel_order(int(entry_id)))
+            if not cancel_ok:
+                cancel_err = getattr(client, "last_cancel_error", None) or "cancel_order returned False"
+        except Exception as e:
+            cancel_ok, cancel_err = False, f"cancel_order raised: {e}"
+
+    # Step 3 -- fill race: a position for this symbol means the entry filled first.
+    try:
+        positions = await client.get_positions()
+    except Exception as e:
+        _audit(db, "ERROR", f"CME order {order_row.id} cancel ({reason}): position check failed, state unchanged, retrying: {e}"
+               + (f" | cancel error: {cancel_err}" if cancel_err else ""), account.id, order_row)
+        return "failed"
+    if any(_position_matches(p, order_row.symbol) for p in positions):
+        _audit(db, "ERROR", f"CME order {order_row.id} entry FILLED before the cancel ({reason}) landed -- treating as a fill, not {terminal_state}",
+               account.id, order_row, detail={"cancel_ok": cancel_ok, "cancel_error": cancel_err})
+        await check_retest_fill_and_confirm(db, account, order_row)
+        return "filled"
+    if not cancel_ok:
+        _audit(db, "ERROR", f"CME order {order_row.id} cancel failed ({reason}) -- order may still be resting, state unchanged, retrying: {cancel_err}",
+               account.id, order_row, detail={"cancel_error": cancel_err})
+        return "failed"
+
+    # Step 4 -- post-cancel verification.
+    verified: Optional[bool] = None
+    if entry_id:
+        try:
+            detail = await client.get_order_detail(int(entry_id))
+        except Exception:
+            detail = {}
+        if detail is None:
+            verified = True
+        else:
+            status = _order_status_of(detail) if isinstance(detail, dict) else None
+            if status in _ORDER_WORKING_STATUSES:
+                _audit(db, "ERROR", f"CME order {order_row.id} cancel reported OK but the order still reads {status!r} ({reason}) -- not booked, retrying",
+                       account.id, order_row)
+                return "failed"
+            # unreadable -> False, accepted with the empty-position check (spec C5.3 step 4)
+            verified = status in _ORDER_GONE_STATUSES
+
+    from_state = order_row.management_state
+    order_row.management_state = terminal_state
+    order_row.closed_at = datetime.datetime.utcnow()
+    _log_transition(db, order_row, from_state, terminal_state, detail={"reason": reason, "cancel_verified": verified})
+    _audit(db, "ORDER_PLACED", f"CME order {order_row.id} resting entry cancelled ({reason}) -> {terminal_state}", account.id, order_row,
+           detail={"cancel_verified": verified})
+    return "cancelled"
+
+
+async def cancel_no_retest(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> str:
     """The retest window elapsed with no fill -- cancel the resting
     bracket and close the row as NO_RETEST (never entered, never a trade).
     Mirrors the stand-down path audit_cme_universe_comparison.py's own
     backtest counts explicitly as a real outcome (stand_down_no_retest),
-    not an error."""
-    client = _client_for(account)
-    if order_row.entry_exchange_order_id:
-        try:
-            await client.cancel_order(int(order_row.entry_exchange_order_id))
-        except Exception as e:
-            _audit(db, "ERROR", f"cancel_order failed for CME order {order_row.id} on NO_RETEST timeout: {e}", account.id, order_row)
-            return   # retry next tick -- never assume cancelled on a failed call
-
-    _log_transition(db, order_row, order_row.management_state, "NO_RETEST")
-    order_row.management_state = "NO_RETEST"
-    order_row.closed_at = datetime.datetime.utcnow()
-    _audit(db, "ORDER_PLACED", f"CME order {order_row.id} resting bracket cancelled -- no retest within the window, standing down", account.id, order_row)
+    not an error. Lane H C5: the cancel is now verified (see
+    cancel_resting_entry) -- a rejected cancel or a fill race never books
+    NO_RETEST."""
+    return await cancel_resting_entry(db, account, order_row, "NO_RETEST",
+                                      "no retest within the window, standing down")
 
 
 async def amend_to_breakeven(db: Session, account: ExecutorAccount, order_row: CMEOrder, stop_order_id: int, be_price: float) -> bool:
@@ -401,15 +526,19 @@ async def cancel_or_close_order(db: Session, account: ExecutorAccount, order_row
     caller decides how to report that (emergency_flatten() catches it per-
     row; the single-order route 400s)."""
     if order_row.management_state in _CANCELLABLE_STATES:
-        client = _client_for(account)
-        if order_row.entry_exchange_order_id:
-            await client.cancel_order(int(order_row.entry_exchange_order_id))
-        from_state = order_row.management_state
-        order_row.management_state = f"CLOSED_{exit_reason}"
+        # Lane H C5.3 step 5: the cancel return value used to be ignored, so
+        # emergency flatten could report "cancelled" for an order still
+        # resting at the broker. Now verified; a failure raises so the
+        # caller reports it (flatten collects it into `errors`).
+        result = await cancel_resting_entry(db, account, order_row, f"CLOSED_{exit_reason}", f"manual/flatten ({exit_reason})")
+        if result == "failed":
+            raise RuntimeError(f"cancel of resting entry for order {order_row.id} could not be confirmed -- check the broker")
+        if result == "filled":
+            # Filled before the cancel landed: it is now an open position,
+            # and the caller asked for it gone -- close it.
+            await market_close(db, account, order_row, exit_reason=exit_reason)
+            return {"action": "closed", "order_id": order_row.id}
         order_row.exit_reason = exit_reason
-        order_row.closed_at = datetime.datetime.utcnow()
-        _log_transition(db, order_row, from_state, order_row.management_state, detail={"reason": exit_reason})
-        _audit(db, "POSITION_CLOSED", f"CME order {order_row.id} resting entry cancelled ({exit_reason})", account.id, order_row)
         return {"action": "cancelled", "order_id": order_row.id}
     elif order_row.management_state in _CLOSEABLE_STATES:
         await market_close(db, account, order_row, exit_reason=exit_reason)

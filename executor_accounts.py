@@ -120,7 +120,7 @@ def set_account_mode(db: Session, account: ExecutorAccount, new_mode: str, by: s
                 )
         else:
             policy = get_or_init_sizing_policy(db, account)
-            if policy.preset_name in (None, "steady_grow", "conservative"):
+            if not sizing_preset_confirmed(policy):
                 raise ValueError(
                     "cannot go LIVE -- no sizing choice has ever been explicitly saved on this account "
                     "(it's still running the untouched default). Go to step 3, pick an option, and click "
@@ -395,6 +395,41 @@ def update_risk_state(db: Session, account: ExecutorAccount, changes: Dict[str, 
             account_id=account.id, actor=updated_by, detail=changes,
         )
     return state
+
+
+# Lane H (SPEC-H-20261114 A4): the ONE definition of "a sizing choice has
+# been explicitly saved". get_or_init_sizing_policy() seeds the old
+# pre-wizard names below on first touch precisely so an untouched policy is
+# distinguishable from a real save. Every gate (set_account_mode, the
+# Traveler LIVE path, Alt Matrix LIVE, the admin badge) calls this so the
+# four sites can never drift apart.
+_UNCONFIRMED_PRESET_NAMES = (None, "steady_grow", "conservative")
+
+
+def sizing_preset_confirmed(policy: Optional["ExecutorSizingPolicy"]) -> bool:
+    return policy is not None and policy.preset_name not in _UNCONFIRMED_PRESET_NAMES
+
+
+_SIZING_NOT_CONFIRMED_REASON = (
+    "no sizing choice has ever been explicitly saved (still the untouched default) -- "
+    "go to Sizing Policy and click SAVE before this account can trade again"
+)
+
+
+def live_entry_refusal(db: Session, account: ExecutorAccount) -> Optional[Tuple[str, str]]:
+    """Lane H A1 + A4 (SPEC-H-20261114): the two crypto LIVE pre-entry
+    gates the Traveler path already enforces (executor_engine.py), in the
+    same order -- global Live Orders switch first, then a confirmed sizing
+    preset. Returns (decision, reason) to refuse, or None to proceed.
+    LIVE accounts only; DRY_RUN is never gated. Both reads fail closed."""
+    import executor_control
+    if (account.mode or "").upper() != "LIVE":
+        return None
+    if not executor_control.is_live_orders_enabled(db):
+        return "SKIPPED_LIVE_ORDERS_OFF", "global Live Orders switch is OFF"
+    if not sizing_preset_confirmed(get_or_init_sizing_policy(db, account)):
+        return "SKIPPED_SIZING_NOT_CONFIRMED", _SIZING_NOT_CONFIRMED_REASON
+    return None
 
 
 def get_or_init_sizing_policy(db: Session, account: ExecutorAccount) -> ExecutorSizingPolicy:

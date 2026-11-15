@@ -35,8 +35,9 @@
 
 import asyncio
 import datetime
+import json
 import traceback
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -48,7 +49,8 @@ import cme_market
 import cme_risk
 import cme_signals
 import executor_accounts
-from database import SessionLocal, CMEPlan, CMEOrder, CMEConfig, ExecutorAccount
+import executor_control
+from database import SessionLocal, CMEPlan, CMEOrder, CMEConfig, CMETransition, ExecutorAccount
 
 UTC = datetime.timezone.utc
 SYMBOLS = ["MNQ", "MES"]
@@ -66,6 +68,18 @@ _WATCH_POLL_SECONDS = 30
 _LOCK_BOUNDARY_BUFFER_SECONDS = 2.0
 
 _PENDING_RETEST_STATES = ("WAITING_RETEST",)
+# Lane H C5: 5-minute bar length, the same literal the retest window uses.
+_BAR_SECONDS = 300
+
+
+def _now_utc() -> datetime.datetime:
+    """Aware UTC now. One seam so tests can freeze the clock for the
+    window/backstop checks below."""
+    return datetime.datetime.now(UTC)
+
+
+def _aware(dt: datetime.datetime) -> datetime.datetime:
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 _OPEN_POSITION_STATES = ("FILLED", "RATCHETED", "ENTRY_FILLED_UNPROTECTED")
 
 
@@ -202,6 +216,26 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
         return
 
     for account, cfg in accounts:
+        # Lane H (SPEC-H-20261114 C7 + C9, approval AA-20261114-01): the
+        # kill switch / is_active (C7) and, for LIVE accounts, the global
+        # Live Orders switch (C9) are checked per account BEFORE any broker
+        # call, in that order, each refusal with its own decision value.
+        # Rows are still written for both directions (audit trail), and
+        # they are terminal: _advance_pending_order skips non-WOULD_PLACE.
+        skip = _admission_gate_refusal(db, account)
+        if skip is not None:
+            decision, reason = skip
+            for direction in ("LONG", "SHORT"):
+                db.add(CMEOrder(
+                    cme_plan_id=plan.id, account_id=account.id, mode=account.mode,
+                    symbol=symbol, direction=direction, box_at_entry=plan.box,
+                    contracts=0, point_multiplier=cme_signals.POINT_MULTIPLIER.get(symbol, 2.0),
+                    risk_dollars_used=0.0,
+                    decision=decision, decision_reason=reason,
+                    management_state=decision,
+                ))
+                _notify_cme_admission_rejected(account, symbol, direction, reason)
+            continue
         for direction, trig, stop in (("LONG", plan.bo, plan.stop_long), ("SHORT", plan.bd, plan.stop_short)):
             equity = await _query_equity(account)
             if equity is None:
@@ -241,6 +275,43 @@ async def _process_symbol_lock(db: Session, symbol: str, date_key: str) -> None:
             if order.decision == "REJECTED":
                 _notify_cme_admission_rejected(account, symbol, direction, order.decision_reason)
     db.flush()
+
+
+def _tradeable_refusal(db: Session, account: ExecutorAccount) -> Optional[Tuple[str, str]]:
+    """C7 (SPEC-H-20261114): (decision, reason) if the account may not open
+    new exposure because of the global kill switch, its own kill switch or
+    is_active; None if tradeable. Same decision-naming rule as Alt Matrix
+    (alt_matrix_engine.py: "kill switch" in reason -> SKIPPED_KILL_SWITCH,
+    otherwise SKIPPED_ACCOUNT_INACTIVE). is_account_tradeable fails closed
+    on any error, so an error reads as not tradeable."""
+    tradeable, reason = executor_accounts.is_account_tradeable(db, account)
+    if tradeable:
+        return None
+    decision = "SKIPPED_KILL_SWITCH" if "kill switch" in reason else "SKIPPED_ACCOUNT_INACTIVE"
+    return decision, reason
+
+
+def _live_orders_refusal(db: Session, account: ExecutorAccount) -> Optional[Tuple[str, str]]:
+    """C9 (SPEC-H-20261114): LIVE accounts only. The global Live Orders
+    switch gates real-money placement on every desk (executor_control.
+    is_live_orders_enabled fails closed: missing row / DB error = OFF).
+    DRY_RUN is never gated by it, same as Traveler and Alt Matrix (A1)."""
+    if (account.mode or "").upper() != "LIVE":
+        return None
+    if executor_control.is_live_orders_enabled(db):
+        return None
+    executor_accounts.write_audit(
+        db, "ERROR",
+        f"LIVE-mode CME account {account.id} skipped real order placement -- global Live Orders switch is OFF",
+        account_id=account.id, actor="system",
+    )
+    return "SKIPPED_LIVE_ORDERS_OFF", "global Live Orders switch is OFF"
+
+
+def _admission_gate_refusal(db: Session, account: ExecutorAccount) -> Optional[Tuple[str, str]]:
+    """Order fixed by the spec (C9.4): tradeable (C7) first, then Live
+    Orders (C9). Later checks (news, trailing DD, risk) stay where they are."""
+    return _tradeable_refusal(db, account) or _live_orders_refusal(db, account)
 
 
 def _notify_cme_admission_rejected(account: ExecutorAccount, symbol: str, direction: str, reason: Optional[str]) -> None:
@@ -406,11 +477,27 @@ async def _advance_pending_order(db: Session, order_row: CMEOrder) -> None:
     if plan is None:
         return
 
+    now = _now_utc()
+    session_end = cme_clock.flush_utc_for_date_key(plan.date_key)
+
     if order_row.management_state == "PENDING_ENTRY":
-        bars_5m = await cme_market.fetch_confirmed_5m(order_row.symbol, plan.lock_time)
+        # Lane H C5.3 step 6: session backstop. With the window expiry
+        # below this should never fire; if it does, say so loudly.
+        if now >= session_end:
+            _expire_no_cross(db, account, order_row, plan, reason="session backstop: still PENDING_ENTRY at the session flush",
+                             backstop=True)
+            return
+        # Lane H C5.3 step 1: the 60-min cross window (CROSS_WINDOW_BARS x
+        # 5m after the lock) is now actually enforced. Bars after the
+        # window are filtered out before check_cross, so the `limit=50`
+        # fetch can never surface a stale "cross" hours later.
+        window_end = _aware(plan.lock_time) + datetime.timedelta(seconds=cme_signals.CROSS_WINDOW_BARS * _BAR_SECONDS)
+        bars_5m = await cme_market.fetch_confirmed_5m(order_row.symbol, plan.lock_time, until_utc=window_end)
         cross = cme_signals.check_cross(bars_5m, plan.bo, plan.bd)
         if cross is None:
-            return   # still waiting within the cross window -- caller enforces the window via plan age, not here
+            if now >= window_end:
+                _expire_no_cross(db, account, order_row, plan, reason="no confirmed cross within the 60-min window")
+            return   # still inside the window
         if cross["side"] != order_row.direction:
             # The OTHER side crossed first (the fan-out creates one
             # PENDING_ENTRY row per direction, an OCO-style pair) -- this
@@ -420,19 +507,71 @@ async def _advance_pending_order(db: Session, order_row: CMEOrder) -> None:
             # straddle. Stand this side down permanently instead.
             cme_executor.stand_down_opposite_side(db, order_row, winning_side=cross["side"])
             return
-        order_row.cross_confirmed_at = datetime.datetime.utcnow()
+        # Lane H C7.3 step 2: re-check the kill switch / is_active right
+        # before the only call that opens exchange exposure. A switch
+        # engaged since the 10:00 admission refuses the entry (terminal).
+        refusal = _tradeable_refusal(db, account)
+        if refusal is not None:
+            cme_executor.refuse_before_placement(db, account, order_row, refusal[0], refusal[1])
+            return
+        order_row.cross_confirmed_at = now.replace(tzinfo=None)
         await cme_executor.place_resting_bracket(db, account, plan, order_row)
         return
 
     if order_row.management_state == "WAITING_RETEST":
+        # AA-20261114-03 (Andy, 2026-11-14): the kill switch ALSO cancels a
+        # resting, unfilled entry -- a new position must not open after the
+        # switch is hit. Open positions are untouched (stops/targets stay,
+        # management continues). Verified cancel; a fill race becomes FILLED.
+        refusal = _tradeable_refusal(db, account)
+        if refusal is not None:
+            terminal = "CLOSED_KILL_SWITCH" if refusal[0] == "SKIPPED_KILL_SWITCH" else "CLOSED_ACCOUNT_INACTIVE"
+            result = await cme_executor.cancel_resting_entry(db, account, order_row, terminal, refusal[1])
+            if result == "cancelled":
+                cme_executor._notify_owner_problem(account, order_row, "resting entry CANCELLED",
+                                                   f"The resting {order_row.symbol} {order_row.direction} entry was cancelled.\n\n"
+                                                   f"Reason: {refusal[1]}")
+            return
+        # Lane H C5.3 step 6: session backstop for a resting entry.
+        if now >= session_end:
+            cme_executor._audit(db, "ERROR", f"CME order {order_row.id} still WAITING_RETEST at the session flush -- "
+                                "session backstop cancelling (should never be reached)", account.id, order_row)
+            await cme_executor.cancel_resting_entry(db, account, order_row, "NO_RETEST",
+                                                    "session backstop: still resting at the session flush")
+            return
         window_elapsed = (
-            datetime.datetime.utcnow() - order_row.cross_confirmed_at
-        ).total_seconds() > cme_signals.RETEST_WINDOW_BARS * 300 if order_row.cross_confirmed_at else False
+            now.replace(tzinfo=None) - order_row.cross_confirmed_at
+        ).total_seconds() > cme_signals.RETEST_WINDOW_BARS * _BAR_SECONDS if order_row.cross_confirmed_at else False
         if window_elapsed:
             await cme_executor.cancel_no_retest(db, account, order_row)
             return
         await cme_executor.check_retest_fill_and_confirm(db, account, order_row)
         return
+
+
+def _expire_no_cross(db: Session, account: ExecutorAccount, order_row: CMEOrder, plan: CMEPlan,
+                     reason: str, backstop: bool = False) -> None:
+    """Lane H C5.3 step 1: PENDING_ENTRY -> NO_CROSS (terminal). No
+    exchange call -- nothing was ever placed for a PENDING_ENTRY row. When
+    every WOULD_PLACE row of the plan has ended NO_CROSS, the plan itself
+    becomes DONE (the status database.py's CMEPlan comment names)."""
+    from_state = order_row.management_state
+    order_row.management_state = "NO_CROSS"
+    order_row.closed_at = datetime.datetime.utcnow()
+    db.add(CMETransition(
+        cme_plan_id=order_row.cme_plan_id, cme_order_id=order_row.id,
+        from_state=from_state, to_state="NO_CROSS", detail_json=json.dumps({"reason": reason}),
+    ))
+    executor_accounts.write_audit(
+        db, "ERROR" if backstop else "ORDER_PLACED",
+        f"CME order {order_row.id} {reason} -- NO_CROSS" + (" (should never be reached)" if backstop else ""),
+        account_id=account.id, actor="system", detail={"cme_order_id": order_row.id},
+    )
+    db.flush()
+    siblings = db.query(CMEOrder).filter(CMEOrder.cme_plan_id == plan.id, CMEOrder.decision == "WOULD_PLACE").all()
+    if siblings and all(s.management_state == "NO_CROSS" for s in siblings) and plan.status == "ARMED":
+        plan.status = "DONE"
+        plan.status_reason = "no cross within window"
 
 
 async def _advance_open_position(db: Session, order_row: CMEOrder) -> None:

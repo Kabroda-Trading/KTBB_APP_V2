@@ -488,6 +488,14 @@ def test_cme_cancel_order_second_call_after_success_400s_not_double_cancels(env,
         return True
     monkeypatch.setattr(tvc.TradovateClient, "cancel_order", _fake_cancel)
 
+    # Lane H C5: the cancel is now verified (no matching position, order gone).
+    async def _no_positions(self, *a, **kw):
+        return []
+    async def _order_gone(self, *a, **kw):
+        return None
+    monkeypatch.setattr(tvc.TradovateClient, "get_positions", _no_positions)
+    monkeypatch.setattr(tvc.TradovateClient, "get_order_detail", _order_gone)
+
     client = _login("cme_owner@kabroda.com", "ownerpass123")
     first = client.post(f"/api/cme/orders/{order.id}/cancel")
     assert first.status_code == 200

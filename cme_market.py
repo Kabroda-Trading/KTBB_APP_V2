@@ -103,7 +103,8 @@ async def fetch_calibration_1m(symbol: str, date_key: str) -> List[Dict[str, Any
     return cal_bars
 
 
-async def fetch_confirmed_5m(symbol: str, since_utc: datetime.datetime) -> List[Dict[str, Any]]:
+async def fetch_confirmed_5m(symbol: str, since_utc: datetime.datetime,
+                             until_utc: Optional[datetime.datetime] = None) -> List[Dict[str, Any]]:
     """Confirmed (fully closed) 5-minute bars for `symbol` since `since_utc`,
     in the shape cme_signals.check_cross()/check_retest_fill() expect, from
     CrossTrade's zero-lag GetBars feed (native 5m bars -- no 1m->5m
@@ -117,6 +118,15 @@ async def fetch_confirmed_5m(symbol: str, since_utc: datetime.datetime) -> List[
     if since_utc.tzinfo is None:
         since_utc = since_utc.replace(tzinfo=datetime.timezone.utc)
     matching = [b for b in bars if b.get("time") and b["time"] >= since_utc]
+    # Lane H C5 (SPEC-H-20261114): optional upper bound so the D2 cross
+    # scan only ever sees bars inside the 60-min cross window. This must
+    # happen HERE because _strip_to_signal_shape() drops the timestamps.
+    # Same bar-label convention as the `>= since` filter above; whether
+    # `time` is a bar's open or close is still UNKNOWN (PROGRAM D1).
+    if until_utc is not None:
+        if until_utc.tzinfo is None:
+            until_utc = until_utc.replace(tzinfo=datetime.timezone.utc)
+        matching = [b for b in matching if b["time"] < until_utc]
     return _strip_to_signal_shape(matching)
 
 

@@ -50,7 +50,8 @@ def _clean_db_files():
 
 
 def _clean_rows(session):
-    for model in (AltMatrixTransition, AltMatrixOrder, AltMatrixPlan, AltMatrixConfig, ExecutorSizingPolicy, ExecutorAccount):
+    for model in (AltMatrixTransition, AltMatrixOrder, AltMatrixPlan, AltMatrixConfig, ExecutorSizingPolicy, ExecutorAccount,
+                  database.ExecutorGlobalConfig):
         session.query(model).delete()
     session.commit()
 
@@ -69,7 +70,7 @@ def db(monkeypatch):
     _clean_db_files()
 
 
-def _account(db, label="engine_test", mode="DRY_RUN", active=True, kill_switch=False):
+def _account(db, label="engine_test", mode="DRY_RUN", active=True, kill_switch=False, sizing_confirmed=True):
     account = ea.create_account(db, user_id=1, label=label)
     db.flush()
     account.mode = mode
@@ -78,6 +79,10 @@ def _account(db, label="engine_test", mode="DRY_RUN", active=True, kill_switch=F
     if mode == "LIVE":
         ea.set_credentials(db, account, api_key="k", api_secret="s", set_by="test@kabroda.com")
         ec.enable_live_orders(db, reason="testing", by="andy@kabroda.com")
+        # Lane H A4: a LIVE Alt Matrix entry now needs an explicitly saved
+        # sizing preset ("custom" is a real wizard value).
+        if sizing_confirmed:
+            ea.get_or_init_sizing_policy(db, account).preset_name = "custom"
     db.commit()
     return account
 
@@ -624,3 +629,70 @@ def test_skipped_macro_plan_sends_admin_signal_email_not_account_email(db, monke
     assert len(admin_calls) == 1
     assert "Cross Filtered" in admin_calls[0]["subject"]
     assert len(account_calls) == 0   # no order was ever attempted for a non-ARMED plan
+
+
+# ================================================================== Lane H batch 1 (SPEC-H-20261114): A1 + A4
+
+from database import ExecutorAuditLog  # noqa: E402  (Lane H tests)
+
+
+def _alt_audit_messages(db, account, event_type="ERROR"):
+    db.flush()
+    return [r.message or "" for r in db.query(ExecutorAuditLog).filter_by(account_id=account.id, event_type=event_type).all()]
+
+
+def _fail_place_mock(monkeypatch):
+    async def _fail(db_, account_, order_row):
+        raise AssertionError("place_entry_and_protect must not be called")
+    monkeypatch.setattr(ame.alt_matrix_executor, "place_entry_and_protect", _fail)
+
+
+def test_a1_try_enter_live_with_live_orders_off_is_not_entered_and_not_placed(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    plan = _plan(db)
+    _common_entry_mocks(monkeypatch)
+    _fail_place_mock(monkeypatch)
+
+    decision = _run(ame._try_enter_for_account(db, account, plan, "SOL/USDT", 100.0, 97.0, 2.0))
+    assert decision == "SKIPPED_LIVE_ORDERS_OFF"
+    order = db.query(AltMatrixOrder).filter_by(account_id=account.id, alt_matrix_plan_id=plan.id).first()
+    assert order.management_state == "NOT_ENTERED"
+    assert any("Live Orders switch is OFF" in m for m in _alt_audit_messages(db, account))
+
+
+@pytest.mark.parametrize("preset", [None, "steady_grow", "conservative"])
+def test_a4_try_enter_live_with_unconfirmed_preset_is_not_entered(db, monkeypatch, preset):
+    account = _account(db, mode="LIVE", sizing_confirmed=False)
+    ea.get_or_init_sizing_policy(db, account).preset_name = preset
+    db.commit()
+    plan = _plan(db)
+    _common_entry_mocks(monkeypatch)
+    _fail_place_mock(monkeypatch)
+
+    decision = _run(ame._try_enter_for_account(db, account, plan, "SOL/USDT", 100.0, 97.0, 2.0))
+    assert decision == "SKIPPED_SIZING_NOT_CONFIRMED"
+    order = db.query(AltMatrixOrder).filter_by(account_id=account.id, alt_matrix_plan_id=plan.id).first()
+    assert order.management_state == "NOT_ENTERED"
+
+
+def test_a1_a4_dry_run_ignores_live_orders_switch_and_preset(db, monkeypatch):
+    account = _account(db, mode="DRY_RUN")
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    plan = _plan(db)
+    _common_entry_mocks(monkeypatch)
+    decision = _run(ame._try_enter_for_account(db, account, plan, "SOL/USDT", 100.0, 97.0, 2.0))
+    assert decision == "WOULD_PLACE"
+
+
+def test_a1_live_orders_off_is_reported_before_sizing_gate(db, monkeypatch):
+    account = _account(db, mode="LIVE", sizing_confirmed=False)
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    plan = _plan(db)
+    _common_entry_mocks(monkeypatch)
+    _fail_place_mock(monkeypatch)
+    decision = _run(ame._try_enter_for_account(db, account, plan, "SOL/USDT", 100.0, 97.0, 2.0))
+    assert decision == "SKIPPED_LIVE_ORDERS_OFF"

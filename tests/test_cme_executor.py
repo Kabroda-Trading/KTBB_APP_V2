@@ -206,7 +206,7 @@ def test_cancel_no_retest_closes_the_order(db, monkeypatch):
     account = _ready_account(db)
     plan = _plan(db)
     order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
-    _patch(monkeypatch, cancel_order=_async(True))
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async([]), get_order_detail=_async(None))
 
     _run(cx.cancel_no_retest(db, account, order))
     db.commit()
@@ -219,7 +219,7 @@ def test_cancel_no_retest_leaves_state_unchanged_on_a_failed_cancel_call(db, mon
     account = _ready_account(db)
     plan = _plan(db)
     order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
-    _patch(monkeypatch, cancel_order=_async(exc=RuntimeError("network error")))
+    _patch(monkeypatch, cancel_order=_async(exc=RuntimeError("network error")), get_positions=_async([]))
 
     _run(cx.cancel_no_retest(db, account, order))
     assert order.management_state == "WAITING_RETEST"   # never assume cancelled on a failed call
@@ -295,7 +295,8 @@ def test_emergency_flatten_cancels_resting_and_closes_open_positions(db, monkeyp
     _patch(monkeypatch,
            cancel_order=_async(True),
            emergency_market_close=_async(True),
-           get_positions=_async([]))
+           get_positions=_async([]),
+           get_order_detail=_async(None))
 
     result = _run(cx.emergency_flatten(db, account))
     db.commit()
@@ -311,7 +312,7 @@ def test_emergency_flatten_collects_errors_without_stopping(db, monkeypatch):
     account = _ready_account(db)
     plan = _plan(db)
     resting = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
-    _patch(monkeypatch, cancel_order=_async(exc=RuntimeError("boom")))
+    _patch(monkeypatch, cancel_order=_async(exc=RuntimeError("boom")), get_positions=_async([]))
 
     result = _run(cx.emergency_flatten(db, account))
     assert result["cancelled"] == []
@@ -329,7 +330,7 @@ def test_cancel_or_close_order_cancels_a_resting_entry(db, monkeypatch):
     account = _ready_account(db)
     plan = _plan(db)
     order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
-    _patch(monkeypatch, cancel_order=_async(True))
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async([]), get_order_detail=_async(None))
 
     result = _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
     db.commit()
@@ -371,7 +372,7 @@ def test_cancel_or_close_order_double_cancel_second_call_raises_not_double_cance
     account = _ready_account(db)
     plan = _plan(db)
     order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
-    _patch(monkeypatch, cancel_order=_async(True))
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async([]), get_order_detail=_async(None))
 
     first = _run(cx.cancel_or_close_order(db, account, order, exit_reason="MANUAL"))
     db.commit()
@@ -574,3 +575,173 @@ def test_exit_fee_fetch_failure_does_not_break_closure_for_a_crosstrade_account(
 
     assert order.management_state == "CLOSED_TIME_FLUSH"   # real closure unaffected
     assert order.exit_fee_usd is None
+
+
+# ================================================================== Lane H batch 1 (SPEC-H-20261114): C9 + C5 verified cancel
+
+def _audit_messages(db, account, event_type=None):
+    db.flush()
+    q = db.query(ExecutorAuditLog).filter_by(account_id=account.id)
+    if event_type:
+        q = q.filter_by(event_type=event_type)
+    return [r.message or "" for r in q.all()]
+
+
+def _resting(db, account, plan):
+    return _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777")
+
+
+def test_c9_place_resting_bracket_refuses_when_live_orders_off(db, monkeypatch):
+    account = _ready_account(db)
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    plan = _plan(db)
+    order = _order(db, account, plan)
+    calls = {"n": 0}
+
+    async def _count(self, *a, **kw):
+        calls["n"] += 1
+        return {"orderId": 1}
+    _patch(monkeypatch, place_bracket_limit_order=_count)
+
+    _run(cx.place_resting_bracket(db, account, plan, order))
+    db.flush()
+    assert calls["n"] == 0
+    assert order.management_state == "SKIPPED_LIVE_ORDERS_OFF"
+    assert order.entry_exchange_order_id is None
+    assert any("Live Orders switch is OFF" in m for m in _audit_messages(db, account, "ERROR"))
+
+
+def test_c9_place_resting_bracket_switch_read_failure_fails_closed(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan)
+    monkeypatch.setattr(ec, "is_live_orders_enabled", lambda db_: False)
+
+    async def _fail(self, *a, **kw):
+        raise AssertionError("must not place")
+    _patch(monkeypatch, place_bracket_limit_order=_fail)
+
+    _run(cx.place_resting_bracket(db, account, plan, order))
+    assert order.management_state == "SKIPPED_LIVE_ORDERS_OFF"
+
+
+def test_c9_emergency_flatten_still_works_with_live_orders_off(db, monkeypatch):
+    account = _ready_account(db)
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    plan = _plan(db)
+    resting = _resting(db, account, plan)
+    plan2 = _plan(db, symbol="MES")
+    open_pos = _order(db, account, plan2, symbol="MES", management_state="FILLED", entry_fill_price=4500.0)
+    _patch(monkeypatch, cancel_order=_async(True), emergency_market_close=_async(True),
+           get_positions=_async([]), get_order_detail=_async(None))
+
+    result = _run(cx.emergency_flatten(db, account))
+    assert resting.id in result["cancelled"]
+    assert open_pos.id in result["closed"]
+
+
+def test_c5_cancel_no_retest_false_return_is_a_failed_cancel(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(False), get_positions=_async([]))
+
+    result = _run(cx.cancel_no_retest(db, account, order))
+    db.flush()
+    assert result == "failed"
+    assert order.management_state == "WAITING_RETEST"
+    assert order.closed_at is None
+    assert any("cancel failed" in m for m in _audit_messages(db, account, "ERROR"))
+
+
+def test_c5_cancel_no_retest_detects_fill_race_and_confirms_fill(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(False),
+           get_positions=_async([{"symbol": "MNQ", "netPrice": 4500.0, "id": 9}]))
+
+    result = _run(cx.cancel_no_retest(db, account, order))
+    assert result == "filled"
+    assert order.management_state == "FILLED"
+    assert order.entry_fill_price == 4500.0
+
+
+def test_c5_cancel_reported_ok_but_order_still_working_is_not_booked(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async([]),
+           get_order_detail=_async({"id": 777, "ordStatus": "Working"}))
+
+    result = _run(cx.cancel_no_retest(db, account, order))
+    assert result == "failed"
+    assert order.management_state == "WAITING_RETEST"
+
+
+def test_c5_cancel_verified_gone_books_no_retest(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async([]), get_order_detail=_async(None))
+
+    result = _run(cx.cancel_no_retest(db, account, order))
+    db.flush()
+    assert result == "cancelled"
+    assert order.management_state == "NO_RETEST"
+    assert order.closed_at is not None
+    t = db.query(CMETransition).filter_by(cme_order_id=order.id).all()
+    assert t[-1].to_state == "NO_RETEST" and '"cancel_verified": true' in t[-1].detail_json
+
+
+def test_c5_cancel_with_unreadable_order_status_is_accepted_but_marked_unverified(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async([]), get_order_detail=_async({"id": 777}))
+
+    result = _run(cx.cancel_no_retest(db, account, order))
+    db.flush()
+    assert result == "cancelled"
+    t = db.query(CMETransition).filter_by(cme_order_id=order.id).all()
+    assert '"cancel_verified": false' in t[-1].detail_json
+
+
+def test_c5_positions_unreadable_leaves_state_unchanged(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(True), get_positions=_async(exc=RuntimeError("down")))
+
+    assert _run(cx.cancel_no_retest(db, account, order)) == "failed"
+    assert order.management_state == "WAITING_RETEST"
+
+
+def test_c5_emergency_flatten_reports_an_unconfirmed_cancel_as_an_error(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+    _patch(monkeypatch, cancel_order=_async(False), get_positions=_async([]))
+
+    result = _run(cx.emergency_flatten(db, account))
+    assert result["cancelled"] == []
+    assert len(result["errors"]) == 1 and result["errors"][0]["order_id"] == order.id
+    assert order.management_state == "WAITING_RETEST"
+
+
+def test_c5_crosstrade_cancel_failure_reason_is_audited(db, monkeypatch):
+    account = _ready_crosstrade_account(db)
+    plan = _plan(db)
+    order = _resting(db, account, plan)
+
+    async def _reject(self, order_id):
+        self.last_cancel_error = "HTTP 400: order not cancellable"
+        return False
+    _patch_crosstrade(monkeypatch, cancel_order=_reject, get_positions=_async([]))
+
+    _run(cx.cancel_no_retest(db, account, order))
+    db.flush()
+    assert order.management_state == "WAITING_RETEST"
+    assert any("HTTP 400: order not cancellable" in m for m in _audit_messages(db, account, "ERROR"))

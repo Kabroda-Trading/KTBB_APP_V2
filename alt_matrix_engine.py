@@ -327,6 +327,27 @@ async def _try_enter_for_account(
         db.flush()
         return decision
 
+    # Lane H A1 + A4 (SPEC-H-20261114, AA-20261114-01): LIVE entries obey
+    # the global Live Orders switch and need a confirmed sizing preset,
+    # exactly like the Traveler LIVE path. Checked here, before any
+    # exchange query or sizing, and terminal (NOT_ENTERED) so the watch
+    # loop can never place it later.
+    live_refusal = executor_accounts.live_entry_refusal(db, account)
+    if live_refusal is not None:
+        decision, reason = live_refusal
+        order_row.decision = decision
+        order_row.decision_reason = reason
+        order_row.management_state = "NOT_ENTERED"
+        db.add(order_row)
+        db.flush()
+        executor_accounts.write_audit(
+            db, "ERROR",
+            f"LIVE-mode ALT_MATRIX account {account.id} skipped real order placement for {symbol} -- {reason} "
+            f"(alt_matrix_order_id={order_row.id})",
+            account_id=account.id, actor="system", detail={"alt_matrix_order_id": order_row.id},
+        )
+        return decision
+
     already_open = db.query(AltMatrixOrder).filter(
         AltMatrixOrder.account_id == account.id, AltMatrixOrder.symbol == symbol,
         AltMatrixOrder.management_state.in_(list(_PENDING_MGMT_STATES) + list(_OPEN_MGMT_STATES)),

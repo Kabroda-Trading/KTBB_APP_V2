@@ -147,7 +147,7 @@ async def _process_traveler_account(
                 account_id=account.id, traveler_plan_id=traveler_plan_row.id, executor_order_id=order.id, actor="system")
             return
         policy = executor_accounts.get_or_init_sizing_policy(db, account)
-        if policy.preset_name in (None, "steady_grow", "conservative"):
+        if not executor_accounts.sizing_preset_confirmed(policy):
             executor_accounts.write_audit(
                 db, "ERROR",
                 f"LIVE-mode GATE_TRAVELER account {account.id} skipped real order placement -- "

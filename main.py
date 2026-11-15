@@ -2005,7 +2005,7 @@ def _serialize_account(account: "_ExecutorAccount", db: Session) -> Dict[str, An
         "sizing_confirmed": (
             _cme_sizing_confirmed(db, account)
             if (account.exchange or "").strip().lower() == "tradovate"
-            else policy.preset_name not in (None, "steady_grow", "conservative")
+            else _executor_accounts.sizing_preset_confirmed(policy)
         ),
     }
 

@@ -61,12 +61,15 @@ def db(monkeypatch):
     _clean_db_files()
 
 
-def _ready_account(db, label="alt_matrix_exec_test"):
+def _ready_account(db, label="alt_matrix_exec_test", sizing_confirmed=True):
     account = ea.create_account(db, user_id=1, label=label)
     db.flush()
     account.mode = "LIVE"
     ea.set_credentials(db, account, api_key="fake-key", api_secret="fake-secret", set_by="test@kabroda.com")
     ec.enable_live_orders(db, reason="testing", by="andy@kabroda.com")
+    # Lane H A4: LIVE placement needs an explicitly saved sizing preset.
+    if sizing_confirmed:
+        ea.get_or_init_sizing_policy(db, account).preset_name = "custom"
     db.commit()
     return account
 
@@ -948,3 +951,48 @@ def test_manual_closure_manual_branch_queries_history_by_position_id_excluding_k
     assert order.management_state == "CLOSED_MANUAL"
     assert order.exit_fee_usd == pytest.approx(0.06)   # entry + stop legs excluded
     assert calls == [{"order_id": None, "position_id": "pos1"}]
+
+
+# ================================================================== Lane H batch 1 (SPEC-H-20261114): A1 + A4 defense in depth
+
+def _never(self, *a, **kw):
+    raise AssertionError("no new market entry may be placed")
+
+
+def test_a1_place_entry_refuses_new_market_order_when_switch_off(db, monkeypatch):
+    account = _ready_account(db)
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    order = _order(db, account)
+    _patch(monkeypatch, get_trading_pairs=_async(_pair_resp()), place_order=_never)
+
+    _run(ax.place_entry_and_protect(db, account, order))
+    assert order.management_state == "NOT_ENTERED"
+    assert order.decision == "SKIPPED_LIVE_ORDERS_OFF"
+
+
+def test_a4_place_entry_refuses_new_market_order_when_preset_unconfirmed(db, monkeypatch):
+    account = _ready_account(db, sizing_confirmed=False)
+    order = _order(db, account)
+    _patch(monkeypatch, get_trading_pairs=_async(_pair_resp()), place_order=_never)
+
+    _run(ax.place_entry_and_protect(db, account, order))
+    assert order.management_state == "NOT_ENTERED"
+    assert order.decision == "SKIPPED_SIZING_NOT_CONFIRMED"
+
+
+def test_a1_a4_existing_entry_is_still_confirmed_and_protected_when_gates_fail(db, monkeypatch):
+    account = _ready_account(db, sizing_confirmed=False)
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    order = _order(db, account, entry_exchange_order_id="entry1")
+    _patch(monkeypatch,
+           get_trading_pairs=_async(_pair_resp()),
+           place_order=_never,
+           get_order_detail=_async(_order_detail_resp("FILLED")),
+           get_position=_async(_position_resp(position_id="pos1", avg_open_price=102.0)),
+           set_position_tpsl=_async(_tpsl_set_resp("sl1")))
+
+    _run(ax.place_entry_and_protect(db, account, order))
+    assert order.management_state == "FILLED"
+    assert order.sl_exchange_order_id == "sl1"

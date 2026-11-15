@@ -346,6 +346,26 @@ async def place_entry_and_protect(db: Session, account: ExecutorAccount, order_r
     call. Mirrors executor_live_e1_engine.py's check_traveler_entry_fill_
     and_protect()'s own stop-placement sequence exactly, minus the T1 leg
     (Alt Matrix has none -- trailing/breakeven management only)."""
+    if order_row.entry_exchange_order_id is None:
+        # Lane H A1 + A4 (SPEC-H-20261114): defense in depth at the only
+        # call that places a NEW real market entry. Covers a row created
+        # while the switch was on / preset confirmed whose placement never
+        # stored an id, which the watch loop would otherwise retry later.
+        # Terminal (a market entry placed hours late is a different trade).
+        # An entry that already has an id is never gated: its fill and
+        # stop must always be completed.
+        refusal = executor_accounts.live_entry_refusal(db, account)
+        if refusal is not None:
+            decision, reason = refusal
+            from_state = order_row.management_state
+            order_row.decision = decision
+            order_row.decision_reason = reason
+            _log_transition(db, order_row, from_state, "NOT_ENTERED", detail={"reason": reason})
+            order_row.management_state = "NOT_ENTERED"
+            _audit(db, "ERROR", f"LIVE-mode ALT_MATRIX order {order_row.id} skipped real order placement -- {reason}",
+                   account.id, order_row)
+            return
+
     client = _client_for(account)
     symbol = order_row.symbol.replace("/", "")
     pair = await _get_pair_precision(client, symbol)

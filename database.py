@@ -3522,6 +3522,13 @@ class CMEOrder(Base):
     # RATCHETED | CLOSED_STOP | CLOSED_BE_STOP | CLOSED_TARGET |
     # CLOSED_TIME_FLUSH | CLOSED_MANUAL | CLOSED_ERROR |
     # ENTRY_FILLED_UNPROTECTED
+    # Lane H (SPEC-H-20261114, 2026-11-14) adds, all terminal:
+    # NO_CROSS (no confirmed cross inside the 60-min window, or session
+    # backstop) | SKIPPED_KILL_SWITCH | SKIPPED_ACCOUNT_INACTIVE |
+    # SKIPPED_LIVE_ORDERS_OFF (refused before any exchange call; also used
+    # as the decision value) | CLOSED_KILL_SWITCH | CLOSED_ACCOUNT_INACTIVE
+    # (a RESTING entry cancelled because the kill switch / inactive flag
+    # was set -- AA-20261114-03).
     # OPPOSITE_CROSSED (added 2026-11-04): the D1 fan-out creates one
     # PENDING_ENTRY row per direction (LONG+SHORT) per account per plan --
     # a legitimate OCO-style pair, only one of which can ever actually

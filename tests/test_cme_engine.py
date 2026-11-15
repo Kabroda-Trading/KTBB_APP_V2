@@ -47,7 +47,9 @@ def _clean_db_files():
 
 
 def _clean_rows(session):
-    for model in (CMETransition, CMEOrder, CMEPlan, CMEConfig, ExecutorAccount):
+    # ExecutorGlobalConfig too (Lane H tests engage the global kill switch /
+    # disable Live Orders; on Windows the DB file can survive between tests).
+    for model in (CMETransition, CMEOrder, CMEPlan, CMEConfig, ExecutorAccount, database.ExecutorGlobalConfig):
         session.query(model).delete()
     session.commit()
 
@@ -66,10 +68,12 @@ def db(monkeypatch):
     _clean_db_files()
 
 
-def _account(db, label="cme_engine_test", mode="DRY_RUN"):
+def _account(db, label="cme_engine_test", mode="DRY_RUN", active=True, kill_switch=False):
     account = ea.create_account(db, user_id=1, label=label)
     db.flush()
     account.mode = mode
+    account.is_active = active
+    account.kill_switch_engaged = kill_switch
     if mode == "LIVE":
         ea.set_credentials(db, account, api_key="u", api_secret="p", set_by="test@kabroda.com")
         ec.enable_live_orders(db, reason="testing", by="andy@kabroda.com")
@@ -115,6 +119,26 @@ def _order(db, account, plan, **overrides):
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+# Lane H C5 (SPEC-H-20261114): _advance_pending_order now enforces the
+# 60-min cross window and the session-flush backstop against
+# cme_engine._now_utc(). Every fixture plan locks at 2026-11-04 15:00 UTC
+# (10:00 ET), so the engine clock is frozen 30 min after that lock by
+# default -- inside the cross window, before the 16:00 ET flush. Tests
+# that need another instant re-freeze it.
+_LOCK_UTC = datetime.datetime(2026, 11, 4, 15, 0, 0, tzinfo=UTC)
+_T0 = _LOCK_UTC + datetime.timedelta(minutes=30)
+_T0_NAIVE = _T0.replace(tzinfo=None)
+
+
+def _freeze(monkeypatch, instant):
+    monkeypatch.setattr(ce, "_now_utc", lambda: instant)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_engine_clock(monkeypatch):
+    _freeze(monkeypatch, _T0)
 
 
 def _capture_emails(monkeypatch):
@@ -665,7 +689,7 @@ def test_advance_pending_order_no_cross_yet_leaves_state_untouched(db, monkeypat
     plan = _plan(db)
     order = _order(db, account, plan, management_state="PENDING_ENTRY")
 
-    async def _fake_bars(symbol, since):
+    async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4490.0}]   # inside the box -- no cross
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -679,7 +703,7 @@ def test_advance_pending_order_cross_confirmed_places_bracket(db, monkeypatch):
     plan = _plan(db)
     order = _order(db, account, plan, management_state="PENDING_ENTRY")
 
-    async def _fake_bars(symbol, since):
+    async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4510.0}]   # beyond bo=4500 -- confirmed LONG cross
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -705,7 +729,7 @@ def test_advance_pending_order_opposite_side_stands_down_instead_of_also_enterin
     long_order = _order(db, account, plan, direction="LONG", management_state="PENDING_ENTRY")
     short_order = _order(db, account, plan, direction="SHORT", management_state="PENDING_ENTRY")
 
-    async def _fake_bars(symbol, since):
+    async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4510.0}]   # beyond bo=4500 -- confirmed LONG cross only
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -731,7 +755,7 @@ def test_advance_pending_order_skips_a_rejected_decision(db, monkeypatch):
     order = _order(db, account, plan, management_state="PENDING_ENTRY", decision="REJECTED", decision_reason="trailing dd")
 
     called = {"n": 0}
-    async def _should_not_run(symbol, since):
+    async def _should_not_run(symbol, since, until_utc=None):
         called["n"] += 1
         return [{"close": 4510.0}]
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _should_not_run)
@@ -744,7 +768,7 @@ def test_advance_pending_order_skips_a_rejected_decision(db, monkeypatch):
 def test_advance_pending_order_retest_window_elapsed_cancels(db, monkeypatch):
     account = _account(db, mode="LIVE")
     plan = _plan(db)
-    stale_cross = datetime.datetime.utcnow() - datetime.timedelta(minutes=120)
+    stale_cross = _T0_NAIVE - datetime.timedelta(minutes=120)
     order = _order(db, account, plan, management_state="WAITING_RETEST", cross_confirmed_at=stale_cross)
 
     called = {}
@@ -759,7 +783,7 @@ def test_advance_pending_order_retest_window_elapsed_cancels(db, monkeypatch):
 def test_advance_pending_order_retest_window_still_open_checks_fill(db, monkeypatch):
     account = _account(db, mode="LIVE")
     plan = _plan(db)
-    recent_cross = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+    recent_cross = _T0_NAIVE - datetime.timedelta(minutes=5)
     order = _order(db, account, plan, management_state="WAITING_RETEST", cross_confirmed_at=recent_cross)
 
     called = {}
@@ -862,7 +886,7 @@ def test_advance_open_position_breakeven_ratchet_fires_and_returns_before_exit_c
                     sl_exchange_order_id="1")
 
     monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
-    async def _fake_bars(symbol, since):
+    async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4520.0, "high": 4522.0, "low": 4518.0}]   # past be_trigger_long=4516
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -891,7 +915,7 @@ def test_advance_open_position_stop_hit_closes_with_correct_reason(db, monkeypat
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=True)
 
     monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
-    async def _fake_bars(symbol, since):
+    async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4475.0, "high": 4481.0, "low": 4478.0}]   # low <= stop 4480
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -911,7 +935,7 @@ def test_advance_open_position_no_action_leaves_order_untouched(db, monkeypatch)
                     entry_fill_price=4505.0, sl_price_current=4480.0, be_amended=True)
 
     monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
-    async def _fake_bars(symbol, since):
+    async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4508.0, "high": 4510.0, "low": 4506.0}]   # flat -- no stop/target touch
     monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
 
@@ -971,3 +995,338 @@ def test_advance_one_row_does_not_crash_the_loop_on_a_single_row_exception(db, m
     monkeypatch.setattr(ce, "_advance_pending_order", _boom)
 
     _run(ce._advance_one_row(db, order))   # must not raise -- caller (the 30s loop) keeps going
+
+
+# ================================================================== Lane H batch 1 (SPEC-H-20261114, AA-20261114-01/03)
+
+from database import ExecutorAuditLog  # noqa: E402
+
+_FLUSH_UTC = datetime.datetime(2026, 11, 4, 21, 0, 0, tzinfo=UTC)   # 16:00 ET on the fixture date_key
+
+
+def _audit_messages(db, account, event_type=None):
+    db.flush()
+    q = db.query(ExecutorAuditLog).filter_by(account_id=account.id)
+    if event_type:
+        q = q.filter_by(event_type=event_type)
+    return [r.message or "" for r in q.all()]
+
+
+def _no_client(monkeypatch):
+    def _boom(account_):
+        raise AssertionError("no exchange call expected")
+    monkeypatch.setattr(cx, "_client_for", _boom)
+
+
+def _armed_lock_mocks(monkeypatch, equity=None):
+    async def _fake_calib(symbol, date_key):
+        return [{"open": 100, "high": 101, "low": 99, "close": 100}] * 20
+    monkeypatch.setattr(cm, "fetch_calibration_1m", _fake_calib)
+
+    async def _fake_atr(symbol, date_key):
+        return None
+    monkeypatch.setattr(cm, "fetch_daily_atr14", _fake_atr)
+    monkeypatch.setattr(cs, "calculate_session_lock", lambda symbol, bars, atr: dict(_ARMED_LOCK))
+
+    async def _equity(account_):
+        if equity is None:
+            raise AssertionError("equity must not be queried for a refused account")
+        return equity
+    monkeypatch.setattr(ce, "_query_equity", _equity)
+    _capture_emails(monkeypatch)
+    import notify
+    sent = []
+    monkeypatch.setattr(notify, "send_account_email", lambda subject, body, account_id, category="routine": sent.append(subject) or True)
+    monkeypatch.setattr(notify, "send_account_telegram", lambda category, text, account_id: True)
+    return sent
+
+
+# ------------------------------------------------------------------ C7 admission
+
+@pytest.mark.parametrize("setup,expected", [
+    ("account_kill_switch", "SKIPPED_KILL_SWITCH"),
+    ("inactive", "SKIPPED_ACCOUNT_INACTIVE"),
+    ("global_kill_switch", "SKIPPED_KILL_SWITCH"),
+])
+def test_c7_admission_refuses_untradeable_account_with_terminal_rows(db, monkeypatch, setup, expected):
+    account = _account(db, mode="LIVE", kill_switch=(setup == "account_kill_switch"), active=(setup != "inactive"))
+    if setup == "global_kill_switch":
+        ec.engage_global_kill_switch(db, reason="test", by="t")
+        db.commit()
+    _config(db, account)
+    sent = _armed_lock_mocks(monkeypatch)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert sorted(o.direction for o in orders) == ["LONG", "SHORT"]
+    assert all(o.decision == expected and o.management_state == expected for o in orders)
+    assert all(o.contracts == 0 for o in orders)
+    assert len(sent) == 2   # owner told, one per direction (LIVE only)
+
+
+# ------------------------------------------------------------------ C9 admission
+
+def test_c9_admission_live_account_with_live_orders_off_writes_terminal_skip_rows(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    _config(db, account)
+    _armed_lock_mocks(monkeypatch)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert len(orders) == 2
+    assert all(o.decision == "SKIPPED_LIVE_ORDERS_OFF" and o.management_state == "SKIPPED_LIVE_ORDERS_OFF" for o in orders)
+    assert all(o.contracts == 0 for o in orders)
+    assert any("Live Orders switch is OFF" in m for m in _audit_messages(db, account, "ERROR"))
+
+
+def test_c9_admission_dry_run_account_ignores_live_orders_switch(db, monkeypatch):
+    account = _account(db, mode="DRY_RUN")
+    account.high_water_mark_usd = 50000.0
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3, trailing_dd_limit_usd=2000.0)
+    _armed_lock_mocks(monkeypatch, equity=50000.0)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert len(orders) == 2
+    assert all(o.decision in ("WOULD_PLACE", "REJECTED") for o in orders)   # normal admission, as before
+
+
+def test_c7_c9_order_tradeable_is_reported_before_live_orders(db, monkeypatch):
+    account = _account(db, mode="LIVE", kill_switch=True)
+    ec.disable_live_orders(db, by="test")
+    db.commit()
+    _config(db, account)
+    _armed_lock_mocks(monkeypatch)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert all(o.decision == "SKIPPED_KILL_SWITCH" for o in orders)
+
+
+# ------------------------------------------------------------------ C7 re-check at placement
+
+def test_c7_cross_confirmed_but_kill_switch_engaged_since_admission_places_nothing(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="PENDING_ENTRY")
+    account.kill_switch_engaged = True
+    db.commit()
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        return [{"close": 4510.0}]   # confirmed LONG cross
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+
+    async def _fail_place(*a, **kw):
+        raise AssertionError("place_resting_bracket must not be called")
+    monkeypatch.setattr(cx, "place_resting_bracket", _fail_place)
+
+    _run(ce._advance_pending_order(db, order))
+    assert order.management_state == "SKIPPED_KILL_SWITCH"
+    assert order.closed_at is not None
+    assert order.cross_confirmed_at is None
+
+
+def test_c7_tradeable_check_error_fails_closed(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="PENDING_ENTRY")
+    monkeypatch.setattr(ea, "is_account_tradeable", lambda db_, a: (False, "error checking tradeability, failing closed: x"))
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        return [{"close": 4510.0}]
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+
+    async def _fail_place(*a, **kw):
+        raise AssertionError("place_resting_bracket must not be called")
+    monkeypatch.setattr(cx, "place_resting_bracket", _fail_place)
+
+    _run(ce._advance_pending_order(db, order))
+    assert order.management_state == "SKIPPED_ACCOUNT_INACTIVE"
+
+
+# ------------------------------------------------------------------ AA-20261114-03: kill switch cancels a RESTING entry
+
+@pytest.mark.parametrize("setup,terminal", [("global", "CLOSED_KILL_SWITCH"), ("inactive", "CLOSED_ACCOUNT_INACTIVE")])
+def test_aa03_kill_switch_cancels_a_resting_entry(db, monkeypatch, setup, terminal):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST",
+                   cross_confirmed_at=_T0_NAIVE - datetime.timedelta(minutes=5), entry_exchange_order_id="777")
+    if setup == "global":
+        ec.engage_global_kill_switch(db, reason="test", by="t")
+    else:
+        account.is_active = False
+    db.commit()
+
+    seen = {}
+    async def _fake_cancel(db_, account_, order_, terminal_state, reason):
+        seen["terminal"] = terminal_state
+        seen["reason"] = reason
+        return "failed"
+    monkeypatch.setattr(cx, "cancel_resting_entry", _fake_cancel)
+
+    async def _fail_check(*a, **kw):
+        raise AssertionError("must cancel, not keep waiting for the retest")
+    monkeypatch.setattr(cx, "check_retest_fill_and_confirm", _fail_check)
+
+    _run(ce._advance_pending_order(db, order))
+    assert seen["terminal"] == terminal
+
+
+def test_aa03_kill_switch_does_not_close_an_open_position(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0,
+                   sl_price_current=4480.0, be_amended=False)
+    ec.engage_global_kill_switch(db, reason="test", by="t")
+    db.commit()
+
+    monkeypatch.setattr(ccal, "news_blackout_reason", lambda now: None)
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        return [{"open": 4505.0, "high": 4506.0, "low": 4504.0, "close": 4505.0}]
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+
+    async def _fail_close(*a, **kw):
+        raise AssertionError("the kill switch must not close an open position")
+    monkeypatch.setattr(cx, "market_close", _fail_close)
+
+    _run(ce._advance_open_position(db, order))
+    assert order.management_state == "FILLED"
+
+
+# ------------------------------------------------------------------ C5 cross-window expiry
+
+def test_c5_pending_entry_expires_to_no_cross_after_window_and_plan_done(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    long_o = _order(db, account, plan, direction="LONG")
+    short_o = _order(db, account, plan, direction="SHORT")
+    _freeze(monkeypatch, _LOCK_UTC + datetime.timedelta(minutes=61))
+    _no_client(monkeypatch)
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        return [{"close": 4490.0}]   # inside the box
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+
+    _run(ce._advance_pending_order(db, long_o))
+    assert long_o.management_state == "NO_CROSS"
+    assert long_o.closed_at is not None
+    assert plan.status == "ARMED"   # the SHORT side hasn't expired yet
+
+    _run(ce._advance_pending_order(db, short_o))
+    assert short_o.management_state == "NO_CROSS"
+    assert plan.status == "DONE"
+    assert plan.status_reason == "no cross within window"
+
+
+def test_c5_pending_entry_inside_window_passes_the_window_end_to_the_fetch(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan)
+    seen = {}
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        seen["until"] = until_utc
+        return []
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+
+    _run(ce._advance_pending_order(db, order))
+    assert seen["until"] == _LOCK_UTC + datetime.timedelta(minutes=60)
+    assert order.management_state == "PENDING_ENTRY"
+
+
+def test_c5_cross_after_window_is_ignored_and_row_expires(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan)
+    _freeze(monkeypatch, _LOCK_UTC + datetime.timedelta(minutes=75))
+    bars = [{"time": _LOCK_UTC + datetime.timedelta(minutes=70), "close": 4510.0}]   # crosses, but after the window
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        return [{"close": b["close"]} for b in bars if until_utc is None or b["time"] < until_utc]
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+
+    async def _fail_place(*a, **kw):
+        raise AssertionError("a post-window cross must never place a bracket")
+    monkeypatch.setattr(cx, "place_resting_bracket", _fail_place)
+
+    _run(ce._advance_pending_order(db, order))
+    assert order.management_state == "NO_CROSS"
+
+
+def test_c5_cross_inside_window_detected_late_still_places(db, monkeypatch):
+    # Documents the as-built late placement the spec leaves alone (N-2).
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan)
+    _freeze(monkeypatch, _LOCK_UTC + datetime.timedelta(minutes=90))
+
+    async def _fake_bars(symbol, since, until_utc=None):
+        return [{"close": 4510.0}]
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fake_bars)
+    called = {}
+
+    async def _fake_place(db_, account_, plan_, order_):
+        called["id"] = order_.id
+    monkeypatch.setattr(cx, "place_resting_bracket", _fake_place)
+
+    _run(ce._advance_pending_order(db, order))
+    assert called.get("id") == order.id
+
+
+def test_c5_session_backstop_terminates_pending_entry_at_flush(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan)
+    _freeze(monkeypatch, _FLUSH_UTC + datetime.timedelta(seconds=1))
+
+    async def _fail_fetch(*a, **kw):
+        raise AssertionError("no fetch after the session flush")
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fail_fetch)
+
+    _run(ce._advance_pending_order(db, order))
+    assert order.management_state == "NO_CROSS"
+    assert any("session backstop" in m for m in _audit_messages(db, account, "ERROR"))
+
+
+def test_c5_session_backstop_cancels_waiting_retest_at_flush(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST",
+                   cross_confirmed_at=_FLUSH_UTC.replace(tzinfo=None) - datetime.timedelta(minutes=5),
+                   entry_exchange_order_id="777")
+    _freeze(monkeypatch, _FLUSH_UTC + datetime.timedelta(seconds=1))
+    seen = {}
+
+    async def _fake_cancel(db_, account_, order_, terminal_state, reason):
+        seen["terminal"] = terminal_state
+        return "cancelled"
+    monkeypatch.setattr(cx, "cancel_resting_entry", _fake_cancel)
+
+    _run(ce._advance_pending_order(db, order))
+    assert seen["terminal"] == "NO_RETEST"
+
+
+def test_c5_fetch_confirmed_5m_until_filter_drops_bars_after_the_window(monkeypatch):
+    bars = [{"time": _LOCK_UTC + datetime.timedelta(minutes=5 * i), "open": 1.0, "high": 2.0, "low": 0.0, "close": float(i)}
+            for i in range(20)]
+
+    class _FakeCT:
+        async def get_market_bars(self, *a, **kw):
+            return bars
+    monkeypatch.setattr(cm, "_require_crosstrade_client", lambda: _FakeCT())
+    monkeypatch.setattr(cm.cme_contracts, "resolve_contract", lambda symbol: symbol)
+
+    windowed = _run(cm.fetch_confirmed_5m("MNQ", _LOCK_UTC.replace(tzinfo=None),
+                                          until_utc=_LOCK_UTC + datetime.timedelta(minutes=60)))
+    assert [b["close"] for b in windowed] == [float(i) for i in range(12)]
+    assert len(_run(cm.fetch_confirmed_5m("MNQ", _LOCK_UTC.replace(tzinfo=None)))) == 20   # unchanged without the bound

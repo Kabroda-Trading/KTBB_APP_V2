@@ -1110,3 +1110,14 @@ def test_set_account_profile_dry_run_account_needs_no_confirm_phrase(db):
     ea.set_account_profile(db, account, gate_profile="GATE_TRAVELER", by="andy@kabroda.com")
     db.commit()
     assert ea.gate_profile_of(account) == "GATE_TRAVELER"
+
+
+# ================================================================== Lane H A4: one shared preset predicate
+
+def test_sizing_preset_confirmed_helper_matches_legacy_tuple():
+    from types import SimpleNamespace
+    for name in (None, "steady_grow", "conservative"):
+        assert ea.sizing_preset_confirmed(SimpleNamespace(preset_name=name)) is False
+    for name in ("fixed_dollar", "percent_capped", "roll_profits", "percent_uncapped", "risk_based", "custom"):
+        assert ea.sizing_preset_confirmed(SimpleNamespace(preset_name=name)) is True
+    assert ea.sizing_preset_confirmed(None) is False
