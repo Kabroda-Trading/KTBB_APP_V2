@@ -3587,6 +3587,10 @@ class CMEOrder(Base):
     # as the decision value) | CLOSED_KILL_SWITCH | CLOSED_ACCOUNT_INACTIVE
     # (a RESTING entry cancelled because the kill switch / inactive flag
     # was set -- AA-20261114-03).
+    # Lane H batch 2 (C2.3): CLOSED_EXTERNAL -- the account went flat with
+    # both bracket legs cancelled/gone: a manual or broker-side close,
+    # observed, not commanded. ENTRY_FILLED_UNPROTECTED is now actually
+    # assigned (C1.3) when no stop leg is found after a fill.
     # OPPOSITE_CROSSED (added 2026-11-04): the D1 fan-out creates one
     # PENDING_ENTRY row per direction (LONG+SHORT) per account per plan --
     # a legitimate OCO-style pair, only one of which can ever actually

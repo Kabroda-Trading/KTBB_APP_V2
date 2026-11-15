@@ -627,13 +627,20 @@ async def _cancel_working_legs(client, order_row: CMEOrder) -> List[str]:
     for leg_id in (order_row.sl_exchange_order_id, order_row.tp_exchange_order_id):
         if not leg_id:
             continue
-        status = await _leg_status(client, leg_id)
+        status = await _leg_status(client, leg_id, distinguish_unreadable=True)
         if status is None or status in _ORDER_GONE_STATUSES or status == "filled":
             continue
         try:
             ok = bool(await client.cancel_order(int(leg_id)))
         except Exception:
             ok = False
+        if status == _LEG_UNREADABLE:
+            # H5 WO-21 D4: the status can't be read, so a cancel is ATTEMPTED
+            # (harmless if the leg is already gone). If the cancel is
+            # rejected too, the leg can't be verified either way: treated as
+            # clear (a rejected cancel usually means the order no longer
+            # exists) -- a GAP until real payloads are seen.
+            continue
         after = await _leg_status(client, leg_id) if ok else status
         if not ok or (after is not None and after not in _ORDER_GONE_STATUSES):
             remaining.append(str(leg_id))
@@ -833,14 +840,25 @@ async def _book_exit(db: Session, account: ExecutorAccount, order_row: CMEOrder,
     await _fetch_cme_exit_fee(client, account, order_row)
 
 
-async def _leg_status(client, leg_id: Optional[str]) -> Optional[str]:
+_LEG_UNREADABLE = "__unreadable__"
+
+
+async def _leg_status(client, leg_id: Optional[str], distinguish_unreadable: bool = False) -> Optional[str]:
+    """Status of a bracket leg. None = no id, or the order is gone (detail
+    None). With distinguish_unreadable=True a failed or field-less read
+    returns _LEG_UNREADABLE instead of None (H5 WO-21 D4)."""
     if not leg_id:
         return None
     try:
         detail = await client.get_order_detail(int(leg_id))
     except Exception:
+        return _LEG_UNREADABLE if distinguish_unreadable else None
+    if detail is None:
         return None
-    return _order_status_of(detail) if isinstance(detail, dict) else None
+    status = _order_status_of(detail) if isinstance(detail, dict) else None
+    if status is None and distinguish_unreadable:
+        return _LEG_UNREADABLE
+    return status
 
 
 async def reconcile_open_position(db: Session, account: ExecutorAccount, order_row: CMEOrder,
@@ -879,6 +897,10 @@ async def reconcile_open_position(db: Session, account: ExecutorAccount, order_r
     if not _flagged_once(db, account, order_row, tag):
         _audit(db, "ERROR", f"[{tag} #{order_row.id}] no matching position but no bracket fill confirmed -- CHECK BROKER "
                f"(stop leg status={sl_status!r}, target leg status={tp_status!r}); no order sent", account.id, order_row)
+        _notify_owner_problem(account, order_row, "position gone, exit not confirmed",
+                              f"The {order_row.symbol} {order_row.direction} position no longer shows at the broker, but no "
+                              "stop or target fill could be confirmed. Nothing has been booked and no order was sent. "
+                              "Check Tradovate and record the exit by hand if needed.")
     return True
 
 
@@ -913,19 +935,25 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrde
                account.id, order_row)
         return
 
-    still_open = True
+    still_open, seen_qty = True, None
     for _ in range(_CLOSE_CONFIRM_ATTEMPTS):
         await asyncio.sleep(_CLOSE_CONFIRM_INTERVAL_SEC)
         try:
             positions = await client.get_positions()
         except Exception:
             continue
-        still_open = any(_position_matches(p, order_row.symbol) for p in positions)
+        matching = [p for p in positions if _position_matches(p, order_row.symbol)]
+        still_open = bool(matching)
+        if matching:
+            seen_qty = _field(matching[0], ("netPos", "qty", "quantity", "size"))
         if not still_open:
             break
 
     if still_open:
-        _audit(db, "ERROR", f"market close reported for CME order {order_row.id} ({exit_reason}) but a position still exists -- CHECK TRADOVATE DIRECTLY", account.id, order_row)
+        # Spec C2.6: a partial close (quantity reduced, not zero) is never
+        # booked closed; the quantity seen is recorded.
+        _audit(db, "ERROR", f"market close reported for CME order {order_row.id} ({exit_reason}) but a position still exists "
+               f"(quantity seen: {seen_qty!r}, expected 0 from {order_row.contracts}) -- CHECK TRADOVATE DIRECTLY", account.id, order_row)
         return
 
     await _book_exit(db, account, order_row, client, exit_reason)
@@ -939,10 +967,15 @@ async def upgrade_approx_exit_price(db: Session, account: ExecutorAccount, order
         return False
     client = _client_for(account)
     leg_id = None
-    if order_row.exit_reason in ("STOP", "BE_STOP"):
-        leg_id = order_row.sl_exchange_order_id
-    elif order_row.exit_reason == "TARGET":
-        leg_id = order_row.tp_exchange_order_id
+    # Only an exchange-side leg exit (booked by reconcile, priced from the
+    # bracket order: APPROX_BRACKET_ORDER_PRICE) has its fill on the leg. A
+    # commanded close (software replay, flush, news, manual) is a separate
+    # market order: look in the fill history instead. (H5 WO-21 D6)
+    if order_row.exit_price_source == "APPROX_BRACKET_ORDER_PRICE":
+        if order_row.exit_reason in ("STOP", "BE_STOP"):
+            leg_id = order_row.sl_exchange_order_id
+        elif order_row.exit_reason == "TARGET":
+            leg_id = order_row.tp_exchange_order_id
     price, _detail = await _broker_exit_fill(client, account, order_row, leg_id)
     if price is None:
         return False

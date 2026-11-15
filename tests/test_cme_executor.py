@@ -1175,3 +1175,57 @@ def test_c5_leg_that_will_not_cancel_keeps_the_row_open(db, monkeypatch):
     assert _run(cx.cancel_no_retest(db, account, order)) == "failed"
     assert order.management_state == "WAITING_RETEST"
 
+
+# ------------------------------------------------------------------ H5 WO-21 follow-ups (batch 2)
+
+def test_wo21_late_upgrade_for_a_commanded_stop_uses_fill_history_not_the_leg(db, monkeypatch):
+    account = _ready_crosstrade_account(db)
+    plan = _plan(db)
+    order = _open_row(db, account, plan, management_state="CLOSED_STOP", exit_reason="STOP", sl_exchange_order_id="12",
+                      exit_price=4490.0, exit_price_source="APPROX_LAST_5M_CLOSE",
+                      exit_time=database.datetime.datetime.utcnow(), closed_at=database.datetime.datetime.utcnow())
+    async def _leg_fills(self, order_id):
+        raise AssertionError("a commanded close must not be looked up on the stop leg")
+    _patch_crosstrade(monkeypatch, get_fills_for_order=_leg_fills,
+                      get_fills_history=_async([{"price": 4488.0, "qty": 2, "action": "Sell"}]))
+    assert _run(cx.upgrade_approx_exit_price(db, account, order)) is True
+    assert order.exit_price == 4488.0 and order.exit_price_source == "BROKER_FILL"
+
+
+def test_wo21_unreadable_leg_status_still_gets_a_cancel_attempt(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="WAITING_RETEST", entry_exchange_order_id="777", sl_exchange_order_id="12")
+    cancelled = []
+    async def _cancel(self, order_id):
+        cancelled.append(order_id)
+        return True
+    async def _detail(self, order_id):
+        return None if order_id == 777 else {"id": order_id}   # leg status field missing
+    _patch(monkeypatch, cancel_order=_cancel, get_positions=_async([]), get_order_detail=_detail)
+    assert _run(cx.cancel_no_retest(db, account, order)) == "cancelled"
+    assert 12 in cancelled
+
+
+def test_wo21_partial_close_is_not_booked_and_audits_the_quantity(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _open_row(db, account, plan)
+    _patch(monkeypatch, emergency_market_close=_async(True),
+           get_positions=_async([{"symbol": "MNQ", "netPos": 1}]))
+    _run(cx.market_close(db, account, order, exit_reason="TIME_FLUSH"))
+    assert order.management_state == "FILLED"
+    assert any("quantity seen: 1" in m for m in _audit_messages(db, account, "ERROR"))
+
+
+def test_wo21_check_broker_alert_reaches_the_owner_once(db, monkeypatch):
+    account = _ready_account(db)
+    plan = _plan(db)
+    order = _open_row(db, account, plan)
+    alerts = []
+    monkeypatch.setattr(cx, "_notify_owner_problem", lambda a, o, tail, body: alerts.append(tail))
+    _broker(monkeypatch, [])
+    _run(cx.reconcile_open_position(db, account, order))
+    _run(cx.reconcile_open_position(db, account, order))
+    assert len(alerts) == 1
+

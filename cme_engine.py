@@ -534,8 +534,9 @@ async def _advance_pending_order(db: Session, order_row: CMEOrder) -> None:
             return
         # Lane H C5.3 step 6: session backstop for a resting entry.
         if now >= session_end:
-            cme_executor._audit(db, "ERROR", f"CME order {order_row.id} still WAITING_RETEST at the session flush -- "
-                                "session backstop cancelling (should never be reached)", account.id, order_row)
+            if not cme_executor._flagged_once(db, account, order_row, "backstop-waiting-retest"):
+                cme_executor._audit(db, "ERROR", f"[backstop-waiting-retest #{order_row.id}] CME order {order_row.id} still WAITING_RETEST "
+                                    "at the session flush -- session backstop cancelling (should never be reached)", account.id, order_row)
             await cme_executor.cancel_resting_entry(db, account, order_row, "NO_RETEST",
                                                     "session backstop: still resting at the session flush")
             return

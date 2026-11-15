@@ -4307,7 +4307,7 @@ async def api_dashboard_cme_history(request: Request, db: Session = Depends(get_
             trades.append({
                 "symbol": o.symbol, "direction": o.direction, "entry_fill_price": o.entry_fill_price,
                 "exit_price": o.exit_price, "exit_reason": o.exit_reason,
-                "exit_price_source": o.exit_price_source,
+                "exit_price_source": o.exit_price_source, "entry_price_source": o.entry_price_source,
                 "realized_pnl_r": o.realized_pnl_r, "dollar_pnl": o.dollar_pnl,
                 "closed_at": o.closed_at.isoformat() if o.closed_at else None,
             })
