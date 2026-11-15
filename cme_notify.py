@@ -102,6 +102,7 @@ _EXIT_LABELS = {
     "STOP": "Full Stop", "BE_STOP": "Breakeven Stop", "TARGET": "Target Hit",
     "TIME_FLUSH": "16:00 ET Session Flush", "MANUAL": "Manually Closed", "ERROR": "Closed (Error)",
     "NEWS_BLACKOUT": "Tier-1 News Blackout Flatten",
+    "EXTERNAL": "Closed at the broker (manual or broker-side)",
 }
 
 
@@ -111,9 +112,19 @@ def build_cme_exit_email(order: Dict[str, Any]) -> Tuple[str, str]:
     label = _EXIT_LABELS.get(reason, reason)
     account_label = order.get("account_label") or f"account #{order.get('account_id')}"
     subject = f"KABRODA - {_date_tag(order.get('date_key'))}{symbol} {direction} - {label} (CME, {account_label})"
+    # Lane H C2.5: say "approximate" only when the price IS approximate, and
+    # name how it was approximated; say plainly when there is no price.
+    source = order.get("exit_price_source") or "UNKNOWN"
+    if source == "BROKER_FILL":
+        price_line = f"{symbol} {direction} closed: {label} at {_fmt(order.get('exit_price'))} (broker fill price)."
+    elif source == "UNKNOWN" or order.get("exit_price") is None:
+        price_line = f"{symbol} {direction} closed: {label}. Exit price unavailable -- check Tradovate for the fill."
+    else:
+        how = {"APPROX_BRACKET_ORDER_PRICE": "approximated at the bracket order's own price",
+               "APPROX_LAST_5M_CLOSE": "approximated at the last 5-minute close"}.get(source, "approximated")
+        price_line = f"{symbol} {direction} closed: {label} at ~{_fmt(order.get('exit_price'))} ({how})."
     body = (
-        f"{symbol} {direction} closed: {label} at ~{_fmt(order.get('exit_price'))} "
-        f"(approximate -- a market-close fill carries no reliable exact price).\n\n"
+        f"{price_line}\n\n"
         f"Dollar P&L: ${_fmt(order.get('dollar_pnl'))}\n\n"
         f"Account: {account_label}\n\nReceipt: {order.get('receipt_id') or '?'}\n\nRef: #{order.get('id')}"
     )

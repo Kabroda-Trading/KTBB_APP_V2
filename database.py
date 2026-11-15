@@ -24,6 +24,37 @@ def get_db():
     finally:
         db.close()
 
+def _fix_cme_zero_r_artifacts() -> int:
+    """Lane H C2.5 (see init_db). Returns the number of rows corrected."""
+    from sqlalchemy.orm import Session as _Session
+    fixed = 0
+    with _Session(engine) as s:
+        rows = s.query(CMEOrder).filter(
+            CMEOrder.mode == "LIVE", CMEOrder.exit_price.isnot(None),
+            CMEOrder.entry_fill_price.isnot(None), CMEOrder.exit_price == CMEOrder.entry_fill_price,
+            CMEOrder.exit_price_source.is_(None),
+        ).all()
+        for o in rows:
+            has_approx_exit = s.query(CMETransition).filter(
+                CMETransition.cme_order_id == o.id, CMETransition.to_state == o.management_state,
+                CMETransition.detail_json.like('%"approximated": true%'),
+            ).first() is not None
+            if not has_approx_exit:
+                continue
+            s.add(ExecutorAuditLog(
+                account_id=o.account_id, event_type="DATA_FIX", actor="system",
+                message=(f"Lane H C2.5: CME order {o.id} exit_price {o.exit_price} was the entry price (artifact, not a fill); "
+                         f"set exit_price/realized_pnl_r/dollar_pnl NULL, exit_price_source UNKNOWN"),
+            ))
+            o.exit_price, o.realized_pnl_r, o.dollar_pnl = None, None, None
+            o.exit_price_source = "UNKNOWN"
+            fixed += 1
+        s.commit()
+    if fixed:
+        print(f"Lane H C2.5: marked {fixed} historical CME zero-R artifact row(s) UNKNOWN")
+    return fixed
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 
@@ -551,6 +582,33 @@ def init_db():
                 conn.execute(text(f"ALTER TABLE executor_accounts ADD COLUMN {_col}"))
         except Exception:
             pass
+
+    # Lane H C2.5 (SPEC-H-20261114, 2026-11-14): exit/entry price-source
+    # columns on an already-deployed table -- same ADD COLUMN idiom as above.
+    for _col in ["exit_price_source VARCHAR", "entry_price_source VARCHAR"]:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE cme_orders ADD COLUMN {_col}"))
+        except Exception:
+            pass
+
+    # Lane H C2.5 one-time, idempotent data fix (Constitution Law 11): before
+    # this fix every CME close booked exit_price = entry_fill_price, so those
+    # rows carry realized_pnl_r = 0.0, which dashboards count as real 0R
+    # trades. They are bookkeeping artifacts, not results: mark them UNKNOWN
+    # with NULL price/R/$ and log each id. Matches nothing once corrected.
+    try:
+        _fix_cme_zero_r_artifacts()
+    except Exception as e:
+        print(f"cme_orders zero-R artifact fix failed: {e}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE cme_orders SET entry_price_source = 'BROKER_POSITION_AVG' "
+                "WHERE entry_fill_price IS NOT NULL AND entry_price_source IS NULL"
+            ))
+    except Exception:
+        pass
 
     # cme_orders unique-constraint fix (2026-11-04) -- the original
     # constraint (cme_plan_id, account_id) was too narrow: the D1 fan-out
@@ -3543,6 +3601,11 @@ class CMEOrder(Base):
     exit_fee_usd = Column(Float, nullable=True)
     realized_pnl_r = Column(Float, nullable=True)
     dollar_pnl = Column(Float, nullable=True)
+    # Lane H C2.5 (SPEC-H-20261114): where each price came from.
+    # exit: BROKER_FILL | APPROX_BRACKET_ORDER_PRICE | APPROX_LAST_5M_CLOSE | UNKNOWN
+    # entry: BROKER_FILL | BROKER_POSITION_AVG
+    exit_price_source = Column(String, nullable=True)
+    entry_price_source = Column(String, nullable=True)
     receipt_id = Column(String, nullable=True, unique=True, index=True)   # printable Trade Execution Receipt id
     closed_at = Column(DateTime, nullable=True)
 

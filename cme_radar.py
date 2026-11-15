@@ -133,6 +133,7 @@ def _order_detail(o: CMEOrder) -> Dict[str, Any]:
         "management_state": o.management_state,
         "exit_reason": o.exit_reason, "exit_price": o.exit_price, "exit_time": _iso(o.exit_time),
         "realized_pnl_r": o.realized_pnl_r, "dollar_pnl": o.dollar_pnl, "receipt_id": o.receipt_id,
+        "exit_price_source": o.exit_price_source, "entry_price_source": o.entry_price_source,
     }
 
 

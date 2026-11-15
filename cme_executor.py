@@ -74,6 +74,7 @@ def _order_dict_for_notify(db: Session, order_row: CMEOrder, account: ExecutorAc
         "contracts": order_row.contracts, "risk_dollars_used": order_row.risk_dollars_used,
         "be_price": order_row.be_price, "exit_reason": order_row.exit_reason,
         "exit_price": order_row.exit_price, "dollar_pnl": order_row.dollar_pnl,
+        "exit_price_source": order_row.exit_price_source,
         "receipt_id": order_row.receipt_id,
         "date_key": plan.date_key if plan is not None else None,
     }
@@ -105,7 +106,10 @@ def _notify_account(db: Session, account: ExecutorAccount, builder: str, order_r
         elif category == "breakeven":
             text = notify._telegram_breakeven_text("CME", order_row.symbol, order_row.be_price)
         elif category == "exit":
-            text = notify._telegram_exit_text("CME", order_row.symbol, order_row.exit_reason,
+            reason_label = order_row.exit_reason
+            if (order_row.exit_price_source or "BROKER_FILL") != "BROKER_FILL":
+                reason_label = f"{reason_label} (approx. price)"   # Lane H C2.5 labelling
+            text = notify._telegram_exit_text("CME", order_row.symbol, reason_label,
                                                r=order_row.realized_pnl_r, usd=order_row.dollar_pnl)
         else:
             text = None
@@ -293,7 +297,18 @@ async def place_resting_bracket(db: Session, account: ExecutorAccount, plan_row:
     order_row.sl_price_initial = stop
     order_row.sl_price_current = stop
     order_row.sl_set_at = datetime.datetime.utcnow()
-    _log_transition(db, order_row, order_row.management_state, "WAITING_RETEST", detail={"trigger": trig, "stop": stop, "target": target})
+    # Lane H C1.3 step 1: store the bracket leg ids if the placement
+    # response carries them. Key names are CANDIDATES, not verified; the raw
+    # response is kept in the transition so the first live placement shows
+    # the real names.
+    sl_leg = _first_key(resp, _STOP_LEG_KEYS)
+    tp_leg = _first_key(resp, _TARGET_LEG_KEYS)
+    if sl_leg:
+        order_row.sl_exchange_order_id = sl_leg
+    if tp_leg:
+        order_row.tp_exchange_order_id = tp_leg
+    _log_transition(db, order_row, order_row.management_state, "WAITING_RETEST",
+                    detail={"trigger": trig, "stop": stop, "target": target, "raw_placement_response": resp})
     order_row.management_state = "WAITING_RETEST"
     _audit(db, "ORDER_PLACED", f"CME resting bracket placed for order {order_row.id} at {trig} (stop {stop}, target {target})", account.id, order_row)
 
@@ -333,11 +348,154 @@ async def check_retest_fill_and_confirm(db: Session, account: ExecutorAccount, o
     order_row.position_id = str(position.get("id") or position.get("positionId") or "")
     order_row.entry_fill_price = float(position.get("netPrice") or position.get("avgOpenPrice") or 0.0) or order_row.entry_fill_price
     order_row.entry_fill_time = datetime.datetime.utcnow()
+    order_row.entry_price_source = "BROKER_POSITION_AVG"   # Lane H C2.5: position avg, not a fill record
     await _fetch_cme_entry_fee(client, account, order_row)
-    _log_transition(db, order_row, "WAITING_RETEST", "FILLED", price=order_row.entry_fill_price)
+    from_state = order_row.management_state
+    _log_transition(db, order_row, from_state, "FILLED", price=order_row.entry_fill_price)
     order_row.management_state = "FILLED"
     _audit(db, "ORDER_PLACED", f"CME order {order_row.id} entry filled at {order_row.entry_fill_price} (bracket stop/target already exchange-hosted)", account.id, order_row)
     _notify_account(db, account, "build_cme_entry_email", order_row)
+    # Lane H C1.3 step 2-3: prove the stop leg exists at the broker.
+    if not order_row.sl_exchange_order_id:
+        await ensure_bracket_legs(db, account, order_row, client=client)
+
+
+# ------------------------------------------------------------------ Lane H C1: bracket legs
+
+# Candidate response keys for the OSO legs. NOT LIVE-VERIFIED (spec C1.3):
+# Tradovate maps bracket1 = target, bracket2 = stop (cme_tradovate_client).
+_STOP_LEG_KEYS = ("oso2Id", "bracket2Id", "stopLossOrderId")
+_TARGET_LEG_KEYS = ("oso1Id", "bracket1Id", "takeProfitOrderId")
+
+
+def _first_key(d: Any, keys) -> Optional[str]:
+    if not isinstance(d, dict):
+        return None
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            return str(v)
+    return None
+
+
+def _num(v: Any) -> Optional[float]:
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _field(o: Dict[str, Any], keys) -> Any:
+    for k in keys:
+        if o.get(k) is not None:
+            return o.get(k)
+    return None
+
+
+def _order_id_of(o: Dict[str, Any]) -> Optional[str]:
+    v = _field(o, ("id", "orderId"))
+    return None if v is None else str(v)
+
+
+def _order_type_of(o: Dict[str, Any]) -> str:
+    return str(_field(o, ("orderType", "ordType", "type")) or "").lower()
+
+
+def _order_action_of(o: Dict[str, Any]) -> str:
+    return str(_field(o, ("action", "side")) or "").lower()
+
+
+def _order_stop_price_of(o: Dict[str, Any]) -> Optional[float]:
+    return _num(_field(o, ("stopPrice", "stop_price", "triggerPrice")))
+
+
+def _order_limit_price_of(o: Dict[str, Any]) -> Optional[float]:
+    return _num(_field(o, ("price", "limitPrice")))
+
+
+def _same_price(a: Optional[float], b: Optional[float]) -> bool:
+    return a is not None and b is not None and abs(round(a, 2) - round(b, 2)) < 1e-9
+
+
+def _is_working_order(o: Dict[str, Any]) -> bool:
+    # An unreadable status counts as possibly working; a known terminal
+    # status (filled/cancelled/expired/rejected) does not.
+    status = _order_status_of(o)
+    return status is None or status not in (_ORDER_GONE_STATUSES | {"filled"})
+
+
+def _plan_target(db: Session, order_row: CMEOrder) -> Optional[float]:
+    plan = db.query(CMEPlan).filter_by(id=order_row.cme_plan_id).first()
+    if plan is None:
+        return None
+    return plan.target_long if order_row.direction == "LONG" else plan.target_short
+
+
+async def ensure_bracket_legs(db: Session, account: ExecutorAccount, order_row: CMEOrder, client=None) -> str:
+    """Lane H C1.3 steps 2-4 (SPEC-H-20261114): find the bracket's stop (and
+    target) leg among the broker's working orders. Returns:
+      "found"   -- exactly one stop leg matched; id stored. An
+                   ENTRY_FILLED_UNPROTECTED row is promoted back to FILLED.
+      "none"    -- the order list was read and holds NO stop leg -> the row
+                   goes ENTRY_FILLED_UNPROTECTED and the owner is alerted
+                   (once, on the transition).
+      "unknown" -- the query failed, or several candidates match: never
+                   guessed, never called unprotected; BE runs in the
+                   software fallback; retried on later ticks."""
+    client = client or _client_for(account)
+    try:
+        orders = await client.get_orders()
+    except Exception as e:
+        _audit(db, "ERROR", f"CME order {order_row.id}: stop leg id unknown (get_orders failed: {e}) -- BE will run in software fallback",
+               account.id, order_row)
+        return "unknown"
+    print(f"[CME EXECUTOR] RAW get_orders for leg discovery, order {order_row.id} (verify field names against this): {orders}")
+    exit_action = "sell" if order_row.direction == "LONG" else "buy"
+    target = _plan_target(db, order_row)
+
+    def _qty_ok(o):
+        q = _num(_field(o, ("orderQty", "qty", "quantity")))
+        return q is None or int(q) == int(order_row.contracts or 0)   # absent qty field: not used to reject
+
+    candidates = [o for o in (orders or []) if isinstance(o, dict) and _is_working_order(o)
+                  and _order_action_of(o) == exit_action and _qty_ok(o)]
+    stops = [o for o in candidates if "stop" in _order_type_of(o) and _same_price(_order_stop_price_of(o), order_row.sl_price_initial)]
+    targets = [o for o in candidates if "limit" in _order_type_of(o) and "stop" not in _order_type_of(o)
+               and _same_price(_order_limit_price_of(o), target)]
+    if len(targets) == 1 and not order_row.tp_exchange_order_id:
+        order_row.tp_exchange_order_id = _order_id_of(targets[0])
+
+    if len(stops) == 1:
+        order_row.sl_exchange_order_id = _order_id_of(stops[0])
+        if order_row.management_state == "ENTRY_FILLED_UNPROTECTED":
+            _log_transition(db, order_row, "ENTRY_FILLED_UNPROTECTED", "FILLED", detail={"stop_leg_found": order_row.sl_exchange_order_id})
+            order_row.management_state = "FILLED"
+            _audit(db, "ORDER_PLACED", f"CME order {order_row.id} stop leg now found ({order_row.sl_exchange_order_id}) -- protected again",
+                   account.id, order_row)
+        return "found"
+    if not stops:
+        if order_row.management_state != "ENTRY_FILLED_UNPROTECTED":
+            from_state = order_row.management_state
+            _log_transition(db, order_row, from_state, "ENTRY_FILLED_UNPROTECTED", detail={"reason": "stop leg not found among working orders"})
+            order_row.management_state = "ENTRY_FILLED_UNPROTECTED"
+            _audit(db, "ERROR", f"CME order {order_row.id} UNPROTECTED: stop leg not found among working orders after fill",
+                   account.id, order_row)
+            _notify_unprotected(db, account, order_row, "stop leg not found among working orders after fill")
+        return "none"
+    _audit(db, "ERROR", f"CME order {order_row.id}: stop leg id ambiguous ({len(stops)} candidates) -- BE will run in software fallback",
+           account.id, order_row)
+    return "unknown"
+
+
+def _flagged_once(db: Session, account: ExecutorAccount, order_row: CMEOrder, tag: str) -> bool:
+    """True if an audit row carrying `tag` already exists for this order
+    (used to alert once per order, not once per 30 s tick)."""
+    from database import ExecutorAuditLog
+    db.flush()
+    marker = f"[{tag} #{order_row.id}]"
+    return db.query(ExecutorAuditLog).filter(
+        ExecutorAuditLog.account_id == account.id, ExecutorAuditLog.message.like(f"%{marker}%"),
+    ).first() is not None
 
 
 def _position_matches(position: Dict[str, Any], symbol: str) -> bool:
@@ -398,36 +556,88 @@ async def cancel_resting_entry(db: Session, account: ExecutorAccount, order_row:
                account.id, order_row, detail={"cancel_ok": cancel_ok, "cancel_error": cancel_err})
         await check_retest_fill_and_confirm(db, account, order_row)
         return "filled"
-    if not cancel_ok:
-        _audit(db, "ERROR", f"CME order {order_row.id} cancel failed ({reason}) -- order may still be resting, state unchanged, retrying: {cancel_err}",
-               account.id, order_row, detail={"cancel_error": cancel_err})
-        return "failed"
-
-    # Step 4 -- post-cancel verification.
+    # Step 4 -- read the entry order's status (also after a REJECTED cancel:
+    # H5 finding -- an order the broker already expired, e.g. a CrossTrade
+    # day order, can reject the cancel; it is gone, so the row must close).
     verified: Optional[bool] = None
+    extra: Dict[str, Any] = {}
     if entry_id:
         try:
             detail = await client.get_order_detail(int(entry_id))
         except Exception:
             detail = {}
-        if detail is None:
+        status = None if detail is None else (_order_status_of(detail) if isinstance(detail, dict) else None)
+        if status == "filled":
+            # H5 finding #9: the entry filled, yet no position exists -- it
+            # opened and closed at the broker between two polls. Never book
+            # it as a non-trade; alert once and leave it for a human.
+            tag = "entry-filled-no-position"
+            if not _flagged_once(db, account, order_row, tag):
+                _audit(db, "ERROR", f"[{tag} #{order_row.id}] entry order reads FILLED but no position exists -- the trade may have "
+                       "opened and closed at the broker between polls. NOT booked. CHECK TRADOVATE and record it by hand.",
+                       account.id, order_row)
+                _notify_owner_problem(account, order_row, "entry filled but no position found",
+                                      "The entry order reads FILLED at the broker but no open position exists. The trade may have "
+                                      "opened and closed between checks. Check Tradovate; the system has not booked it.")
+            return "failed"
+        if not cancel_ok:
+            if detail is None or status in _ORDER_GONE_STATUSES:
+                verified, extra = True, {"cancel_rejected_but_order_gone": cancel_err}
+            else:
+                _audit(db, "ERROR", f"CME order {order_row.id} cancel failed ({reason}) -- order may still be resting, state unchanged, retrying: {cancel_err}",
+                       account.id, order_row, detail={"cancel_error": cancel_err})
+                return "failed"
+        elif detail is None:
             verified = True
         else:
-            status = _order_status_of(detail) if isinstance(detail, dict) else None
             if status in _ORDER_WORKING_STATUSES:
                 _audit(db, "ERROR", f"CME order {order_row.id} cancel reported OK but the order still reads {status!r} ({reason}) -- not booked, retrying",
                        account.id, order_row)
                 return "failed"
             # unreadable -> False, accepted with the empty-position check (spec C5.3 step 4)
             verified = status in _ORDER_GONE_STATUSES
+    elif not cancel_ok:
+        return "failed"
+
+    # Step 5 -- spec C5.4: with the leg ids known (batch 2 C1), make sure no
+    # bracket child is still working. A stop leg resting with no position
+    # could OPEN a new position if touched, so the row stays open (and the
+    # cancel retries) until every known leg is confirmed gone.
+    still_working = await _cancel_working_legs(client, order_row)
+    if still_working:
+        _audit(db, "ERROR", f"CME order {order_row.id} entry cancelled but bracket leg(s) {still_working} still working ({reason}) -- not booked, retrying",
+               account.id, order_row)
+        return "failed"
 
     from_state = order_row.management_state
     order_row.management_state = terminal_state
     order_row.closed_at = datetime.datetime.utcnow()
-    _log_transition(db, order_row, from_state, terminal_state, detail={"reason": reason, "cancel_verified": verified})
+    _log_transition(db, order_row, from_state, terminal_state, detail={"reason": reason, "cancel_verified": verified, **extra})
     _audit(db, "ORDER_PLACED", f"CME order {order_row.id} resting entry cancelled ({reason}) -> {terminal_state}", account.id, order_row,
            detail={"cancel_verified": verified})
     return "cancelled"
+
+
+async def _cancel_working_legs(client, order_row: CMEOrder) -> List[str]:
+    """Spec C5.4: cancel any known bracket leg that still reads as working.
+    Returns the ids still working (or unconfirmed) afterwards; [] = clear.
+    An unknown leg id is skipped. A leg whose status reads nothing (gone) or
+    cannot be read is treated as clear: unverified, listed as a GAP."""
+    remaining = []
+    for leg_id in (order_row.sl_exchange_order_id, order_row.tp_exchange_order_id):
+        if not leg_id:
+            continue
+        status = await _leg_status(client, leg_id)
+        if status is None or status in _ORDER_GONE_STATUSES or status == "filled":
+            continue
+        try:
+            ok = bool(await client.cancel_order(int(leg_id)))
+        except Exception:
+            ok = False
+        after = await _leg_status(client, leg_id) if ok else status
+        if not ok or (after is not None and after not in _ORDER_GONE_STATUSES):
+            remaining.append(str(leg_id))
+    return remaining
 
 
 async def cancel_no_retest(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> str:
@@ -444,40 +654,263 @@ async def cancel_no_retest(db: Session, account: ExecutorAccount, order_row: CME
 
 async def amend_to_breakeven(db: Session, account: ExecutorAccount, order_row: CMEOrder, stop_order_id: int, be_price: float) -> bool:
     """Amends the live exchange stop leg to breakeven (+0.1x box). Returns
-    False (never raises) on any failure -- the caller logs/alerts and
-    leaves be_amended False so the next tick retries; never marks the row
-    amended without a successful call (there is no cheap confirm-read here
-    the way Bitunix's get_pending_tp_sl_order() provides -- flagged as a
-    live-API gap to close during the 1-Micro Smoke Test, same as this
-    module's other NOT YET LIVE-VERIFIED items in cme_tradovate_client.py)."""
+    False (never raises) on any failure -- the caller then lets the
+    software BE replay run and retries next tick; never marks the row
+    amended without a successful call.
+    Lane H C1.4: after a True return the stop is read back. A read-back
+    showing a DIFFERENT price is a failure (not amended). A missing or
+    unreadable price is accepted (the API said OK) but recorded as
+    unconfirmed. The owner is alerted once per order on a failed amend."""
     client = _client_for(account)
-    ok = await client.amend_stop_to_breakeven(stop_order_id, be_price, order_row.contracts)
+    try:
+        ok = await client.amend_stop_to_breakeven(stop_order_id, be_price, order_row.contracts)
+    except Exception as e:
+        ok = False
+        print(f"|| CME EXECUTOR || amend raised for order {order_row.id}: {e}")
     if not ok:
-        _audit(db, "ERROR", f"breakeven amendment failed for CME order {order_row.id} (stop_order_id={stop_order_id})", account.id, order_row)
+        _audit(db, "ERROR", f"breakeven amendment failed for CME order {order_row.id} (stop_order_id={stop_order_id}) -- software BE fallback active",
+               account.id, order_row)
+        _alert_be_amend_failed_once(db, account, order_row)
         return False
 
+    confirmed, raw = False, None
+    try:
+        raw = await client.get_order_detail(int(stop_order_id))
+    except Exception as e:
+        raw = {"readback_error": str(e)}
+    seen = _order_stop_price_of(raw) if isinstance(raw, dict) else None
+    if seen is not None and not _same_price(seen, be_price):
+        _audit(db, "ERROR", f"breakeven amendment for CME order {order_row.id} read back stop {seen}, expected {round(be_price, 2)} -- NOT marked amended, retrying",
+               account.id, order_row, detail={"raw": raw})
+        _alert_be_amend_failed_once(db, account, order_row)
+        return False
+    confirmed = seen is not None
+
+    from_state = order_row.management_state
     order_row.be_amended = True
     order_row.be_amended_at = datetime.datetime.utcnow()
     order_row.be_price = be_price
     order_row.sl_price_current = be_price
-    _log_transition(db, order_row, "FILLED", "RATCHETED", price=be_price)
+    _log_transition(db, order_row, from_state, "RATCHETED", price=be_price,
+                    detail={"confirmed": confirmed} if confirmed else {"confirmed": False, "raw": raw})
     order_row.management_state = "RATCHETED"
     _audit(db, "STOP_AMENDED", f"CME order {order_row.id} stop amended to breakeven ({be_price})", account.id, order_row)
+    if not confirmed:
+        _audit(db, "WARNING", f"CME order {order_row.id} breakeven amend accepted but the new stop price could not be read back (unconfirmed)",
+               account.id, order_row, detail={"raw": raw})
     _notify_account(db, account, "build_cme_breakeven_email", order_row)
+    return True
+
+
+def _alert_be_amend_failed_once(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> None:
+    tag = "be-amend-alert"
+    if _flagged_once(db, account, order_row, tag):
+        return
+    _audit(db, "ERROR", f"[{tag} #{order_row.id}] owner alerted: breakeven stop could not be moved at the broker", account.id, order_row)
+    _notify_owner_problem(account, order_row, "breakeven stop NOT moved at the broker",
+                          f"The exchange stop for {order_row.symbol} {order_row.direction} could not be moved to breakeven.\n\n"
+                          "The system is enforcing breakeven in software (it will market-close if price returns to the "
+                          "breakeven level) and keeps retrying the exchange amendment every 30 seconds.\n\n"
+                          "CHECK TRADOVATE if you want the exchange stop moved by hand.")
+
+
+# ------------------------------------------------------------------ Lane H C2: exit price, reconcile, guarded close
+
+_EXIT_SOURCES_APPROX = ("APPROX_BRACKET_ORDER_PRICE", "APPROX_LAST_5M_CLOSE")
+
+
+def _fill_price_qty(fills: List[Dict[str, Any]]):
+    """Quantity-weighted mean fill price. Field names are NOT LIVE-VERIFIED
+    (same caveat as sum_fill_fees). Returns (price or None, total_qty)."""
+    num, qty_total = 0.0, 0.0
+    for f in fills or []:
+        if not isinstance(f, dict):
+            continue
+        price = _num(_field(f, ("price", "fillPrice", "avgPrice")))
+        qty = _num(_field(f, ("qty", "quantity", "fillQty")))
+        if price is None or qty is None:
+            continue
+        num += price * qty
+        qty_total += qty
+    return (num / qty_total if qty_total > 0 else None), qty_total
+
+
+async def _broker_exit_fill(client, account: ExecutorAccount, order_row: CMEOrder, leg_id: Optional[str]):
+    """Step 1 of the exit-price hierarchy (BROKER_FILL), CrossTrade only.
+    Returns (price or None, detail dict)."""
+    if (account.execution_provider or "tradovate").strip().lower() != "crosstrade":
+        return None, {}
+    try:
+        if leg_id:
+            fills = await client.get_fills_for_order(int(leg_id))
+        else:
+            exit_time = order_row.exit_time or datetime.datetime.utcnow()
+            lookback = datetime.timedelta(seconds=_CLOSE_CONFIRM_ATTEMPTS * _CLOSE_CONFIRM_INTERVAL_SEC + 5)
+            from_ts = (exit_time - lookback).replace(tzinfo=datetime.timezone.utc).isoformat()
+            to_ts = (exit_time + datetime.timedelta(seconds=5)).replace(tzinfo=datetime.timezone.utc).isoformat()
+            fills = await client.get_fills_history(from_ts, to_ts, is_demo=bool(account.tradovate_is_demo))
+            exclude = {str(x) for x in (order_row.entry_exchange_order_id, order_row.sl_exchange_order_id,
+                                         order_row.tp_exchange_order_id) if x}
+            exit_action = "sell" if order_row.direction == "LONG" else "buy"
+
+            def _keep(f):
+                oid = _field(f, ("orderId", "order_id"))
+                if oid is not None and str(oid) in exclude:
+                    return False
+                act = str(_field(f, ("action", "side")) or "").lower()
+                if act and act != exit_action:
+                    return False
+                inst = str(_field(f, ("instrument", "symbol", "contract")) or "")
+                if inst and order_row.symbol not in inst:
+                    return False
+                return True
+            fills = [f for f in (fills or []) if isinstance(f, dict) and _keep(f)]
+    except Exception as e:
+        return None, {"fill_lookup_error": str(e)}
+    price, qty = _fill_price_qty(fills)
+    if price is None:
+        return None, {}
+    if int(round(qty)) != int(order_row.contracts or 0):
+        return None, {"fill_qty_mismatch": qty}
+    return price, {}
+
+
+async def _last_5m_close(order_row: CMEOrder) -> Optional[float]:
+    try:
+        import cme_market
+        bars = await cme_market.fetch_confirmed_5m(order_row.symbol, order_row.entry_fill_time or datetime.datetime.utcnow())
+        return float(bars[-1]["close"]) if bars else None
+    except Exception:
+        return None
+
+
+async def _resolve_exit_price(client, account: ExecutorAccount, order_row: CMEOrder,
+                              leg_id: Optional[str] = None, leg_price: Optional[float] = None):
+    """Lane H C2.5 hierarchy, first available wins, never invented:
+    BROKER_FILL -> APPROX_BRACKET_ORDER_PRICE (exchange leg exits) ->
+    APPROX_LAST_5M_CLOSE (commanded closes) -> UNKNOWN (NULL price/R/$)."""
+    price, detail = await _broker_exit_fill(client, account, order_row, leg_id)
+    if price is not None:
+        return price, "BROKER_FILL", detail
+    if leg_price is not None:
+        return float(leg_price), "APPROX_BRACKET_ORDER_PRICE", detail
+    last = await _last_5m_close(order_row)
+    if last is not None:
+        return last, "APPROX_LAST_5M_CLOSE", detail
+    return None, "UNKNOWN", detail
+
+
+def _apply_exit_price(order_row: CMEOrder, price: Optional[float], source: str) -> None:
+    order_row.exit_price = price
+    order_row.exit_price_source = source
+    if price is None or order_row.entry_fill_price is None:
+        order_row.realized_pnl_r = None
+        order_row.dollar_pnl = None
+        return
+    sgn = 1 if order_row.direction == "LONG" else -1
+    move = price - order_row.entry_fill_price
+    order_row.realized_pnl_r = sgn * move / order_row.box_at_entry if order_row.box_at_entry else None
+    order_row.dollar_pnl = sgn * move * (order_row.contracts or 0) * (order_row.point_multiplier or 0.0)
+
+
+async def _book_exit(db: Session, account: ExecutorAccount, order_row: CMEOrder, client, exit_reason: str,
+                     leg_id: Optional[str] = None, leg_price: Optional[float] = None,
+                     extra: Optional[Dict[str, Any]] = None) -> None:
+    from_state = order_row.management_state
+    order_row.exit_reason = exit_reason
+    order_row.exit_time = datetime.datetime.utcnow()
+    order_row.closed_at = order_row.exit_time
+    price, source, pdetail = await _resolve_exit_price(client, account, order_row, leg_id=leg_id, leg_price=leg_price)
+    _apply_exit_price(order_row, price, source)
+    order_row.management_state = f"CLOSED_{exit_reason}"
+    detail = {"exit_price_source": source, "approximated": source != "BROKER_FILL"}
+    detail.update(pdetail)
+    detail.update(extra or {})
+    _log_transition(db, order_row, from_state, order_row.management_state, price=order_row.exit_price,
+                    realized_pnl_r=order_row.realized_pnl_r, detail=detail)
+    _audit(db, "POSITION_CLOSED", f"CME order {order_row.id} closed: {exit_reason} at {order_row.exit_price} ({source})", account.id, order_row)
+    _notify_account(db, account, "build_cme_exit_email", order_row)
+    await _fetch_cme_exit_fee(client, account, order_row)
+
+
+async def _leg_status(client, leg_id: Optional[str]) -> Optional[str]:
+    if not leg_id:
+        return None
+    try:
+        detail = await client.get_order_detail(int(leg_id))
+    except Exception:
+        return None
+    return _order_status_of(detail) if isinstance(detail, dict) else None
+
+
+async def reconcile_open_position(db: Session, account: ExecutorAccount, order_row: CMEOrder,
+                                  positions: Optional[List[Dict[str, Any]]] = None, client=None) -> bool:
+    """Lane H C2.3: before acting on an open row, look at the broker. Returns
+    True when this tick must send NO order (an exchange-side exit was booked,
+    or the account reads flat with no confirmed bracket fill); False when the
+    position is still open or the position query failed (normal management
+    continues, and market_close re-checks before sending anything)."""
+    client = client or _client_for(account)
+    if positions is None:
+        try:
+            positions = await client.get_positions()
+        except Exception:
+            return False
+    if any(_position_matches(p, order_row.symbol) for p in positions):
+        return False
+
+    sl_status = await _leg_status(client, order_row.sl_exchange_order_id)
+    tp_status = await _leg_status(client, order_row.tp_exchange_order_id)
+    if sl_status == "filled":
+        reason = "BE_STOP" if order_row.be_amended else "STOP"
+        await _book_exit(db, account, order_row, client, reason, leg_id=order_row.sl_exchange_order_id,
+                         leg_price=order_row.sl_price_current, extra={"reconciled": True})
+        return True
+    if tp_status == "filled":
+        await _book_exit(db, account, order_row, client, "TARGET", leg_id=order_row.tp_exchange_order_id,
+                         leg_price=_plan_target(db, order_row), extra={"reconciled": True})
+        return True
+    if (order_row.sl_exchange_order_id and order_row.tp_exchange_order_id
+            and sl_status in _ORDER_GONE_STATUSES and tp_status in _ORDER_GONE_STATUSES):
+        await _book_exit(db, account, order_row, client, "EXTERNAL", extra={"reconciled": True})
+        return True
+
+    tag = "recon-flat-unconfirmed"
+    if not _flagged_once(db, account, order_row, tag):
+        _audit(db, "ERROR", f"[{tag} #{order_row.id}] no matching position but no bracket fill confirmed -- CHECK BROKER "
+               f"(stop leg status={sl_status!r}, target leg status={tp_status!r}); no order sent", account.id, order_row)
     return True
 
 
 async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrder, exit_reason: str) -> None:
     """Closes the position at market -- used for the 16:00 ET mandatory
-    flush and emergency_flatten(). Exit price is APPROXIMATED at the last
-    known live price (same Andy-accepted tradeoff Alt Matrix/Traveler's own
-    contingency closes use) -- confirmed closed via a bounded re-poll of
-    get_positions(), never assumed on the call succeeding."""
+    flush, the news window, the software exit replay and emergency_flatten().
+    Lane H C2.4: the position is checked FIRST -- a market order into a flat
+    account would open a NEW unprotected position on Tradovate-direct. A
+    flat account goes to reconcile (exchange-side exit) instead; an
+    unreadable account sends nothing. The close call's False return is a
+    failure. Lane H C2.5: the exit price comes from the broker fill when
+    available, otherwise a labelled approximation, otherwise NULL --
+    never the entry price."""
     client = _client_for(account)
     try:
-        await client.emergency_market_close(order_row.symbol, order_row.contracts, order_row.direction)
+        positions = await client.get_positions()
+    except Exception as e:
+        _audit(db, "ERROR", f"market close for CME order {order_row.id} ({exit_reason}) NOT sent: position check failed ({e}), retrying next tick",
+               account.id, order_row)
+        return
+    if not any(_position_matches(p, order_row.symbol) for p in positions):
+        await reconcile_open_position(db, account, order_row, positions=positions, client=client)
+        return
+
+    try:
+        sent = await client.emergency_market_close(order_row.symbol, order_row.contracts, order_row.direction)
     except Exception as e:
         _audit(db, "ERROR", f"market close failed for CME order {order_row.id} ({exit_reason}): {e}", account.id, order_row)
+        return
+    if not sent:
+        _audit(db, "ERROR", f"market close for CME order {order_row.id} ({exit_reason}) was rejected by the broker (returned False) -- retrying next tick",
+               account.id, order_row)
         return
 
     still_open = True
@@ -487,7 +920,7 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrde
             positions = await client.get_positions()
         except Exception:
             continue
-        still_open = any(p.get("symbol") == order_row.symbol for p in positions)
+        still_open = any(_position_matches(p, order_row.symbol) for p in positions)
         if not still_open:
             break
 
@@ -495,20 +928,30 @@ async def market_close(db: Session, account: ExecutorAccount, order_row: CMEOrde
         _audit(db, "ERROR", f"market close reported for CME order {order_row.id} ({exit_reason}) but a position still exists -- CHECK TRADOVATE DIRECTLY", account.id, order_row)
         return
 
-    from_state = order_row.management_state
-    order_row.exit_reason = exit_reason
-    order_row.exit_price = order_row.entry_fill_price   # approximated -- no reliable market-close fill price, same convention as Alt Matrix
-    order_row.exit_time = datetime.datetime.utcnow()
-    order_row.closed_at = order_row.exit_time
-    order_row.management_state = f"CLOSED_{exit_reason}"
-    if order_row.box_at_entry:
-        sgn = 1 if order_row.direction == "LONG" else -1
-        order_row.realized_pnl_r = sgn * (order_row.exit_price - order_row.entry_fill_price) / order_row.box_at_entry
-    _log_transition(db, order_row, from_state, order_row.management_state, price=order_row.exit_price,
-                     realized_pnl_r=order_row.realized_pnl_r, detail={"approximated": True})
-    _audit(db, "POSITION_CLOSED", f"CME order {order_row.id} closed: {exit_reason} at ~{order_row.exit_price} (approximated)", account.id, order_row)
-    _notify_account(db, account, "build_cme_exit_email", order_row)
-    await _fetch_cme_exit_fee(client, account, order_row)
+    await _book_exit(db, account, order_row, client, exit_reason)
+
+
+async def upgrade_approx_exit_price(db: Session, account: ExecutorAccount, order_row: CMEOrder) -> bool:
+    """Lane H C2.5 late upgrade (called from the 48 h fee sweep): if a broker
+    fill price is now available for an APPROX_* exit, replace it, recompute
+    R/$ and log the upgrade. CrossTrade only. Returns True if upgraded."""
+    if (order_row.exit_price_source or "") not in _EXIT_SOURCES_APPROX:
+        return False
+    client = _client_for(account)
+    leg_id = None
+    if order_row.exit_reason in ("STOP", "BE_STOP"):
+        leg_id = order_row.sl_exchange_order_id
+    elif order_row.exit_reason == "TARGET":
+        leg_id = order_row.tp_exchange_order_id
+    price, _detail = await _broker_exit_fill(client, account, order_row, leg_id)
+    if price is None:
+        return False
+    old_price, old_source = order_row.exit_price, order_row.exit_price_source
+    _apply_exit_price(order_row, price, "BROKER_FILL")
+    _log_transition(db, order_row, order_row.management_state, order_row.management_state, price=price,
+                    realized_pnl_r=order_row.realized_pnl_r,
+                    detail={"exit_price_upgraded_from": old_price, "old_source": old_source, "exit_price_source": "BROKER_FILL"})
+    return True
 
 
 _CANCELLABLE_STATES = ("WAITING_RETEST",)
@@ -542,6 +985,11 @@ async def cancel_or_close_order(db: Session, account: ExecutorAccount, order_row
         return {"action": "cancelled", "order_id": order_row.id}
     elif order_row.management_state in _CLOSEABLE_STATES:
         await market_close(db, account, order_row, exit_reason=exit_reason)
+        if order_row.management_state in _CLOSEABLE_STATES:
+            # Lane H C2.4: market_close no longer books a close it couldn't
+            # confirm (position unreadable, broker rejected, still open, or
+            # flat without a confirmed bracket fill). Report it, don't claim it.
+            raise RuntimeError(f"close of order {order_row.id} could not be confirmed -- check the broker")
         return {"action": "closed", "order_id": order_row.id}
     else:
         raise ValueError(f"order {order_row.id} is not in a cancellable/closeable state ({order_row.management_state!r})")

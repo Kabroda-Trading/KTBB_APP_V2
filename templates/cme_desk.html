@@ -287,7 +287,7 @@
                     const rColor = r > 0 ? '#5e8c66' : (r < 0 ? '#8c4a3a' : '#c9a880');
                     const canCancel = CME_ACTIONABLE_STATES.includes(o.management_state);
                     html += `<tr><td>${escapeHtml(o.direction)}</td><td class="s-${escapeHtml(String(o.management_state||'').toLowerCase())}">${escapeHtml(o.management_state || '&mdash;')}</td>`
-                         + `<td>${o.entry_fill_price ?? '&mdash;'}</td><td>${o.exit_price ?? '&mdash;'} ${o.exit_reason ? '('+escapeHtml(o.exit_reason)+')' : ''}</td>`
+                         + `<td>${o.entry_fill_price ?? '&mdash;'}</td><td>${o.exit_price ?? '&mdash;'}${o.exit_price_source === 'UNKNOWN' ? ' (no price)' : (o.exit_price != null && o.exit_price_source && o.exit_price_source !== 'BROKER_FILL' ? ' (approx.)' : '')} ${o.exit_reason ? '('+escapeHtml(o.exit_reason)+')' : ''}</td>`
                          + `<td style="color:${rColor};">${r != null ? (r >= 0 ? '+' : '') + r.toFixed(2) + 'R' : '&mdash;'}</td>`
                          + `<td>${canCancel ? `<button class="btn btn-danger btn-sm" onclick="cancelCmeOrder(${o.id})">CANCEL</button>` : ''}</td></tr>`;
                 });

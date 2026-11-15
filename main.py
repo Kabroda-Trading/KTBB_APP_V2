@@ -4307,10 +4307,12 @@ async def api_dashboard_cme_history(request: Request, db: Session = Depends(get_
             trades.append({
                 "symbol": o.symbol, "direction": o.direction, "entry_fill_price": o.entry_fill_price,
                 "exit_price": o.exit_price, "exit_reason": o.exit_reason,
+                "exit_price_source": o.exit_price_source,
                 "realized_pnl_r": o.realized_pnl_r, "dollar_pnl": o.dollar_pnl,
                 "closed_at": o.closed_at.isoformat() if o.closed_at else None,
             })
-        return JSONResponse({"ok": True, "pnl_series": pnl_series, "trades": trades})
+        approximated = sum(1 for t in trades if (t.get("exit_price_source") or "") not in ("", "BROKER_FILL"))
+        return JSONResponse({"ok": True, "pnl_series": pnl_series, "trades": trades, "approximated_trades": approximated})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

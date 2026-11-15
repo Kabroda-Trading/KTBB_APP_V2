@@ -141,6 +141,19 @@ def _frozen_engine_clock(monkeypatch):
     _freeze(monkeypatch, _T0)
 
 
+# Lane H batch 2: _advance_open_position now reconciles with the broker and
+# retries stop-leg discovery first. Default: still open, legs unknown -- so
+# existing tests exercise the same paths as before. Batch-2 tests override.
+@pytest.fixture(autouse=True)
+def _broker_reconcile_defaults(monkeypatch):
+    async def _still_open(db_, account_, order_, positions=None, client=None):
+        return False
+    async def _legs_unknown(db_, account_, order_, client=None):
+        return "unknown"
+    monkeypatch.setattr(cx, "reconcile_open_position", _still_open)
+    monkeypatch.setattr(cx, "ensure_bracket_legs", _legs_unknown)
+
+
 def _capture_emails(monkeypatch):
     import notify
     calls = []
@@ -1330,3 +1343,82 @@ def test_c5_fetch_confirmed_5m_until_filter_drops_bars_after_the_window(monkeypa
                                           until_utc=_LOCK_UTC + datetime.timedelta(minutes=60)))
     assert [b["close"] for b in windowed] == [float(i) for i in range(12)]
     assert len(_run(cm.fetch_confirmed_5m("MNQ", _LOCK_UTC.replace(tzinfo=None)))) == 20   # unchanged without the bound
+
+
+# ================================================================== Lane H batch 2 (SPEC-H-20261114): C1.4 / C2.3 engine wiring
+
+def _open_position_setup(monkeypatch):
+    monkeypatch.setattr(ccal, "news_blackout_reason", lambda now: None)
+    monkeypatch.setattr(cc, "flush_utc_for_date_key", lambda date_key: datetime.datetime.now(UTC) + datetime.timedelta(hours=1))
+
+
+def test_c2_reconcile_booked_exit_means_nothing_else_runs_this_tick(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0, sl_price_current=4480.0)
+    _open_position_setup(monkeypatch)
+    async def _booked(db_, account_, order_, positions=None, client=None):
+        return True
+    monkeypatch.setattr(cx, "reconcile_open_position", _booked)
+    async def _fail(*a, **kw):
+        raise AssertionError("nothing else may run after a reconcile booked the exit")
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _fail)
+    monkeypatch.setattr(cx, "market_close", _fail)
+    _run(ce._advance_open_position(db, order))
+
+
+def test_c1_ratchet_amend_failure_falls_through_to_software_replay(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, direction="LONG", management_state="FILLED", entry_fill_price=4505.0,
+                   sl_price_current=4480.0, be_amended=False, sl_exchange_order_id="12")
+    _open_position_setup(monkeypatch)
+    async def _bars(symbol, since, until_utc=None):
+        # bar 1 touches the BE trigger (4516) -> stop moves to 4502 from bar 2;
+        # bar 2 dips to 4501 -> software BE_STOP. Last close 4517 >= trigger.
+        return [{"high": 4517.0, "low": 4505.0, "close": 4510.0}, {"high": 4520.0, "low": 4501.0, "close": 4517.0}]
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _bars)
+    async def _amend_fails(*a, **kw):
+        return False
+    monkeypatch.setattr(cx, "amend_to_breakeven", _amend_fails)
+    closed = {}
+    async def _close(db_, account_, order_, exit_reason):
+        closed["reason"] = exit_reason
+    monkeypatch.setattr(cx, "market_close", _close)
+    _run(ce._advance_open_position(db, order))
+    assert closed.get("reason") == "BE_STOP"
+
+
+def test_c1_no_stop_id_runs_discovery_then_software_exit_check(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, direction="LONG", management_state="FILLED", entry_fill_price=4505.0,
+                   sl_price_current=4480.0, be_amended=False)
+    _open_position_setup(monkeypatch)
+    seen = {}
+    async def _discover(db_, account_, order_, client=None):
+        seen["discovery"] = True
+        return "none"
+    monkeypatch.setattr(cx, "ensure_bracket_legs", _discover)
+    async def _bars(symbol, since, until_utc=None):
+        return [{"high": 4506.0, "low": 4479.0, "close": 4490.0}]   # stop hit
+    monkeypatch.setattr(cm, "fetch_confirmed_5m", _bars)
+    closed = {}
+    async def _close(db_, account_, order_, exit_reason):
+        closed["reason"] = exit_reason
+    monkeypatch.setattr(cx, "market_close", _close)
+    _run(ce._advance_open_position(db, order))
+    assert seen.get("discovery") is True
+    assert closed.get("reason") == "STOP"
+
+
+def test_c1_unprotected_row_is_still_managed_by_the_watch_loop(db, monkeypatch):
+    account = _account(db, mode="LIVE")
+    plan = _plan(db)
+    order = _order(db, account, plan, management_state="ENTRY_FILLED_UNPROTECTED", entry_fill_price=4505.0, sl_price_current=4480.0)
+    routed = {}
+    async def _fake_open(db_, order_):
+        routed["open"] = order_.id
+    monkeypatch.setattr(ce, "_advance_open_position", _fake_open)
+    _run(ce._advance_one_row(db, order))
+    assert routed.get("open") == order.id

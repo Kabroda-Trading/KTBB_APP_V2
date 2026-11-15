@@ -584,6 +584,17 @@ async def _advance_open_position(db: Session, order_row: CMEOrder) -> None:
 
     now_utc = datetime.datetime.now(UTC)
 
+    # Lane H C2.3: look at the broker first. An exchange-side exit (the
+    # bracket's stop/target filled) is booked from the broker and NO order is
+    # sent; a flat account with no confirmed bracket fill sends nothing.
+    if await cme_executor.reconcile_open_position(db, account, order_row):
+        return
+
+    # Lane H C1.3/C1.4 step 1: a row without a known stop-leg id (opened
+    # before this fix, ambiguous earlier, or UNPROTECTED) retries discovery.
+    if not order_row.sl_exchange_order_id:
+        await cme_executor.ensure_bracket_legs(db, account, order_row)
+
     # 2026-11-11: MFFU's Tier-1 news-trading rule requires zero open
     # positions/orders within the blackout window (cme_calendar.py) --
     # checked before the normal TIME_FLUSH/stop/target priority below,
@@ -616,8 +627,12 @@ async def _advance_open_position(db: Session, order_row: CMEOrder) -> None:
         if cme_signals.check_breakeven_ratchet(last_price, order_row.direction, be_trigger):
             be_price = plan.be_stop_long if order_row.direction == "LONG" else plan.be_stop_short
             if order_row.sl_exchange_order_id:
-                await cme_executor.amend_to_breakeven(db, account, order_row, int(order_row.sl_exchange_order_id), be_price)
-            return
+                if await cme_executor.amend_to_breakeven(db, account, order_row, int(order_row.sl_exchange_order_id), be_price):
+                    return
+            # Lane H C1.4 step 2: amend failed or no stop-leg id -> do NOT
+            # return. Fall through to the check_exit replay below, which
+            # already enforces BE in software while be_amended is False. The
+            # old early return disabled that fallback on every tick.
 
     stop = order_row.sl_price_current
     exit_result = cme_signals.check_exit(
@@ -673,6 +688,26 @@ async def run_cme_watch_loop() -> None:
                 CMEOrder.closed_at > fee_cutoff,
                 or_(CMEOrder.entry_fee_usd.is_(None), CMEOrder.exit_fee_usd.is_(None)),
             ).all()
+            # Lane H C2.5 late upgrade: closed rows whose exit price is still
+            # an approximation get one more broker-fill lookup per tick
+            # (CrossTrade only; same 48 h window as the fee retry).
+            approx_rows = db.query(CMEOrder).filter(
+                CMEOrder.mode == "LIVE",
+                CMEOrder.closed_at.isnot(None),
+                CMEOrder.closed_at > fee_cutoff,
+                CMEOrder.exit_price_source.in_(cme_executor._EXIT_SOURCES_APPROX),
+            ).all()
+            for order_row in approx_rows:
+                try:
+                    account = db.query(ExecutorAccount).filter_by(id=order_row.account_id).first()
+                    if account is None or (account.execution_provider or "").strip().lower() != "crosstrade":
+                        continue
+                    await asyncio.wait_for(cme_executor.upgrade_approx_exit_price(db, account, order_row), timeout=_ROW_TIMEOUT_SECONDS)
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print(f"|| CME WATCH (EXIT PRICE UPGRADE) || order {order_row.id} failed: {e}")
+
             for order_row in fee_retry_rows:
                 try:
                     account = db.query(ExecutorAccount).filter_by(id=order_row.account_id).first()
