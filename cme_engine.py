@@ -284,7 +284,12 @@ def _tradeable_refusal(db: Session, account: ExecutorAccount) -> Optional[Tuple[
     (alt_matrix_engine.py: "kill switch" in reason -> SKIPPED_KILL_SWITCH,
     otherwise SKIPPED_ACCOUNT_INACTIVE). is_account_tradeable fails closed
     on any error, so an error reads as not tradeable."""
-    tradeable, reason = executor_accounts.is_account_tradeable(db, account)
+    # AA-20261115-05 (Andy, 2026-11-15): CME obeys its OWN account kill
+    # switch and is_active, NOT the global kill switch, for now. The global
+    # switch pauses the crypto desks (AA-20261115-03) while CME keeps trading
+    # its evaluation. Applies to all three call sites: 10:00 admission, the
+    # pre-placement re-check, and AA-03's cancel of a resting entry.
+    tradeable, reason = executor_accounts.is_account_tradeable(db, account, include_global=False)
     if tradeable:
         return None
     decision = "SKIPPED_KILL_SWITCH" if "kill switch" in reason else "SKIPPED_ACCOUNT_INACTIVE"

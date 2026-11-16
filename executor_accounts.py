@@ -637,13 +637,19 @@ def record_trade_result(
     return state
 
 
-def is_account_tradeable(db: Session, account: ExecutorAccount) -> Tuple[bool, str]:
+def is_account_tradeable(db: Session, account: ExecutorAccount, include_global: bool = True) -> Tuple[bool, str]:
     """ANDs account-level active/kill-switch state with the GLOBAL kill
     switch. Fails CLOSED (not tradeable) on any error -- modeled directly
     on session_monitor.py's _is_notification_enabled(): uncertain state
-    never permits an action with real consequences."""
+    never permits an action with real consequences.
+
+    include_global=False skips the GLOBAL switch only (the account's own
+    switch and is_active still apply). Used by the CME desk per Andy's
+    scope ruling 2026-11-15 (AA-20261115-05): "let's keep cme out of the
+    global kill switch right now" -- the global switch pauses the crypto
+    desks while CME keeps trading its evaluation."""
     try:
-        if executor_control.is_global_kill_switch_engaged(db):
+        if include_global and executor_control.is_global_kill_switch_engaged(db):
             return False, "global kill switch is engaged"
         if not account.is_active:
             return False, f"account {account.id} is inactive"

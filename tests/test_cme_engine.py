@@ -1059,13 +1059,9 @@ def _armed_lock_mocks(monkeypatch, equity=None):
 @pytest.mark.parametrize("setup,expected", [
     ("account_kill_switch", "SKIPPED_KILL_SWITCH"),
     ("inactive", "SKIPPED_ACCOUNT_INACTIVE"),
-    ("global_kill_switch", "SKIPPED_KILL_SWITCH"),
 ])
 def test_c7_admission_refuses_untradeable_account_with_terminal_rows(db, monkeypatch, setup, expected):
     account = _account(db, mode="LIVE", kill_switch=(setup == "account_kill_switch"), active=(setup != "inactive"))
-    if setup == "global_kill_switch":
-        ec.engage_global_kill_switch(db, reason="test", by="t")
-        db.commit()
     _config(db, account)
     sent = _armed_lock_mocks(monkeypatch)
 
@@ -1076,6 +1072,31 @@ def test_c7_admission_refuses_untradeable_account_with_terminal_rows(db, monkeyp
     assert all(o.decision == expected and o.management_state == expected for o in orders)
     assert all(o.contracts == 0 for o in orders)
     assert len(sent) == 2   # owner told, one per direction (LIVE only)
+
+
+def test_c7_cme_ignores_the_global_kill_switch_aa_20261115_05(db, monkeypatch):
+    """Andy 2026-11-15: CME stays out of the global kill switch (it pauses
+    the crypto desks only). The account's own switch still applies (above)."""
+    account = _account(db, mode="LIVE")
+    account.high_water_mark_usd = 50000.0
+    ec.engage_global_kill_switch(db, reason="crypto paused", by="t")
+    ec.enable_live_orders(db, reason="test", by="t")
+    db.commit()
+    _config(db, account, daily_risk_budget_usd=350.0, contracts_cap=3, trailing_dd_limit_usd=2000.0)
+    _armed_lock_mocks(monkeypatch, equity=50000.0)
+
+    _run(ce._process_symbol_lock(db, "MNQ", "2026-11-04"))
+
+    orders = db.query(CMEOrder).filter_by(account_id=account.id).all()
+    assert len(orders) == 2
+    assert all(o.decision in ("WOULD_PLACE", "REJECTED") for o in orders)   # normal admission, not a kill-switch skip
+
+
+def test_global_kill_switch_still_blocks_other_desks():
+    """The shared check keeps the global switch for every caller that doesn't opt out."""
+    import inspect
+    sig = inspect.signature(ea.is_account_tradeable)
+    assert sig.parameters["include_global"].default is True
 
 
 # ------------------------------------------------------------------ C9 admission
@@ -1150,7 +1171,7 @@ def test_c7_tradeable_check_error_fails_closed(db, monkeypatch):
     account = _account(db, mode="LIVE")
     plan = _plan(db)
     order = _order(db, account, plan, management_state="PENDING_ENTRY")
-    monkeypatch.setattr(ea, "is_account_tradeable", lambda db_, a: (False, "error checking tradeability, failing closed: x"))
+    monkeypatch.setattr(ea, "is_account_tradeable", lambda db_, a, **kw: (False, "error checking tradeability, failing closed: x"))
 
     async def _fake_bars(symbol, since, until_utc=None):
         return [{"close": 4510.0}]
@@ -1166,14 +1187,15 @@ def test_c7_tradeable_check_error_fails_closed(db, monkeypatch):
 
 # ------------------------------------------------------------------ AA-20261114-03: kill switch cancels a RESTING entry
 
-@pytest.mark.parametrize("setup,terminal", [("global", "CLOSED_KILL_SWITCH"), ("inactive", "CLOSED_ACCOUNT_INACTIVE")])
+@pytest.mark.parametrize("setup,terminal", [("account", "CLOSED_KILL_SWITCH"), ("inactive", "CLOSED_ACCOUNT_INACTIVE")])
 def test_aa03_kill_switch_cancels_a_resting_entry(db, monkeypatch, setup, terminal):
     account = _account(db, mode="LIVE")
     plan = _plan(db)
     order = _order(db, account, plan, management_state="WAITING_RETEST",
                    cross_confirmed_at=_T0_NAIVE - datetime.timedelta(minutes=5), entry_exchange_order_id="777")
-    if setup == "global":
-        ec.engage_global_kill_switch(db, reason="test", by="t")
+    if setup == "account":
+        account.kill_switch_engaged = True
+        account.kill_switch_reason = "test"
     else:
         account.is_active = False
     db.commit()
@@ -1198,7 +1220,8 @@ def test_aa03_kill_switch_does_not_close_an_open_position(db, monkeypatch):
     plan = _plan(db)
     order = _order(db, account, plan, management_state="FILLED", entry_fill_price=4505.0,
                    sl_price_current=4480.0, be_amended=False)
-    ec.engage_global_kill_switch(db, reason="test", by="t")
+    account.kill_switch_engaged = True
+    account.kill_switch_reason = "test"
     db.commit()
 
     monkeypatch.setattr(ccal, "news_blackout_reason", lambda now: None)
