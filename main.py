@@ -841,6 +841,9 @@ async def service_worker():
     return FileResponse(os.path.join(BASE_DIR, "static", "sw.js"), media_type="application/javascript")
 
 app.include_router(auth.router)
+# Read-only API for the Kabroda AI Brain (auditor). GET only, BRAIN_READONLY_API_KEY, fails closed.
+import brain_readonly_api
+app.include_router(brain_readonly_api.router)
 
 def _template_or_fallback(request: Request, templates: Jinja2Templates, name: str, context: Dict[str, Any]):
     try:
