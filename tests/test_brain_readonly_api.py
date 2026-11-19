@@ -152,3 +152,70 @@ def test_cme_orders_and_plans(env):
 
 def test_limit_is_capped():
     assert bra._limit(10**9) == bra.MAX_LIMIT and bra._limit(0) == 1 and bra._limit(None) == bra.DEFAULT_LIMIT
+
+
+# ---------------------------------------------------------------- market history (2026-11-18)
+class _FakeClient:
+    def __init__(self, bars=None, err=None):
+        self.bars, self.err, self.calls = bars or [], err, []
+
+    async def get_market_bars(self, instrument, **kw):
+        self.calls.append((instrument, kw))
+        if self.err:
+            raise self.err
+        return self.bars
+
+
+def _bar(minute):
+    t = datetime.datetime(2026, 11, 16, 15, minute, tzinfo=datetime.timezone.utc)
+    return {"time": t, "timestamp": int(t.timestamp()), "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 10,
+            "token": "SHOULD-NOT-LEAK"}
+
+
+def test_market_bars_needs_the_key(env):
+    c = TestClient(app)
+    assert c.get("/api/brain/v1/market/bars", params={"instrument": "MGC 12-26"}).status_code == 401
+
+
+def test_market_bars_validates_inputs(env, monkeypatch):
+    import cme_market
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: _FakeClient())
+    c = TestClient(app)
+    assert c.get("/api/brain/v1/market/bars", params={"instrument": "MGC"}, headers=H).status_code == 400
+    assert c.get("/api/brain/v1/market/bars", params={"instrument": "MGC 12-26; drop"}, headers=H).status_code == 400
+    assert c.get("/api/brain/v1/market/bars", params={"instrument": "MGC 12-26", "period_type": "tick"},
+                 headers=H).status_code == 400
+
+
+def test_market_bars_without_a_client_is_503(env, monkeypatch):
+    import cme_market
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: None)
+    r = TestClient(app).get("/api/brain/v1/market/bars", params={"instrument": "MGC 12-26"}, headers=H)
+    assert r.status_code == 503
+
+
+def test_market_bars_happy_path_caps_and_never_logs_or_leaks(env, monkeypatch):
+    import cme_market
+    fake = _FakeClient(bars=[_bar(0), _bar(1)])
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: fake)
+    r = TestClient(app).get("/api/brain/v1/market/bars", headers=H,
+                            params={"instrument": "MGC 12-26", "period": 1, "days_back": 99999, "limit": 10 ** 7})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 2 and body["first"].startswith("2026-11-16T15:00") and body["last"].startswith("2026-11-16T15:01")
+    inst, kw = fake.calls[0]
+    assert inst == "MGC 12-26" and kw["log_raw"] is False and kw["period_type"] == "Minute"
+    assert kw["days_back"] == bra.MAX_DAYS_BACK and kw["limit"] == bra.MAX_BARS
+    assert "SHOULD-NOT-LEAK" not in r.text and set(body["bars"][0]) == {"time", "open", "high", "low", "close", "volume"}
+
+
+def test_market_bars_provider_error_is_502(env, monkeypatch):
+    import cme_market
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: _FakeClient(err=RuntimeError("CrossTrade market bars query failed (429): slow down")))
+    r = TestClient(app).get("/api/brain/v1/market/bars", params={"instrument": "MGC 12-26"}, headers=H)
+    assert r.status_code == 502 and "429" in r.json()["error"]
+
+
+def test_market_bars_route_is_get_only():
+    routes = [rt for rt in bra.router.routes if rt.path.endswith("/market/bars")]
+    assert len(routes) == 1 and routes[0].methods == {"GET"}

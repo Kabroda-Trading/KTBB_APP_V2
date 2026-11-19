@@ -329,6 +329,7 @@ class CrossTradeClient:
         period: int = 5,
         days_back: int = 1,
         limit: int = 100,
+        log_raw: bool = True,
     ) -> List[Dict[str, Any]]:
         """POST /v1/api/market/bars (RPC GetBars) -- queries the connected
         NinjaTrader 8 add-on (via the St. Louis VPS) for the venue-true,
@@ -382,7 +383,8 @@ class CrossTradeClient:
                 body = await resp.json(content_type=None)
             except Exception:
                 raise RuntimeError(f"CrossTrade market bars returned non-JSON: {text[:500]!r}")
-        print(f"[CROSSTRADE] RAW market/bars response (verify field names against this): {body}")
+        if log_raw:
+            print(f"[CROSSTRADE] RAW market/bars response (verify field names against this): {body}")
         return _parse_market_bars(body)
 
     async def get_fills_for_order(self, order_id: int) -> List[Dict[str, Any]]:

@@ -25,6 +25,14 @@ from sqlalchemy.orm import Session
 from database import (CMEConfig, CMEOrder, CMEPlan, ExecutorAccount, ExecutorAuditLog, ExecutorGlobalConfig,
                       get_db)
 
+# Market history (Andy 2026-11-18: "Kabroda.com would be a better route"): read-only historical bars from the same
+# CrossTrade -> NinjaTrader 8 feed the live CME desk uses, for the Brain's backtests. GetBars is a read RPC; this
+# endpoint never places, changes or cancels anything and never returns the token.
+_INSTRUMENT = re.compile(r"^[A-Z0-9]{1,4} \d{2}-\d{2}$")          # a dated NT8 contract, e.g. "MGC 12-26"
+_PERIOD_TYPES = {"minute": "Minute", "day": "Day"}
+MAX_DAYS_BACK = 3650
+MAX_BARS = 50000
+
 router = APIRouter(prefix="/api/brain/v1", tags=["brain-readonly"])
 
 ENV_KEY = "BRAIN_READONLY_API_KEY"
@@ -154,3 +162,37 @@ async def brain_audit(request: Request, since: Optional[str] = None, event_type:
         q = q.filter(ExecutorAuditLog.account_id == account_id)
     rows = q.order_by(ExecutorAuditLog.id.desc()).limit(_limit(limit)).all()
     return _ok({"audit": _rows(rows)})
+
+
+@router.get("/market/bars")
+async def brain_market_bars(request: Request, instrument: str, period_type: str = "minute", period: int = 1,
+                            days_back: int = 1, limit: Optional[int] = None):
+    """Historical bars for one dated contract from the CrossTrade -> NinjaTrader 8 feed (read-only).
+    instrument = a dated NT8 contract ("MGC 12-26"); period_type minute|day; period 1-1440; days_back 1-3650;
+    limit 1-50000 (default 5000). Returns {count, first, last, bars:[{time, open, high, low, close, volume}]}.
+    503 if no CrossTrade client is configured; an empty list when the NT8 add-on is disconnected."""
+    if not _authorized(request):
+        return _unauthorized()
+    if not _INSTRUMENT.match(instrument or ""):
+        return JSONResponse({"ok": False, "error": "instrument must be a dated NT8 contract like 'MGC 12-26'"},
+                            status_code=400)
+    pt = _PERIOD_TYPES.get((period_type or "").lower())
+    if pt is None or not (1 <= int(period) <= 1440):
+        return JSONResponse({"ok": False, "error": "period_type must be minute|day and period 1-1440"}, status_code=400)
+    days = max(1, min(int(days_back), MAX_DAYS_BACK))
+    lim = max(1, min(int(limit) if limit is not None else 5000, MAX_BARS))
+    import cme_market                                              # lazy: the site's own CrossTrade client resolver
+    client = cme_market._get_crosstrade_client()
+    if client is None:
+        return JSONResponse({"ok": False, "error": "CrossTrade market-data client not configured"}, status_code=503)
+    try:
+        bars = await client.get_market_bars(instrument, period_type=pt, period=int(period), days_back=days,
+                                            limit=lim, log_raw=False)
+    except Exception as e:                                         # surface the provider's error, never the token
+        msg = _DENY.sub("***", str(e))[:300]
+        return JSONResponse({"ok": False, "error": f"market bars query failed: {msg}"}, status_code=502)
+    out = [{k: _value(b.get(k)) for k in ("time", "open", "high", "low", "close", "volume")} for b in bars]
+    return _ok({"instrument": instrument, "period_type": pt, "period": int(period), "days_back": days, "limit": lim,
+                "count": len(out), "first": out[0]["time"] if out else None, "last": out[-1]["time"] if out else None,
+                "bars": out})
+
