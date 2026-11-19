@@ -217,6 +217,18 @@ def test_get_market_bars_posts_to_market_bars_with_dated_instrument(monkeypatch)
     }]
 
 
+def test_get_market_bars_sends_optional_window_fields_only_when_given(monkeypatch):
+    response = _FakeResponse(status=200, json_body={"success": True, "data": {"bars": []}})
+    session = _install(monkeypatch, response)
+    client = ctc.CrossTradeClient(bearer_token="tok", crosstrade_account_id="acct1")
+    asyncio.run(client.get_market_bars("GC 12-20", period_type="Minute", period=1, days_back=3650, limit=50000,
+                                       from_ts="2020-09-01", to_ts="2020-09-15", merge_policy="DoNotMerge",
+                                       timeout_ms=60000))
+    assert session.calls[0]["json"] == {"instrument": "GC 12-20", "periodType": "Minute", "period": 1,
+                                        "daysBack": 3650, "limit": 50000, "from": "2020-09-01", "to": "2020-09-15",
+                                        "mergePolicy": "DoNotMerge", "timeoutMs": 60000}
+
+
 def test_get_market_bars_parses_the_documented_bars_wrapper_shape(monkeypatch):
     bars = [
         {"time": "2026-11-09T22:35:00Z", "timestamp": 1794285300,

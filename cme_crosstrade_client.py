@@ -330,6 +330,10 @@ class CrossTradeClient:
         days_back: int = 1,
         limit: int = 100,
         log_raw: bool = True,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+        merge_policy: Optional[str] = None,
+        timeout_ms: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """POST /v1/api/market/bars (RPC GetBars) -- queries the connected
         NinjaTrader 8 add-on (via the St. Louis VPS) for the venue-true,
@@ -361,7 +365,15 @@ class CrossTradeClient:
         the caller logs VPS_NT8_DISCONNECTED and treats it as a quiet gap,
         NOT a hard failure. Raises RuntimeError on any other non-200 so the
         caller can't silently mistake an auth/rate-limit error for "no
-        bars yet"."""
+        bars yet".
+
+        from_ts / to_ts / merge_policy / timeout_ms (2026-11-18, Brain
+        market history): optional GetBars fields listed in CrossTrade's own
+        endpoint catalog (app.crosstrade.io/v1/api/_endpoints: "Optional
+        fields (from add-on): periodType, period, daysBack, from, to, limit,
+        timeoutMs, mergePolicy"). Sent ONLY when given, so every existing
+        caller's payload is unchanged. Their formats/values are NOT
+        documented there and NOT live-verified."""
         url = f"{_MARKET_BASE}/market/bars"
         payload = {
             "instrument": instrument,
@@ -370,6 +382,9 @@ class CrossTradeClient:
             "daysBack": days_back,
             "limit": limit,
         }
+        for key, value in (("from", from_ts), ("to", to_ts), ("mergePolicy", merge_policy), ("timeoutMs", timeout_ms)):
+            if value is not None:
+                payload[key] = value
         session = _get_session()
         async with session.post(url, headers=self._headers(), json=payload) as resp:
             text = await resp.text()

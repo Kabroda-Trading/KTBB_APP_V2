@@ -18,7 +18,7 @@ import os
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,11 @@ _INSTRUMENT = re.compile(r"^[A-Z0-9]{1,4} \d{2}-\d{2}$")          # a dated NT8 
 _PERIOD_TYPES = {"minute": "Minute", "day": "Day"}
 MAX_DAYS_BACK = 3650
 MAX_BARS = 50000
+# Optional date window and merge policy (2026-11-18): GetBars lists from/to/mergePolicy/timeoutMs as optional fields
+# (CrossTrade endpoint catalog). Formats are undocumented, so values are strictly shape-checked and passed through as is.
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})?)?$")
+_MERGE = re.compile(r"^[A-Za-z]{1,32}$")
+MAX_TIMEOUT_MS = 120000
 
 router = APIRouter(prefix="/api/brain/v1", tags=["brain-readonly"])
 
@@ -166,11 +171,14 @@ async def brain_audit(request: Request, since: Optional[str] = None, event_type:
 
 @router.get("/market/bars")
 async def brain_market_bars(request: Request, instrument: str, period_type: str = "minute", period: int = 1,
-                            days_back: int = 1, limit: Optional[int] = None):
+                            days_back: int = 1, limit: Optional[int] = None,
+                            from_: Optional[str] = Query(None, alias="from"), to: Optional[str] = None,
+                            merge_policy: Optional[str] = None, timeout_ms: Optional[int] = None):
     """Historical bars for one dated contract from the CrossTrade -> NinjaTrader 8 feed (read-only).
     instrument = a dated NT8 contract ("MGC 12-26"); period_type minute|day; period 1-1440; days_back 1-3650;
-    limit 1-50000 (default 5000). Returns {count, first, last, bars:[{time, open, high, low, close, volume}]}.
-    503 if no CrossTrade client is configured; an empty list when the NT8 add-on is disconnected."""
+    limit 1-50000 (default 5000); optional from/to (YYYY-MM-DD or ISO datetime), merge_policy (letters only) and
+    timeout_ms (1000-120000), passed to GetBars only when given. Returns {count, first, last, bars:[{time, open, high,
+    low, close, volume}]}. 503 if no CrossTrade client is configured; an empty list when the NT8 add-on is disconnected."""
     if not _authorized(request):
         return _unauthorized()
     if not _INSTRUMENT.match(instrument or ""):
@@ -179,6 +187,12 @@ async def brain_market_bars(request: Request, instrument: str, period_type: str 
     pt = _PERIOD_TYPES.get((period_type or "").lower())
     if pt is None or not (1 <= int(period) <= 1440):
         return JSONResponse({"ok": False, "error": "period_type must be minute|day and period 1-1440"}, status_code=400)
+    for name, value in (("from", from_), ("to", to)):
+        if value is not None and not _DATE.match(value):
+            return JSONResponse({"ok": False, "error": f"{name} must be YYYY-MM-DD or an ISO datetime"}, status_code=400)
+    if merge_policy is not None and not _MERGE.match(merge_policy):
+        return JSONResponse({"ok": False, "error": "merge_policy must be letters only"}, status_code=400)
+    tmo = None if timeout_ms is None else max(1000, min(int(timeout_ms), MAX_TIMEOUT_MS))
     days = max(1, min(int(days_back), MAX_DAYS_BACK))
     lim = max(1, min(int(limit) if limit is not None else 5000, MAX_BARS))
     import cme_market                                              # lazy: the site's own CrossTrade client resolver
@@ -186,13 +200,16 @@ async def brain_market_bars(request: Request, instrument: str, period_type: str 
     if client is None:
         return JSONResponse({"ok": False, "error": "CrossTrade market-data client not configured"}, status_code=503)
     try:
+        extra = {k: v for k, v in (("from_ts", from_), ("to_ts", to), ("merge_policy", merge_policy),
+                                   ("timeout_ms", tmo)) if v is not None}
         bars = await client.get_market_bars(instrument, period_type=pt, period=int(period), days_back=days,
-                                            limit=lim, log_raw=False)
+                                            limit=lim, log_raw=False, **extra)
     except Exception as e:                                         # surface the provider's error, never the token
         msg = _DENY.sub("***", str(e))[:300]
         return JSONResponse({"ok": False, "error": f"market bars query failed: {msg}"}, status_code=502)
     out = [{k: _value(b.get(k)) for k in ("time", "open", "high", "low", "close", "volume")} for b in bars]
     return _ok({"instrument": instrument, "period_type": pt, "period": int(period), "days_back": days, "limit": lim,
+                "from": from_, "to": to, "merge_policy": merge_policy, "timeout_ms": tmo,
                 "count": len(out), "first": out[0]["time"] if out else None, "last": out[-1]["time"] if out else None,
                 "bars": out})
 

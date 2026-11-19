@@ -219,3 +219,38 @@ def test_market_bars_provider_error_is_502(env, monkeypatch):
 def test_market_bars_route_is_get_only():
     routes = [rt for rt in bra.router.routes if rt.path.endswith("/market/bars")]
     assert len(routes) == 1 and routes[0].methods == {"GET"}
+
+
+def test_market_bars_passes_the_date_window_and_merge_policy(env, monkeypatch):
+    import cme_market
+    fake = _FakeClient(bars=[_bar(0)])
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: fake)
+    r = TestClient(app).get("/api/brain/v1/market/bars", headers=H,
+                            params={"instrument": "GC 12-20", "from": "2020-09-01", "to": "2020-09-15T00:00:00Z",
+                                    "merge_policy": "DoNotMerge", "timeout_ms": 10 ** 9})
+    assert r.status_code == 200
+    _, kw = fake.calls[0]
+    assert kw["from_ts"] == "2020-09-01" and kw["to_ts"] == "2020-09-15T00:00:00Z"
+    assert kw["merge_policy"] == "DoNotMerge" and kw["timeout_ms"] == bra.MAX_TIMEOUT_MS
+    body = r.json()
+    assert body["from"] == "2020-09-01" and body["merge_policy"] == "DoNotMerge"
+
+
+def test_market_bars_omits_unset_optional_fields(env, monkeypatch):
+    import cme_market
+    fake = _FakeClient(bars=[])
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: fake)
+    assert TestClient(app).get("/api/brain/v1/market/bars", params={"instrument": "GC 12-20"}, headers=H).status_code == 200
+    _, kw = fake.calls[0]
+    assert not {"from_ts", "to_ts", "merge_policy", "timeout_ms"} & set(kw)
+
+
+def test_market_bars_rejects_bad_dates_and_merge_policy(env, monkeypatch):
+    import cme_market
+    monkeypatch.setattr(cme_market, "_get_crosstrade_client", lambda: _FakeClient())
+    c = TestClient(app)
+    for params in ({"from": "09/01/2020"}, {"to": "2020-09-01; drop"}, {"from": "2020-9-1"},
+                   {"merge_policy": "Merge Back"}, {"merge_policy": "x" * 33}):
+        params["instrument"] = "GC 12-20"
+        assert c.get("/api/brain/v1/market/bars", params=params, headers=H).status_code == 400, params
+
